@@ -70,7 +70,7 @@
 000500f0  car_steer
 000502c4  car_gearbox
 0002b734  frame_time           ms * 0.036
-0002c5b8  human_input          keyboard steer +-100 -> car+0x344
+0002c5b8  human_input          keyboard: +0x1c..0x23 keys, digital steer ±100 -> car+0x344  status=identified
 001fefe0  g_cars               0x484c bytes per car
 001fefe8  g_bodies             0x1d0 bytes per car
 000c4e20  t_car_mass

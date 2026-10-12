@@ -88,6 +88,20 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   Si quedan 1 coche, todos terminan. Mensajes en 6 idiomas (`[0x1ff6eb]`), p. ej. `%s IS OUT`.
 - `car+0x554` es el contador 1–0x50 del giro del chasis tras un golpe (`0x30d05`), no una reaparición.
 
+## Entrada de teclado (`sub_0002c5b8` = `human_input`, decodificada)
+
+- Registro de control por jugador en `[0x1fefd0]` (`0x4c` B): `+8` tipo (0 = humano), `+0xc` cambio manual, `+0x18` auto-acelerar,
+  teclas (consultadas con `sub_00055c28`): `+0x1c` izquierda, `+0x1d` derecha, `+0x1e` acelerar, `+0x1f` frenar, `+0x20/+0x21` marcha
+  arriba/abajo, `+0x22` turbo, `+0x23` cámara trasera (`car+0x5a4`).
+- Acelerador y freno digitales = 100; dirección **digital** −100 / +100 / 0 en `car+0x344` (sin rampa; la suavidad la da el
+  integrador `steer`). `car+0x9a4` = ±50 y `car+0x9a8` = ángulo del tramo + constante (`g_sections+4`, o `+0x10` si tramo < 0).
+- `+0x18 == 1` y sin freno → acelerador 100. Si `car+0x558 > 0` (solape con otro coche) la dirección se invierte.
+- Turbo: tecla y `+0x354 == +0x35c == +0x358 == 0` → petición `car+0x52c = 1`; pasa a 2 si `car+0x3a4 <` constante y `+0x530 == +0x53c == 0`.
+- Cambio manual (`+0xc == 1`): flancos de `+0x20/+0x21` suben/bajan `car+0x27c` (0–2) y llaman a `car_gearbox` `0x502c4`.
+- Termina en `car_input` (`0x4d5f4`) con (acelerador, freno, dirección, turbo). El port ya cubre este camino con `IgnInput`.
+- `sub_00031858` (llamada al solapar, `0x2d4d9`/`0x312fe`) solo cambia la malla del coche (`[0x1fecb4]`, 'Error while changing car mesh')
+  y reproduce un sonido; `sub_0002ea44` (impacto > 15) es solo efecto visual y sonoro.
+
 ## Hipótesis (pendiente)
 
 - **TAB**: cómo elige el rasterizador el nivel de sombra (el byte alto de `flags` es casi siempre ≥ 64, así que no basta). **SHD/PAN**: función exacta.

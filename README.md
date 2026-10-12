@@ -366,10 +366,10 @@ Cada tarea indica las direcciones de partida.
 - [x] **P1** Orden de carrera, posiciones, fin de carrera y número de vueltas por modo (`race.c`; 3 vueltas, modo 3 sin límite; clasificación propia: ver desviaciones).
 - [x] **P1** Evento de eliminación `0x2de30` (modo 3): el último coche de cada vuelta queda eliminado. Portada la lógica
       (`--elimination`); faltan explosión (`0x3fee8`), sonido y mensajes "%s IS OUT" / "WARNING, YOU'RE LAST!" (`0x4a320`).
-- [ ] **P1** Solape entre coches `0x31858` (|dx|,|dz| < 25: cambio de malla y reaparición) y efectos de golpe
+- [ ] **P1** (decodificado: `0x31858` es solo cambio de malla + sonido y `0x2ea44` un efecto; falta portarlos con los efectos de Fase 2) Solape entre coches `0x31858` (|dx|,|dz| < 25: cambio de malla y reaparición) y efectos de golpe
       `0x2ea44` (impacto > 15).
 - [ ] **P1** Reaparición o recolocación tras caer o volcar. `car+0x554` **no** es de reaparición: es el contador (1–0x50) de la animación de giro tras un golpe (`car_update` `0x30d05`); buscar otro mecanismo o confirmar que no existe.
-- [ ] **P1** Entrada original: teclado `0x2c5b8` (rampas de dirección), joystick `0x4c9b4`, `car_input` completo
+- [ ] **P1** Entrada original: teclado `0x2c5b8` decodificado (dirección digital, sin rampas; ver `docs/formats.md`); faltan joystick `0x4c9b4`, cambio manual y `car_input` completo
       (`0x4f874`, `0x50464`, `0x50824`, `0x4e1bc` sin identificar).
 - [ ] **P2** Caja de cambios completa `0x502c4` (selección de marcha por régimen).
 - [ ] **P2** Dificultad `0xc5470` y tipos de control `0x1fefd0[coche]+4` (1, 2, 7).
