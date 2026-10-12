@@ -88,3 +88,4 @@
 001ff004  g_section_count
 001feff8  g_sections           24 bytes per section
 000350f0  car_ground_contact   moving-object collisions; calls ground_query
+0002de30  race_elimination     mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), "%s IS OUT"; [0x1fed78]-- ; at 1 left, all finish

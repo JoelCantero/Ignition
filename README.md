@@ -330,7 +330,8 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 3. **Suelo**: se ignoran las caras de más de ~80° y las degeneradas.
 4. **Vertical**: el límite de seguimiento del suelo también se aplica hacia arriba (evita saltos de capa).
 5. **Cámara**: cámara de persecución propia (falta la original de `camera_angles`).
-6. **Dificultad**: factor de agarre trasero fijo a 1,0 (`0xc5470`).
+6. **Posiciones**: la clasificación (`ign_race_position`) es propia; falta la rutina original del HUD `0x4a320`.
+7. **Dificultad**: factor de agarre trasero fijo a 1,0 (`0xc5470`).
 
 ---
 
@@ -362,12 +363,12 @@ Cada tarea indica las direcciones de partida.
       (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
       Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.
 - [x] **P1** Arreglar el atasco en la bifurcación de CANADA (tramo −34): la IA usa las puertas de la rama B (`gate_b`) en tramos negativos.
-- [ ] **P1** Orden de carrera, posiciones, fin de carrera y número de vueltas por modo.
-- [ ] **P1** Evento de eliminación `0x2de30` ("BIL %d RACEEND %d BLOW", "%s IS OUT", "WARNING, YOU'RE LAST!"):
-      ¿se elimina al último de cada vuelta? Portar la lógica y la explosión.
+- [x] **P1** Orden de carrera, posiciones, fin de carrera y número de vueltas por modo (`race.c`; 3 vueltas, modo 3 sin límite; clasificación propia: ver desviaciones).
+- [x] **P1** Evento de eliminación `0x2de30` (modo 3): el último coche de cada vuelta queda eliminado. Portada la lógica
+      (`--elimination`); faltan explosión (`0x3fee8`), sonido y mensajes "%s IS OUT" / "WARNING, YOU'RE LAST!" (`0x4a320`).
 - [ ] **P1** Solape entre coches `0x31858` (|dx|,|dz| < 25: cambio de malla y reaparición) y efectos de golpe
       `0x2ea44` (impacto > 15).
-- [ ] **P1** Reaparición o recolocación tras caer o volcar (`car+0x554`, contador de vuelco).
+- [ ] **P1** Reaparición o recolocación tras caer o volcar. `car+0x554` **no** es de reaparición: es el contador (1–0x50) de la animación de giro tras un golpe (`car_update` `0x30d05`); buscar otro mecanismo o confirmar que no existe.
 - [ ] **P1** Entrada original: teclado `0x2c5b8` (rampas de dirección), joystick `0x4c9b4`, `car_input` completo
       (`0x4f874`, `0x50464`, `0x50824`, `0x4e1bc` sin identificar).
 - [ ] **P2** Caja de cambios completa `0x502c4` (selección de marcha por régimen).

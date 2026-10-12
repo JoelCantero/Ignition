@@ -8,6 +8,7 @@
 #include "../game/ai.h"
 #include "../game/assets.h"
 #include "../game/car.h"
+#include "../game/race.h"
 #include "../game/track.h"
 #include "../render/raster.h"
 
@@ -64,6 +65,7 @@ static void free_camera(IgnCamera *cam, const bool *keys, float dt) {
 static IgnCar rivals[MAX_RIVALS];
 static IgnAi rival_ai[MAX_RIVALS];
 static int nrivals;
+static IgnRace race;
 
 /* Start grid of sub_00026458: PLC origin of the type-0 object facing the type-1 object; slot i is
  * (i/2)*180 + 200 units back and 60 units to the side by parity (a lone car: 200 back, centred). */
@@ -96,12 +98,16 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player) {
     IgnCar *all[MAX_RIVALS + 1] = {player};
     for (int i = 0; i < nrivals; i++) {
         IgnInput in;
-        ign_ai_drive(&rival_ai[i], &rivals[i], t, &in);
-        ign_car_tick(&rivals[i], lv, &in);
-        ign_car_progress(&rivals[i], t);
+        if (!rivals[i].wrecked) {
+            ign_ai_drive(&rival_ai[i], &rivals[i], t, &in);
+            ign_car_tick(&rivals[i], lv, &in);
+            ign_car_progress(&rivals[i], t);
+        }
         all[i + 1] = &rivals[i];
     }
-    return ign_cars_collide(all, nrivals + 1);
+    int hits = ign_cars_collide(all, nrivals + 1);
+    ign_race_step(&race, all, nrivals + 1);
+    return hits;
 }
 
 static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
@@ -117,7 +123,7 @@ int main(int argc, char **argv) {
     const char *level = "USA";
     const char *shot = NULL;
     float sim_seconds = 0.0f, sim_steer = 0.0f;
-    int autopilot = 0, want_rivals = -1, sim_turbo = 0;
+    int autopilot = 0, want_rivals = -1, sim_turbo = 0, race_mode = 0;
     IgnCamera cam = {0};
     int fixed_cam = 0;
     for (int i = 1; i < argc; i++) {
@@ -145,6 +151,8 @@ int main(int argc, char **argv) {
             autopilot = !strcmp(argv[i], "auto");
             sim_turbo = !strcmp(argv[i], "turbo");
             sim_steer = autopilot || sim_turbo ? 0 : strtof(argv[i], NULL);
+        } else if (!strcmp(argv[i], "--elimination")) {
+            race_mode = IGN_MODE_ELIMINATION;
         } else if (!strcmp(argv[i], "--rivals") && i + 1 < argc) {
             want_rivals = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--model") && i + 6 < argc && shot) {
@@ -207,6 +215,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     spawn_rivals(&lv, &track, &car, want);
+    ign_race_init(&race, race_mode, nrivals + 1);
     IgnAi player_ai;
     ign_ai_init(&player_ai, MAX_RIVALS);
     if (getenv("IGN_TRACE")) {
@@ -250,8 +259,10 @@ int main(int argc, char **argv) {
         int hits = 0, air = 0, car_hits = 0;
         for (float t = 0; t < sim_seconds; t += SIM_DT) {
             if (autopilot) ign_ai_drive(&player_ai, &car, &track, &in);
-            ign_car_tick(&car, &lv, &in);
-            ign_car_progress(&car, &track);
+            if (!car.wrecked) {
+                ign_car_tick(&car, &lv, &in);
+                ign_car_progress(&car, &track);
+            }
             car_hits += tick_rivals(&lv, &track, &car);
             hits += car.wall_hit;
             air += car.airborne;
@@ -266,6 +277,16 @@ int main(int argc, char **argv) {
                car.x, car.y, car.z, car.heading, car.kmh, car.gear, car.surface_type, hits, air,
                car.section, track.count, car.phase, car.lap);
         printf("car-car contacts %d\n", car_hits);
+        {
+            const IgnCar *all[MAX_RIVALS + 1] = {&car};
+            for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
+            printf("race: %d/%d finished or out, position %d\n", race.finished, nrivals + 1,
+                   ign_race_position(all, nrivals + 1, 0));
+            for (int i = 0; i <= nrivals; i++)
+                if (all[i]->out)
+                    printf("  car %d: place %d at tick %d%s\n", i, all[i]->place, all[i]->finish_tick,
+                           all[i]->wrecked ? " (eliminated)" : "");
+        }
         for (int i = 0; i < nrivals; i++)
             printf("rival %d (car %d): section %d phase %d lap %d %.0f km/h\n", i, rivals[i].id,
                    rivals[i].section, rivals[i].phase, rivals[i].lap, rivals[i].kmh);
@@ -339,8 +360,10 @@ int main(int argc, char **argv) {
                 .turbo = keys[SDL_SCANCODE_SPACE],
             };
             for (accumulator += dt; accumulator >= SIM_DT; accumulator -= SIM_DT) {
-                ign_car_tick(&car, &lv, &in);
-                ign_car_progress(&car, &track);
+                if (!car.wrecked) {
+                    ign_car_tick(&car, &lv, &in);
+                    ign_car_progress(&car, &track);
+                }
                 tick_rivals(&lv, &track, &car);
             }
             chase_camera(&car, &cam);

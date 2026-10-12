@@ -40,6 +40,10 @@ typedef struct {
     /* Visual pose, model frame (x forward, y down, z = physics side): radians unless noted. */
     double lean_roll, lean_pitch;  /* car+0xb8/+0xc0: degrees, from acceleration (sub_0002e6f8) */
     double body_roll, body_pitch;  /* car+0x584/+0x58c: smoothed body tilt (sub_00040ec8) */
+    int out;                       /* car+0x528: finished or eliminated */
+    int wrecked;                   /* car+0x354: exploded, no longer driven */
+    double blow;                   /* car+0x60c: 0 until eliminated, then 1.0 */
+    int finish_tick, place;        /* car+0x3a0 and the [0x1fee60] counter at the finish */
     double step_x, step_z;         /* car+0x18/+0x28: last tick displacement, world units */
 } IgnCar;
 

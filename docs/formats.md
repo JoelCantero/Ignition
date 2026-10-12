@@ -78,6 +78,16 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 - **Desviación**: `src/game/ai.c` es una aproximación propia (sigue las puertas TRI, frena según la curvatura en los
   próximos 5+ tramos, marcha atrás si no avanza 150 u en 1,5 s). La ley de control original sigue pendiente.
 
+## Fin de carrera y eliminación (portado a `src/game/race.c`)
+
+- `car_update` (`0x2f2f1`): vuelta + 1 si `|tramo| == count−1`, fase 3 y `car+0x604 == 0`. Si la vuelta ≥ 3 y el modo `[0x1feefc]` ≠ 3,
+  el coche termina: `+0x528 = 1`, `+0x3a0 = +0x39c` (tiempo) y `[0x1fee60]++` (contador de llegada).
+- `[0x1fed78]` = nº de coches (init `0x2aaee`), `[0x1fee60]` = 0 al empezar (`0x2a995`).
+- `sub_0002de30` (solo modo 3, desde `cars_update_all` `0x2d2bb`): vuelta máxima entre coches con `+0x528 == 0`; si **un solo**
+  coche va por detrás y `+0x60c == 0.0` queda eliminado (explosión `0x3fee8`, sonido `0x49a8c`, `+0x354 = 1`, `+0x60c = 1.0`).
+  Si quedan 1 coche, todos terminan. Mensajes en 6 idiomas (`[0x1ff6eb]`), p. ej. `%s IS OUT`.
+- `car+0x554` es el contador 1–0x50 del giro del chasis tras un golpe (`0x30d05`), no una reaparición.
+
 ## Hipótesis (pendiente)
 
 - **TAB**: cómo elige el rasterizador el nivel de sombra (el byte alto de `flags` es casi siempre ≥ 64, así que no basta). **SHD/PAN**: función exacta.

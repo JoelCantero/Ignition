@@ -14,6 +14,7 @@ add_library(ignition_core STATIC
   src/game/ai.c
   src/game/car.c
   src/game/physics.c
+  src/game/race.c
   src/game/track.c
   src/render/raster.c
 )
