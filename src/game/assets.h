@@ -1,0 +1,101 @@
+#ifndef IGN_ASSETS_H
+#define IGN_ASSETS_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct {
+    uint8_t rgb[256][3];
+} IgnPalette;
+
+typedef struct {
+    int width;
+    int height;
+    IgnPalette palette;
+    uint8_t *pixels;
+} IgnPic;
+
+/* Reads a whole file; returns NULL on failure. Caller frees. */
+uint8_t *ign_read_file(const char *path, size_t *size);
+
+/* Parses a 0x308-byte COL palette block. Returns 0 on success. */
+int ign_parse_col(const uint8_t *data, size_t size, IgnPalette *out);
+
+int ign_load_pic(const char *path, IgnPic *out);
+void ign_free_pic(IgnPic *pic);
+
+/* MSH face: 44 bytes on disk. uv are 8.8 fixed-point texels inside the 256x256 page extra >> 16. */
+typedef struct {
+    uint32_t flags;
+    int32_t v[3];
+    int32_t uv[6];
+    uint32_t extra;
+} IgnFace;
+
+typedef struct {
+    uint32_t type;
+    int32_t pos[3];
+    int nv, nf;
+    const int32_t *verts; /* nv * {x, y, z}; y points down */
+    const IgnFace *faces;
+} IgnObject;
+
+typedef struct {
+    uint8_t *tex; /* 256 x tex_h indices, 256x256 pages */
+    int tex_h;
+    int nobj;
+    IgnObject *objs;
+    uint8_t *plc, *msh;
+} IgnModel;
+
+typedef struct {
+    uint8_t *data;
+    size_t size;
+    int cell_w, cell_h, gx, gz;
+    int nspan, na, nb;
+    const uint8_t *cells, *spans, *list_a, *list_b;
+    int *engine_to_plc; /* engine object index -> PLC index, -1 if unknown */
+    int nengine;
+} IgnSurface;
+
+/* SRF coordinates are world x/z + this offset. */
+#define IGN_SRF_ORIGIN 25600
+
+typedef struct {
+    IgnPalette palette;
+    IgnPic backdrop;
+    IgnModel track;
+    IgnModel cars; /* CARS: object type = car * 10 + part (0 body, 1-4 wheels) */
+    IgnSurface surface;
+    uint8_t *tri; /* u32 n + 500-byte block per PLC object */
+    size_t tri_size;
+} IgnLevel;
+
+int ign_load_model(const char *plc_path, const char *msh_path, const char *tex_path,
+                   IgnModel *out);
+void ign_free_model(IgnModel *m);
+
+/* data_dir: game root; name: e.g. "USA". Returns 0 on success. */
+int ign_load_level(const char *data_dir, const char *name, IgnLevel *out);
+void ign_free_level(IgnLevel *lv);
+
+typedef struct {
+    float y;          /* ground height (y down) */
+    int surface_type; /* face flags >> 16 */
+    int object, face;
+} IgnGroundHit;
+
+/* sub_00020814: ground face under world (x, z) for a car whose height (y down) is y_hint. Returns 0 if found. */
+int ign_ground_at(const IgnLevel *lv, float x, float z, float y_hint, IgnGroundHit *hit);
+
+/* Start pose from the first two TRI road sections. Returns 0 on success. */
+int ign_level_start(const IgnLevel *lv, float *x, float *z, float *heading);
+
+typedef struct {
+    double x0, z0, x1, z1; /* world units */
+} IgnWall;
+
+/* sub_00033ee8: unshared edges of drivable faces near (x, y, z). Returns the count. */
+int ign_collect_walls(const IgnLevel *lv, float x, float y, float z, IgnWall *out, int max);
+
+#endif

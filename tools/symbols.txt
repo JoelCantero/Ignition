@@ -1,0 +1,90 @@
+# address  name  [notes]  -- identified functions/data in MAINDOS.EXE
+00055fbc  _cstart_             Watcom entry point
+000215d0  game_init            sets 640x480 then 320x200, prints banner, loads system gfx
+00021860  load_system_gfx      N_SYSGFX.PIC, N_SYSG_2.PIC, SYS.COL
+000224d0  load_level           LEVELS\%s%s.{TRI,SRF,COL,PIC,POS,MSH,TEX}
+000243e0  load_panel_gfx       HUD panels, signs, POKAL.PIC
+00011504  menu_load_gfx        baltazar\data\*.pic
+00060f9c  load_file            eax=filename -> eax=malloc'd contents or 0
+000558e4  set_video_mode       mode params in 0xc5cfc..0xc5d08 (w, h, bpp, ?)
+00062775  sprintf              cdecl (dest, fmt, ...)
+00020d14  log_printf
+000652fa  exit
+000653d3  open                 cdecl (path, mode); 0x200 = O_BINARY
+00065645  filelength           eax=fd
+00065682  read                 eax=fd, edx=buf, ebx=size
+0006577d  close                eax=fd
+00064e84  pool_alloc           eax=pool [0x1fee68], edx=size
+00051afc  out_of_memory
+000230f4  load_plc             LEVELS\..PLC + CARS\CARS.PLC
+0002322c  load_msh             LEVELS\..MSH + CARS\CARS.MSH
+00023368  load_tex             LEVELS\..TEX + CARS.TEX
+0001ce30  load_tri             reads TRI (500 B/object), computes edge angles
+0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car
+00026458  cars_init            allocs cars/bodies, torque splines, start grid (slots 0xc33d0)
+00048a14  car_place_objects    per frame: body/wheels/shadow/name engine objects, front wheel steer
+00040ec8  cars_body_sway       body tilt car+0x584/+0x58c = ground tilt + lean, smoothed 0.25
+0002e6f8  car_body_lean        lean car+0xb8/+0xc0 from per-tick acceleration
+000160c4  cheat_check          typed words 0xbf030[7] toggle flags 0x1fb2f0[i] (BANARNE..STRINGS)
+0001ebb4  body_vs_body         box-box contact (edges 0xbfe40), returns 1 on impulse
+0001e638  body_pair_impulse    eax=A, edx=B, stack: cx, cz, theta
+0002236c  level_prepare        progress bar, load_tri, objects, load_srf_grid
+0001fee0  load_srf_grid        eax=path, edx=material table; relocates SRF offsets
+00041244  pos_make_relative    subtracts frame 0 from every POS frame
+000412e8  pos_apply_frame      copies current POS frame into object state
+00060f40  read_file_into       eax=path, edx=buf, ebx=size
+000240f4  load_fonts           IGNITION.FNT + *.lft
+001febf4  g_level_pos
+0001aaf8  menu_load_car        menucar.plc/msh/tex
+001fefd4  g_level_msh
+001fec08  g_cars_msh
+001fefec  g_level_plc          u32 n + 20-byte records
+001febf0  g_level_col
+001fef38  g_level_pan          64 KB aligned
+001fef80  g_level_pic
+001ff102  g_level_dir          e.g. "USA\"
+001ff14a  g_level_name         e.g. "USA"
+001fef5c  g_sysgfx_pic         pointer to N_SYSGFX.PIC; pixels at +0x34e
+001fef54  g_sysg2_pic          pointer to N_SYSG_2.PIC
+001fec00  g_sys_col            pointer to SYS.COL
+000492fc  race_setup_video     picks 320x200/640x480/800x600, per-player viewports, TAB -> 0xc484c
+00056410  render_scene         draws layers gated by config flags [0x24c05c]+0x38..0x54
+0005891c  camera_angles        camera orientation in tenths of a degree
+00043fe0  render_main          ~3500 insns; uses PAN and TAB
+000c4840  g_raster_state       +0 ?, +4/+8 framebuffer 0xebb60, +0xc shade table, +0x10..0x1c clip rect
+000ebb60  g_framebuffer
+001fec04  g_level_tab
+001fef18  g_level_shd
+00020814  ground_query         eax=x, edx=y, ebx=z (SRF space) -> best face, plane, surface type  status=ported
+00020c18  srf_walk_list_b      spans with dz >= 0
+00020c81  srf_walk_list_a      spans with dz < 0
+00020bbc  face_avg_height
+000569ec  engine_alloc_objects 42-byte object pool -> [0x24c058]
+0002ed00  car_update           ~2300 insns, calls ground_query
+0002d008  cars_update_all      calls car_update
+0001e090  body_step            rigid-body bicycle model, dt 1/72 (ported: physics.c)  status=ported
+00053e70  torque_spline        Hermite curve -> 200 int16  status=ported
+0004d5f4  car_input            (throttle, brake, steer, turbo request 1/2)
+0004db90  car_throttle
+0004e2d8  car_turbo            charge car+0x534, mode +0x53c, tables 0xc4e50/0xc4f70
+000500f0  car_steer
+000502c4  car_gearbox
+0002b734  frame_time           ms * 0.036
+0002c5b8  human_input          keyboard steer +-100 -> car+0x344
+001fefe0  g_cars               0x484c bytes per car
+001fefe8  g_bodies             0x1d0 bytes per car
+000c4e20  t_car_mass
+000c4fd0  t_car_gears          12 cars x 3 gears x 8 int
+000c33f0  t_surface_grip       30 doubles
+000c4dc0  t_car_grip
+00033ee8  collect_walls        unshared edges of drivable faces near car (ported)  status=ported
+0001f708  box_vs_walls         (ported: ign_body_collide)  status=ported
+0001f3fc  wall_impulse         (ported)  status=ported
+0001fdb4  body_corners         world corners from cuerpo+0xf0/+0x110
+0003fd04  collisions_pass      object/car collisions per frame
+0002e234  car_vertical         gravity, jumps, landing (car+0x20) (ported: vertical_step)  status=ported
+00028f08  build_sections       track section order from the start object (ported: track.c)  status=ported
+000247b0  split_plc_types      class = type & 0xfff, attributes -> [0x1fef7c]
+001ff004  g_section_count
+001feff8  g_sections           24 bytes per section
+000350f0  car_ground_contact   moving-object collisions; calls ground_query

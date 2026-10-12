@@ -1,0 +1,11 @@
+build/
+# Original game files are copyrighted: never commit them or derived dumps.
+*.EXE
+*.PIC
+*.TEX
+*.elf
+*.png
+.venv/
+*.ppm
+__pycache__/
+.DS_Store
