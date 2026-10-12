@@ -89,3 +89,6 @@
 001feff8  g_sections           24 bytes per section
 000350f0  car_ground_contact   moving-object collisions; calls ground_query
 0002de30  race_elimination     mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), "%s IS OUT"; [0x1fed78]-- ; at 1 left, all finish
+0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> next valid gate record; skips flag!=0 placeholders
+000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}
+000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty

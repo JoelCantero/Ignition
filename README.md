@@ -103,7 +103,7 @@ src/game/assets.{c,h}   carga de COL, PIC, PLC, MSH, TEX, SRF, TRI; consulta de 
 src/game/physics.{c,h}  cuerpo rígido (modelo bicicleta), par motor, muros, choques entre coches, tablas por coche
 src/game/car.{c,h}      coche: suelo bajo 4 ruedas, vertical, dirección, acelerador, turbo, pose visual, vueltas
 src/game/track.{c,h}    clases PLC, orden de tramos y bifurcaciones, puertas por tramo (TRI)
-src/game/ai.{c,h}       IA de rivales (aproximación)
+src/game/ai.{c,h}       IA de rivales (port parcial de 0x1aea0)
 src/render/raster.{c,h} rasterizador por software de 8 bits 320×200, z-buffer, texturas con perspectiva
 src/platform/main.c     SDL3: ventana, entrada, bucle fijo de 72 Hz, cámaras, modos sin ventana y visor
 docs/formats.md         referencia técnica detallada (formatos, fórmulas, direcciones)
@@ -197,7 +197,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Pose: dirección visual, inclinación | `0x48a14`, `0x40ec8`, `0x2e6f8` | `car.c`, `raster.c` | fiel |
 | Sombra del coche | `0x48a14` | `raster.c` | geometría fiel; sombreado aproximado |
 | Truco BANARNE | `cheat_check` `0x160c4` | `main.c` | fiel |
-| IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **aproximación**: usa sus datos (puertas TRI, parámetros), pero no su ley de control |
+| IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: estructura de `0x1aea0` (anticipación 1,2,3,4,6,8, curvatura, dirección ×75, rival cercano, atasco, turbo, límites `0xbfa48`, entrada analógica); sin tabla de carriles ni registros `load_tri`, y con álgebra de acelerador/freno aproximada |
 | Render 3D | motor Lisa 2 | `raster.c` | propio: z-buffer, sin sombreado TAB |
 
 ---
@@ -324,7 +324,7 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 
 ## Desviaciones conocidas respecto al original
 
-1. **IA**: ley de control propia (`ai.c`), no la de `0x1aea0`. 
+1. **IA**: port parcial de `0x1aea0` (`ai.c`): registros de puerta reconstruidos al vuelo, sin tablas de carril `0xbf9a0`, acelerador (`0x1b9a2`) aproximado y frenada por curvatura propia. 
 2. **Render**: z-buffer propio en lugar del rasterizador del motor Lisa 2; sin sombreado TAB/SHD/PAN; la sombra se
    oscurece con una tabla de paleta al 50 %.
 3. **Suelo**: se ignoran las caras de más de ~80° y las degeneradas.
@@ -358,7 +358,7 @@ Cada tarea indica las direcciones de partida.
 
 ### Fase 1 — Carrera completa de un jugador (jugabilidad)
 
-- [ ] **P1** Portar 1:1 la **IA original** `0x1aea0` (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
+- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: núcleo de dirección/atasco/turbo/límites; falta carriles, álgebra exacta de `0x1b9a2`/`0x1c424`, registros `load_tri`) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
       byte `+0x6d` de TRI), consulta de puertas `0x1decc`, velocidad objetivo por curvatura y pendiente
       (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
       Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.

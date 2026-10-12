@@ -96,6 +96,8 @@ static void spawn_rivals(const IgnLevel *lv, const IgnTrack *t, const IgnCar *pl
 
 static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player) {
     IgnCar *all[MAX_RIVALS + 1] = {player};
+    for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
+    ign_ai_set_cars(all, nrivals + 1);
     for (int i = 0; i < nrivals; i++) {
         IgnInput in;
         if (!rivals[i].wrecked) {
@@ -207,6 +209,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     ign_track_gates(&track, &lv);
+    ign_ai_set_track(level);
     IgnCar car;
     int want = want_rivals >= 0 ? want_rivals : (shot ? 0 : 3);
     if (want > MAX_RIVALS) want = MAX_RIVALS;

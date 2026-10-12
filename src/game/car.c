@@ -12,6 +12,7 @@
 static const double difficulty_grip[4] = {1.0, 1.15, 1.3, 1.3};
 static int difficulty;
 
+int ign_get_difficulty(void) { return difficulty; }
 void ign_set_difficulty(int level) { difficulty = level < 0 ? 0 : level > 3 ? 3 : level; }
 
 #define VERT_REST 5.0 /* the original rests the car 5 units above the ground */
@@ -324,7 +325,15 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     int idx = (int)fabs(trunc(b->v_fwd * 3.6));
     if (idx > IGN_TORQUE_POINTS - 1) idx = IGN_TORQUE_POINTS - 1;
     int throttle_in = 0;
-    if (in->brake) {
+    if (in->analog) {
+        if (in->a_brake > 0) {
+            car->gear = 0;
+            throttle_in = -(in->a_brake > 50 ? 100 : in->a_brake * 2);
+        } else if (in->a_accel > 0) {
+            car->gear = car->torque[2][idx] > car->torque[1][idx] ? 2 : 1;
+            throttle_in = in->a_accel > 100 ? 100 : in->a_accel;
+        }
+    } else if (in->brake) {
         car->gear = 0;
         throttle_in = -100;
     } else if (in->accel) {
@@ -334,7 +343,7 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     throttle(car, throttle_in);
     turbo(car);
     /* Positive body steering turns towards +z from +x, i.e. left as seen from above. */
-    steer(car, (in->left ? 100 : 0) - (in->right ? 100 : 0), grip_avg);
+    steer(car, in->analog ? in->a_steer : (in->left ? 100 : 0) - (in->right ? 100 : 0), grip_avg);
     if (in->turbo) request_turbo(car);
     if (car->turbo_wait > 0) car->turbo_wait--;
 

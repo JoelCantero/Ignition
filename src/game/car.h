@@ -10,6 +10,9 @@
 
 typedef struct {
     bool accel, brake, left, right, turbo;
+    /* car_input (0x4d5f4) analog form used by the AI: accel 0..100, brake 0..50, steer -100..100 (+ = left). */
+    bool analog;
+    int a_accel, a_brake, a_steer;
 } IgnInput;
 
 typedef struct {
@@ -49,6 +52,7 @@ typedef struct {
 
 /* Difficulty level 0..3 ([0x1fedd8]): scales the rear grip of every car by 1, 1.15, 1.3, 1.3. */
 void ign_set_difficulty(int level);
+int ign_get_difficulty(void);
 /* Returns 0 if the car id exists in CARS.PLC. */
 int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, float heading);
 /* Advances one original physics tick (1/72 s). */
