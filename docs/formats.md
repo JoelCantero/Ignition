@@ -102,6 +102,14 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 - `sub_00031858` (llamada al solapar, `0x2d4d9`/`0x312fe`) solo cambia la malla del coche (`[0x1fecb4]`, 'Error while changing car mesh')
   y reproduce un sonido; `sub_0002ea44` (impacto > 15) es solo efecto visual y sonoro.
 
+## Caja de cambios y dificultad
+
+- `sub_000502c4(coche)` (cambio manual): `idx = min(|v_long·3.6|, 199)`; con las curvas de par `0x1fb6d8` (marcha 1) y `0x1fb868`
+  (marcha 2) como `int16`: si `par1[idx] > par2[idx]` → marcha 1; si no, marcha 2 salvo que `car+0x90 ¿?` (ángulo) esté en
+  (−π/2, π/2) o > 3π/2 (entonces 1). Un contador (`ctrl+0x10`) debe superar el retardo `ctrl+0x14` antes de cambiar; suena un
+  efecto si `ctrl+4 != 1`.
+- Dificultad `[0x1fedd8]` ∈ 0..3 → `[0xc5470]` = {1.0, 1.15, 1.3, 1.3}, factor del agarre trasero (`car_update` `0x30811`).
+
 ## Hipótesis (pendiente)
 
 - **TAB**: cómo elige el rasterizador el nivel de sombra (el byte alto de `flags` es casi siempre ≥ 64, así que no basta). **SHD/PAN**: función exacta.

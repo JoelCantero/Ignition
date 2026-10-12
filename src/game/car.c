@@ -8,6 +8,12 @@
 
 #define HALF_PI 1.5707963267948966
 #define PI 3.14159265358979323846
+/* Rear grip factor per difficulty level, [0xc5470] indexed by [0x1fedd8] (car_update 0x30811). */
+static const double difficulty_grip[4] = {1.0, 1.15, 1.3, 1.3};
+static int difficulty;
+
+void ign_set_difficulty(int level) { difficulty = level < 0 ? 0 : level > 3 ? 3 : level; }
+
 #define VERT_REST 5.0 /* the original rests the car 5 units above the ground */
 
 int ign_first_car_id(const IgnLevel *lv) {    for (int i = 0; i < lv->cars.nobj; i++)
@@ -312,7 +318,7 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     double grip_avg = grip_sum * 0.25; /* car+0x148 */
     car->surface_type = types[0];
     b->grip_f = grip_avg * ign_car_grip[car->spec];
-    b->grip_r = grip_avg * ign_car_grip[car->spec]; /* x difficulty factor 0xc5470 (1.0 on easy) */
+    b->grip_r = grip_avg * ign_car_grip[car->spec] * difficulty_grip[difficulty];
 
     /* Gearbox: brake selects reverse (gear 0, negated throttle); otherwise the stronger forward curve. */
     int idx = (int)fabs(trunc(b->v_fwd * 3.6));

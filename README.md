@@ -331,7 +331,7 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 4. **Vertical**: el límite de seguimiento del suelo también se aplica hacia arriba (evita saltos de capa).
 5. **Cámara**: cámara de persecución propia (falta la original de `camera_angles`).
 6. **Posiciones**: la clasificación (`ign_race_position`) es propia; falta la rutina original del HUD `0x4a320`.
-7. **Dificultad**: factor de agarre trasero fijo a 1,0 (`0xc5470`).
+7. **Dificultad**: solo se aplica el agarre trasero (`0xc5470`); `[0x1fedd8]` se fija con `--difficulty`.
 
 ---
 
@@ -371,8 +371,8 @@ Cada tarea indica las direcciones de partida.
 - [ ] **P1** Reaparición o recolocación tras caer o volcar. `car+0x554` **no** es de reaparición: es el contador (1–0x50) de la animación de giro tras un golpe (`car_update` `0x30d05`); buscar otro mecanismo o confirmar que no existe.
 - [ ] **P1** Entrada original: teclado `0x2c5b8` decodificado (dirección digital, sin rampas; ver `docs/formats.md`); faltan joystick `0x4c9b4`, cambio manual y `car_input` completo
       (`0x4f874`, `0x50464`, `0x50824`, `0x4e1bc` sin identificar).
-- [ ] **P2** Caja de cambios completa `0x502c4` (selección de marcha por régimen).
-- [ ] **P2** Dificultad `0xc5470` y tipos de control `0x1fefd0[coche]+4` (1, 2, 7).
+- [ ] **P2** Caja de cambios `0x502c4` decodificada (ver `docs/formats.md`); falta el cambio manual y la histéresis, el port usa selección automática.
+- [x] **P2** Dificultad `0xc5470` (agarre trasero ×1/1,15/1,3/1,3, `--difficulty N`). Pendiente: tipos de control `0x1fefd0[coche]+4` (1, 2, 7).
 - [ ] **P2** Superficies especiales `0x12c–0x131` (meta, rampas…) y `0x6e–0x83`.
 - [ ] **P2** Trucos restantes: identificar el efecto de SURMULE (`0x1fb2f4`), SLASKTRATT (`0x1fb2f8`),
       FILMJOLK (`0x1fb2fc`, `0x420cc`), SKUNK (`0x1fb300`, muy usado en efectos y `0x48a14`), SVINPOLE (`0x1fb304`) y

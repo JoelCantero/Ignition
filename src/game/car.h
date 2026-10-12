@@ -47,6 +47,8 @@ typedef struct {
     double step_x, step_z;         /* car+0x18/+0x28: last tick displacement, world units */
 } IgnCar;
 
+/* Difficulty level 0..3 ([0x1fedd8]): scales the rear grip of every car by 1, 1.15, 1.3, 1.3. */
+void ign_set_difficulty(int level);
 /* Returns 0 if the car id exists in CARS.PLC. */
 int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, float heading);
 /* Advances one original physics tick (1/72 s). */

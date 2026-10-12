@@ -151,6 +151,8 @@ int main(int argc, char **argv) {
             autopilot = !strcmp(argv[i], "auto");
             sim_turbo = !strcmp(argv[i], "turbo");
             sim_steer = autopilot || sim_turbo ? 0 : strtof(argv[i], NULL);
+        } else if (!strcmp(argv[i], "--difficulty") && i + 1 < argc) {
+            ign_set_difficulty(atoi(argv[++i]));
         } else if (!strcmp(argv[i], "--elimination")) {
             race_mode = IGN_MODE_ELIMINATION;
         } else if (!strcmp(argv[i], "--rivals") && i + 1 < argc) {
