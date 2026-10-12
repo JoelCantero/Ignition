@@ -137,38 +137,48 @@ void ign_free_track(IgnTrack *t) {
     free(t->center);
     free(t->section_obj);
     free(t->gate);
+    free(t->gate_b);
+    free(t->has_b);
     memset(t, 0, sizeof *t);
+}
+
+static void object_gate(const IgnTrack *t, const IgnLevel *lv, int o, float g[4]) {
+    const IgnObject *obj = &lv->track.objs[o];
+    const float *c = t->center[o];
+    int va = -1, vb = -1;
+    size_t at = 4 + (size_t)o * 500;
+    if (lv->tri && at + 0x19 <= lv->tri_size) {
+        va = lv->tri[at + 1] | lv->tri[at + 2] << 8;
+        vb = lv->tri[at + 0x17] | lv->tri[at + 0x18] << 8;
+    }
+    if (va >= 0 && vb >= 0 && va < obj->nv && vb < obj->nv && va != vb) {
+        g[0] = (float)(obj->verts[va * 3] + obj->pos[0]);
+        g[1] = (float)(obj->verts[va * 3 + 2] + obj->pos[2]);
+        g[2] = (float)(obj->verts[vb * 3] + obj->pos[0]);
+        g[3] = (float)(obj->verts[vb * 3 + 2] + obj->pos[2]);
+    } else {
+        g[0] = g[2] = c[0];
+        g[1] = g[3] = c[2];
+    }
 }
 
 void ign_track_gates(IgnTrack *t, const IgnLevel *lv) {
     t->section_obj = malloc(sizeof *t->section_obj * (size_t)(t->count + 1));
     t->gate = calloc((size_t)t->count + 1, sizeof *t->gate);
-    if (!t->section_obj || !t->gate) return;
+    t->gate_b = calloc((size_t)t->count + 1, sizeof *t->gate_b);
+    t->has_b = calloc((size_t)t->count + 1, 1);
+    if (!t->section_obj || !t->gate || !t->gate_b || !t->has_b) return;
     for (int s = 0; s < t->count; s++) t->section_obj[s] = -1;
-    for (int i = 0; i < t->nobj; i++)
-        if (t->section[i] >= 0 && t->section[i] < t->count) t->section_obj[t->section[i]] = i;
-
-    for (int s = 0; s < t->count; s++) {
-        int o = t->section_obj[s];
-        if (o < 0) continue;
-        const IgnObject *obj = &lv->track.objs[o];
-        const float *c = t->center[o];
-        int va = -1, vb = -1;
-        size_t at = 4 + (size_t)o * 500;
-        if (lv->tri && at + 0x19 <= lv->tri_size) {
-            va = lv->tri[at + 1] | lv->tri[at + 2] << 8;
-            vb = lv->tri[at + 0x17] | lv->tri[at + 0x18] << 8;
-        }
-        if (va >= 0 && vb >= 0 && va < obj->nv && vb < obj->nv && va != vb) {
-            t->gate[s][0] = (float)(obj->verts[va * 3] + obj->pos[0]);
-            t->gate[s][1] = (float)(obj->verts[va * 3 + 2] + obj->pos[2]);
-            t->gate[s][2] = (float)(obj->verts[vb * 3] + obj->pos[0]);
-            t->gate[s][3] = (float)(obj->verts[vb * 3 + 2] + obj->pos[2]);
-        } else {
-            t->gate[s][0] = t->gate[s][2] = c[0];
-            t->gate[s][1] = t->gate[s][3] = c[2];
+    for (int i = 0; i < t->nobj; i++) {
+        int s = t->section[i];
+        if (s >= 0 && s < t->count) t->section_obj[s] = i;
+        else if (s < 0 && s != IGN_NO_SECTION && -s < t->count) {
+            object_gate(t, lv, i, t->gate_b[-s]);
+            t->has_b[-s] = 1;
         }
     }
+    for (int s = 0; s < t->count; s++)
+        if (t->section_obj[s] >= 0) object_gate(t, lv, t->section_obj[s], t->gate[s]);
     /* Sections without an object reuse the previous gate. */
     for (int s = 1; s < t->count; s++)
         if (t->section_obj[s] < 0) memcpy(t->gate[s], t->gate[s - 1], sizeof t->gate[s]);

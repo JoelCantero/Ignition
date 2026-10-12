@@ -147,7 +147,7 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 - Parrilla de salida (`sub_00026458`, portada): origen PLC del objeto tipo 0 mirando al tipo 1 (ángulo = `−atan2(p0−p1) − π/2`).
   Hueco `i` (tabla identidad en `0xc33d0`): `(i/2)·180 + 200` unidades atrás y 60 al lado según la paridad; con un solo coche,
   200 atrás y centrado. Verificado: 8 coches sobre asfalto en las 7 pistas.
-- Vueltas completas comprobadas con `--sim 200 auto --rivals 3` en las 7 pistas (salvo atascos en la bifurcación de CANADA).
+- Vueltas completas comprobadas con `--sim 200 auto --rivals 3` en las 7 pistas (CANADA incluida: la IA sigue `gate_b` en la rama B).
 - **Choques entre coches** (portado): `cars_update_all` (0x2d2f8) prueba cada par con |dx|,|dz| < 200 y |dy| < 70 unidades y llama
   a `sub_0001ebb4`: círculo de radio 4 m (`+0x130`), cruce de los 4×4 lados de las cajas (máx. 8 puntos; más = sin choque),
   contacto = media, línea = par de puntos más alejado. `sub_0001e638`: impulso mutuo con `e = 0.6·0.6` (`+0x10`),

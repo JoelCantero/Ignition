@@ -13,6 +13,8 @@ typedef struct IgnTrack {
     int count;         /* [0x1ff004] */
     int start_obj, dir_obj;
     int *section_obj;  /* main route: object of each section */
+    float (*gate_b)[4]; /* branch B gates (negative sections), valid where has_b[s] */
+    unsigned char *has_b;
     float (*gate)[4];  /* per section: left x,z and right x,z road edges (TRI vertices) */
 } IgnTrack;
 

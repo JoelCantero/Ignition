@@ -324,7 +324,7 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 
 ## Desviaciones conocidas respecto al original
 
-1. **IA**: ley de control propia (`ai.c`), no la de `0x1aea0`. Los coches se atascan en la bifurcación de CANADA.
+1. **IA**: ley de control propia (`ai.c`), no la de `0x1aea0`. 
 2. **Render**: z-buffer propio en lugar del rasterizador del motor Lisa 2; sin sombreado TAB/SHD/PAN; la sombra se
    oscurece con una tabla de paleta al 50 %.
 3. **Suelo**: se ignoran las caras de más de ~80° y las degeneradas.
@@ -341,7 +341,7 @@ Cada tarea indica las direcciones de partida.
 
 ### Fase 0 — Infraestructura de ingeniería inversa
 
-- [ ] **P1** Inicializar git y subir solo código, documentación y herramientas (los datos ya están excluidos).
+- [x] **P1** Inicializar git y subir solo código, documentación y herramientas (los datos ya están excluidos).
 - [ ] **P1** Separar la libc de Watcom y DOS/4G del código del juego con firmas (estilo FLIRT) generadas a partir de
       Watcom C 10.x/11, para descartar unas 33 000 instrucciones de `0x60000–0x86000` sin revisarlas.
 - [ ] **P1** Cubrir el 17 % de bytes restante: barrido lineal de huecos con heurísticas de prólogo Watcom
@@ -361,7 +361,7 @@ Cada tarea indica las direcciones de partida.
       byte `+0x6d` de TRI), consulta de puertas `0x1decc`, velocidad objetivo por curvatura y pendiente
       (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
       Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.
-- [ ] **P1** Arreglar el atasco en la bifurcación de CANADA (tramo −34): rama B y numeración negativa de tramos.
+- [x] **P1** Arreglar el atasco en la bifurcación de CANADA (tramo −34): la IA usa las puertas de la rama B (`gate_b`) en tramos negativos.
 - [ ] **P1** Orden de carrera, posiciones, fin de carrera y número de vueltas por modo.
 - [ ] **P1** Evento de eliminación `0x2de30` ("BIL %d RACEEND %d BLOW", "%s IS OUT", "WARNING, YOU'RE LAST!"):
       ¿se elimina al último de cada vuelta? Portar la lógica y la explosión.
