@@ -197,7 +197,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Pose: dirección visual, inclinación | `0x48a14`, `0x40ec8`, `0x2e6f8` | `car.c`, `raster.c` | fiel |
 | Sombra del coche | `0x48a14` | `raster.c` | geometría fiel; sombreado aproximado |
 | Truco BANARNE | `cheat_check` `0x160c4` | `main.c` | fiel |
-| IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: estructura de `0x1aea0` (anticipación 1,2,3,4,6,8, curvatura, dirección ×75, rival cercano, atasco, turbo, límites `0xbfa48`, entrada analógica); sin tabla de carriles ni registros `load_tri`, y con álgebra de acelerador/freno aproximada |
+| IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: estructura de `0x1aea0` (anticipación 1,2,3,4,6,8, curvatura, dirección ×75, rival cercano, atasco, turbo, límites `0xbfa48`, entrada analógica); sin tabla de carriles ni registros `load_tri`, con el álgebra exacta de acelerador (0x1b9a2), curvatura, rival, borde, atasco y turbo; aproximados: registros `load_tri` (ángulos desde las puertas), pendiente (Y), giro por solape y frenada de curva (heurística) |
 | Render 3D | motor Lisa 2 | `raster.c` | propio: z-buffer, sin sombreado TAB |
 
 ---
@@ -358,7 +358,7 @@ Cada tarea indica las direcciones de partida.
 
 ### Fase 1 — Carrera completa de un jugador (jugabilidad)
 
-- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: núcleo de dirección/atasco/turbo/límites; falta carriles, álgebra exacta de `0x1b9a2`/`0x1c424`, registros `load_tri`) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
+- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: núcleo de dirección/atasco/turbo/límites; álgebra exacta de acelerador/dirección/turbo; falta carriles, registros `load_tri` reales, pendiente Y y giro por solape) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
       byte `+0x6d` de TRI), consulta de puertas `0x1decc`, velocidad objetivo por curvatura y pendiente
       (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
       Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.

@@ -4,11 +4,11 @@
 #include "car.h"
 #include "track.h"
 
-/* Rival driver parameters: one 0x48-byte record per car at 0xbfb28 (copied into the 0x7c-byte AI state
- * by load_tri); every car uses {0.8, 0.4, 0.6, 0.75, 0.5, 5, 0.6, 0.6, 0.9}, matching CARS/TEST.AIS
- * (acc, carebed, caresight, careother, maintain, aggr, sight, curveinflu, slopeinflu). */
+/* Driver parameters: state offsets +0x00..+0x48 of the 0x7c-byte AI state, copied by load_tri from the
+ * 0x48-byte record at 0xbfb28 (0.9, 0.8, 0.4, 0.6, 0.75, 0.5, 5, 0.6, 0.6); +0x00 is scaled by the
+ * difficulty (x1, x0.7, x0.4, x0.4). */
 typedef struct {
-    double acc, carebed, caresight, careother, maintain, aggr, sight, curveinflu, slopeinflu;
+    double s00, s08, s10, s18, s20, s28, s38, s40, s48;
 } IgnAiParams;
 
 /* AI state of sub_0001aea0 (0x7c bytes in the original). */

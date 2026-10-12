@@ -110,7 +110,16 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   efecto si `ctrl+4 != 1`.
 - Dificultad `[0x1fedd8]` ∈ 0..3 → `[0xc5470]` = {1.0, 1.15, 1.3, 1.3}, factor del agarre trasero (`car_update` `0x30811`).
 
-## IA original `0x1aea0`: etapa de salida (decodificado, sin portar)
+## IA original `0x1aea0`: álgebra exacta (portada en `ai.c`)
+
+Estado (0x7c B, copiado de `0xbfb28`): `+0x00`=0.9 (×1/×0.7/×0.4/×0.4 según dificultad 0/1/2/3), `+0x08`=0.8, `+0x10`=0.4,
+`+0x18`=0.6, `+0x20`=0.75, `+0x28`=0.5, `+0x38`=5.0, `+0x40`=0.6, `+0x48`=0.6.
+`a8 = 1+(grip+0.8)·Σ|Δángulo|·(s38·0.4+0.6)·1.6/n`; `T = ((1+s00)·0.5+0.3)·x90/(s10·6/(3n+6)+1)/((a8-1)·0.4+1)`;
+`x88 = max(0,s18·60+120-kmh)/(s18·60+120)·s18·1.5+1`; `T = (T·x88+(x88-1)·0.25)·100` (máx 100);
+freno `(kmh-ov)·0.5` si `ov·0.2777 < v`; marcha atrás: acelerador 0, freno `min(1.5T,100)`;
+turbo si `s20·0.13+1.07 > a8`, `off>3` y `|dir| > s20·5+3` (o `ov==500` en dificultad 0).
+
+## IA original `0x1aea0`: etapa de salida (decodificado)
 
 - Estado por coche `[0xeb7c0]` (0x7c B): `+0x20` agresividad ¿?, `+0x28` radio de alcance (×`[0xa7b30]`), `+0x58` valor lateral del
   rival más cercano, `+0x60` contador de atasco (i32), `+0x74` dirección calculada (double, ±100).

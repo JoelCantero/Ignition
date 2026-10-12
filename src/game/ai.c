@@ -11,7 +11,8 @@
 /* Port of sub_0001aea0 (see docs/formats.md, "IA original"). Deviations: the per-section records of
  * load_tri are rebuilt on the fly from the gate edges (angles +0x2e), the lane/branch choice tables
  * at 0xbf9a0 are not used (the port's progress code already picks the branch from the car position),
- * and the throttle algebra of 0x1b9a2-0x1bae2 is approximated. */
+ * the slope term (record Y, x90 = 1), the collision-overlap spin (car+0x558), the control-type 5/8
+ * steering gain and the avoidance sign flip from the rival's own side ratio are omitted. */
 
 static int track_id = 1;
 static IgnCar *all_cars[16];
@@ -29,7 +30,7 @@ void ign_ai_set_cars(IgnCar *const *cars, int n) {
 }
 
 void ign_ai_init(IgnAi *ai, int index) {
-    static const IgnAiParams base = {0.8, 0.4, 0.6, 0.75, 0.5, 5.0, 0.6, 0.6, 0.9};
+    static const IgnAiParams base = {0.9, 0.8, 0.4, 0.6, 0.75, 0.5, 5.0, 0.6, 0.6};
     (void)index;
     memset(ai, 0, sizeof *ai);
     ai->p = base;
@@ -88,8 +89,9 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnInput *in)
     in->analog = true;
     if (!t->gate || t->count < 4 || car->section == IGN_NO_SECTION) return;
     const IgnBody *b = &car->body;
-    const IgnAiParams *p = &ai->p;
+    IgnAiParams p = ai->p;
     int diff = ign_get_difficulty();
+    p.s00 *= diff == 1 ? 0.7 : diff >= 2 ? 0.4 : 1.0; /* load_tri 0x1ceef / 0x1cf06 */
     int s = abs(car->section);
     int bb = car->section < 0;
     int idx = track_idx[track_id];
@@ -122,94 +124,128 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnInput *in)
         used = 1;
         mid_of(edge_at(t, s + 1, bb), &lx, &lz);
     }
-    double grip = clampd((8 - ign_surface_grip[car->surface_type >= 0 && car->surface_type < 30 ? car->surface_type : 0]) * 0.125, 0, 100);
-    double curve = 1 + (grip + 0.3) * sum * (p->curveinflu * 0.4 + 0.6) * 1.6 / used;
+    int off = look_off[used - 1];
+    double grip = fmax(0, (8 - ign_surface_grip[car->surface_type >= 0 && car->surface_type < 30 ? car->surface_type : 0]) * 0.125);
+    /* 0x1b7b0-0x1b84a */
+    double a8 = 1 + (grip + 0.8) * sum * ((p.s38 * 0.4 + 0.6) * 1.6) / used;
 
     /* Curve speed override of the current section (last matching entry wins). */
     int key = (bb ? -s : s) & ~1, override = -1;
     for (int i = 0; i < 8; i++)
         if (limits[idx][i].speed && limits[idx][i].key == key) override = limits[idx][i].speed;
 
-    /* Throttle target (+0x70) and brake level. */
+    /* Throttle (0x1b9a2-0x1bad1): T is the pedal fraction, scaled by 100 at the end. */
     double kmh = car->kmh;
-    double cap = p->acc * 60 + 120;
-    double margin = clampd((cap - kmh) / cap, 0, 100) * p->acc * 1.5 + 1;
-    double tgt = ((1 + p->acc) * 0.5 + 0.3) * margin / ((curve - 1) * 0.4 + 1);
-    double accel = clampd(tgt * 100, 0, 100);
-    int brake = 0;
-    if (override != -1 && override != 500 && kmh > override)
-        brake = (int)clampd((kmh - override) * 0.5, 0, 50);
+    double T = ((1 + p.s00) * 0.5 + 0.3) / (p.s10 * 6 / (3.0 * used + 6) + 1);
+    T /= (a8 - 1) * 0.4 + 1;
+    double cap = p.s18 * 60 + 120;
+    double x88 = fmax(0, cap - kmh) / cap * (p.s18 * 1.5) + 1;
+    T = (T * x88 + (x88 - 1) * 0.25) * 100;
+    if (T > 100) T = 100;
+    int brake = 0, force_turbo = 0;
+    if (override == 500) {
+        T = 100;
+        force_turbo = diff < 1;
+    } else if (override != -1 && override * 0.2777 < b->v_fwd) {
+        brake = (int)clampd((kmh - override) * 50 * 0.01, 0, 50);
+    }
     else {
-        /* Port heuristic (not in the original): brake for the total turn seen over the lookahead. */
-        double lim = fmax(70.0, 240.0 / (1 + 1.2 * sum * (grip + 0.3) * (p->curveinflu * 0.4 + 0.6) * 1.6));
+        /* Port heuristic (not in the original, which brakes only for the override table): the records
+         * rebuilt from the gates are coarser than the original ones, so brake for the turn seen ahead. */
+        double lim = fmax(70.0, 240.0 / (1 + 1.2 * sum * (grip + 0.3) * 1.34 / used));
         if (kmh > lim) brake = (int)clampd((kmh - lim) * 0.5, 0, 50);
     }
+    double A = fmin(T * 1.5, 100);
 
-    /* Steering: aim at the lookahead mid-point from the blended travel direction. */
+    /* Steering (0x1c07a...): aim at the lookahead mid-point from the blended travel direction. */
     double h = b->heading;
-    double dirt = (car->step_x != 0 || car->step_z != 0) ? atan2(car->step_z, car->step_x) : 0;
+    double dirt = (car->step_x != 0 || car->step_z != 0) ? atan2(car->step_z, car->step_x) : h;
     double travel = h + 0.15 * wrap(dirt - h);
     if (fabs(h - dirt) > 0.7854) travel = h;
     double aim = atan2(lz - cz, lx - cx);
-    double err = wrap(aim - travel);
-    double road_err = wrap(cur_ang - travel);
-    double dir = err * 75 * ((curve - 1) * 0.25 + 1);
+    double c0 = wrap(aim - travel);
+    double e40 = first;
+    double dir = c0 * 75 * ((a8 - 1) * 0.25 + 1);
     dir *= diff == 1 ? 0.9 : diff == 2 ? 0.8 : diff == 3 ? 0.75 : 1;
     dir = clampd(dir, -100, 100);
 
-    /* Nearest rival ahead: steer away from it. */
+    /* Nearest rival (0x1c1b0-0x1c3d0): steer around it when it is almost straight ahead. */
     int best = -1;
-    double bestd = 100000;
+    double bestd = 1e9;
     for (int i = 0; i < n_cars; i++) {
         if (all_cars[i] == car) continue;
         double d = hypot(all_cars[i]->x - cx, all_cars[i]->z - cz);
         if (d < bestd) bestd = d, best = i;
     }
     if (best >= 0) {
-        double rel = wrap(atan2(all_cars[best]->z - cz, all_cars[best]->x - cx) - travel);
-        double r = p->careother * 800;
-        if (fabs(rel) < 0.3 && r > bestd) {
-            double push = clampd(-(rel < 0 ? -1 : 1) * 100 * (1 - bestd / r) - rel * 40, -100, 100);
-            dir += (push - dir) / curve;
+        double rel = wrap(atan2(all_cars[best]->z - cz, all_cars[best]->x - cx) - travel + 1.5708);
+        double r = p.s28 * 800;
+        if (rel > 1.2708 && rel < 1.8708 && r > bestd) {
+            rel = wrap(rel - 1.5708);
+            double v = rel < 0 ? -PI / 2 : PI / 2;
+            double push = -(v - 3 * rel) * 40;
+            push = r / (r - bestd) * push;
+            push = clampd(push, -100, 100);
+            dir += (push - dir) / a8;
         }
     }
-    /* Stay off the edge when the road bends away and the car is already hugging it. */
-    if (sign * first < 0 && fabs(road_err) < 0.3 && curve < 2 && used > 2 && fabs(ai->side) > 1.5) {
-        double tgt_dir = clampd((curve - 1) * 50, 0, 50) * (ai->side < 0 ? 1 : -1);
-        dir += (tgt_dir - dir) / (ai->side < 0 ? 2.5 : fabs(ai->side) * 2.5);
-    }
-    /* Collision spin: invert the steering while bumping another car. */
-    ai->steer = dir = clampd(dir, -100, 100);
 
-    /* Stuck detection (+0x60 counts ticks; the original adds the car count once per round). */
-    /* The original resets the counter while the car faces more than 1.4 rad away from the road; the port
-     * also counts those ticks so a car pointing at a wall still recovers. */
+    /* Hug the inside edge of the next bend (0x1c3e0-0x1c5be). */
+    if (off > 2 && a8 < 2 && fabs(e40) < 0.3) {
+        if (sign == -1) {
+            double tg = fmin(50, (a8 - 1) * 50);
+            double dv = ai->side >= 0 ? ai->side * 2.5 : 2.5;
+            dir += (tg - dir) / dv;
+        } else if (sign == 1) {
+            double tg = fmax(-50, (a8 - 1) * -50);
+            double dv = ai->side <= 0 ? 2.5 : ai->side * -2.5;
+            dir += (tg - dir) / dv;
+        }
+    }
+    ai->steer = dir;
+
+    /* Stuck detection (0x1c6a0-0x1c8d0). The original waits for the standing start through its race
+     * phase; the port uses an age counter. */
     if (ai->age < 144) ai->age++;
-    if (ai->age >= 144 && (fabs(b->v_fwd) < 6.944 || car->airborne))
+    int force_back = (track_id == 1 && s > 0x54 && s < 0x5f && ai->side < 0) || (track_id == 4 && s > 0x3d && s < 0x41) ||
+                     (track_id == 5 && s >= 0x92 && s <= 0x94);
+    if (ai->age >= 144 && ((fabs(b->v_fwd) < 6.944 || car->airborne) || force_back))
         ai->stuck++;
     else
         ai->stuck = 0;
     if (ai->stuck >= 151.2) ai->stuck = 0;
     int reverse = ai->stuck > 43.2 && ai->stuck < 97.2;
-    if (ai->stuck > 97.2 && ai->stuck < 108) ai->steer = dir = 0;
-    if (car->airborne) ai->steer = dir = 0;
-
     if (reverse) {
-        in->a_brake = 50;
-        in->a_steer = (int)-clampd(dir, -70, 70);
+        if (ai->stuck < 54)
+            ai->steer = 0;
+        else if (force_back)
+            ai->steer = -100;
+        else if (ai->steer < 0 && ai->steer > -70)
+            ai->steer = -70;
+        else if (ai->steer >= 0 && ai->steer < 70)
+            ai->steer = 70;
+        in->a_brake = (int)A;
+        in->a_steer = (int)-ai->steer;
         ai->accel = 0;
         ai->section = s;
         return;
     }
-    /* Turbo (0x1ca15): full charge, on the ground, no braking, gentle curve and steering. */
-    int turbo = car->turbo_charge >= 100.0 && !car->airborne && !brake &&
-                p->aggr * 0.13 + 1.07 > curve && used > 3 && fabs(dir) < p->aggr * 5 + 3;
-    in->a_steer = (int)dir;
-    in->turbo = turbo;
+    if (ai->stuck > 97.2 && ai->stuck < 108) ai->steer = 0;
+    if (car->airborne) ai->steer = 0;
+
+    /* Turbo (0x1ca15): full charge, on the ground, no braking; a hard steering input in a gentle
+     * bend, or an unlimited-speed section on the easiest difficulty. */
+    int want = (p.s20 * 0.13 + 1.07 > a8 && off > 3 && p.s20 * 5 + 3 < fabs(ai->steer)) || force_turbo;
+    int sec = bb ? -s : s;
+    int zone = 1;
+    if (track_id == 4 && s > 0x28 && s < 0x36) zone = 0;
+    if (track_id == 0 && ((sec < -156 && sec > -162) || (sec < 102 && sec > 90))) zone = 0;
+    in->turbo = car->turbo_charge >= 100.0 && !car->airborne && !brake && want && zone;
+    in->a_steer = (int)ai->steer;
     if (brake)
         in->a_brake = brake;
     else
-        in->a_accel = (int)accel;
-    ai->accel = (int)accel;
+        in->a_accel = (int)T;
+    ai->accel = (int)T;
     ai->section = s;
 }
