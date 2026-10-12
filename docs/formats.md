@@ -110,6 +110,25 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   efecto si `ctrl+4 != 1`.
 - Dificultad `[0x1fedd8]` ∈ 0..3 → `[0xc5470]` = {1.0, 1.15, 1.3, 1.3}, factor del agarre trasero (`car_update` `0x30811`).
 
+## IA original `0x1aea0`: etapa de salida (decodificado, sin portar)
+
+- Estado por coche `[0xeb7c0]` (0x7c B): `+0x20` agresividad ¿?, `+0x28` radio de alcance (×`[0xa7b30]`), `+0x58` valor lateral del
+  rival más cercano, `+0x60` contador de atasco (i32), `+0x74` dirección calculada (double, ±100).
+- Rival más cercano: mínimo de `hypot(Δx,Δz)` sobre los demás coches (`0x1c12d`). Si el ángulo relativo (atan2) menos el rumbo
+  ∈ (`[0xa7b20]`,`[0xa7b28]`) y la distancia < radio, se mezcla una corrección de esquiva en `dir` (`0x1c2a2–0x1c409`).
+- Dirección base: `dir = Δángulo(rumbo objetivo − rumbo coche) · k · (1 + (aggr+…)·…)`, ×`[0xa7af8]` si control 5/8, ×factor por
+  dificultad `[0x1ff164]` (1: `[0xa7b00]`, 2: `[0xa7a70]`, 3: `[0xa7b08]`); recorte a ±100. Se invierte si `car+0x558 != 0`
+  (giro de choque) y `|car+0x558| < 0x48−dif·…`.
+- Atasco: si `|ángulo| ≤ [0xa7b88]` y (`body+0x98` < `[0xa7b90]` o `car+0x270`≠0) o casos de pista concretos (`[0x1fef10]`=1/4/5),
+  `+0x60 += nº coches`; si no, `+0x60 = 0`. Con `+0x60 ≥ [0xa7ba0]` se resetea. Entre `[0xa7b98]` y `[0xa7ba8]` marcha atrás
+  (dirección 0 o ±70 según `+0x74`; acelerador = −`[0xa7be0]…`), con `car+0x270`≠0 la dirección se anula.
+- Turbo: si `car+0x534/538` == 100.0 (turbo lleno), sin `car+0x270`, `+0x20·[0xa7bb8]+[0xa7bc0] > curva` y la curva lejana > 3, se
+  llama a `car_input` con turbo = 1 (`0x1cb12`), salvo exclusiones por pista/sección.
+- Salida: `car_input(coche, ecx=turbo, edx=freno/atrás, ebx=dirección, …)` en `0x1cbf9`; al final `+0x58 = trunc(acelerador)`.
+- Pendiente de portar: búsqueda de carril (`0x1decc`, tablas `[0xeb7c4]/[0xeb7e0]`), velocidad objetivo por curvatura (bucle
+  de 6 secciones `0xbf992`, `t_surface_grip`), registro por sección con ángulos `+0x2a..+0x46` calculados en `load_tri`
+  (`atan2` entre bordes de secciones consecutivas, y puntos de carril `+0x1a..+0x26` = borde + `cos/sin·[0xa7c18]`).
+
 ## Hipótesis (pendiente)
 
 - **TAB**: cómo elige el rasterizador el nivel de sombra (el byte alto de `flags` es casi siempre ≥ 64, así que no basta). **SHD/PAN**: función exacta.
