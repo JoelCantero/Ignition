@@ -35,9 +35,9 @@ animados, los efectos, el HUD, los menús, el sonido, los fantasmas y el multiju
 
 | Métrica | Valor |
 |---|---|
-| Funciones candidatas detectadas | **809** (bytes de código cubiertos: 83 %) |
-| Instrucciones únicas desensambladas | **107 474** |
-| Funciones con nombre en `tools/symbols.txt` | 65 (≈ 25 800 instrucciones, el 24 %) |
+| Funciones candidatas detectadas | **1 129** (bytes de código cubiertos: 98,7 %; 497 son libc/DOS4G) |
+| Instrucciones únicas desensambladas | **129 255** (20 744 de la libc de Watcom y DOS/4G) |
+| Funciones con nombre en `tools/symbols.txt` | 61 (≈ 25 900 instrucciones, el 20 %) |
 | Código propio del juego (sin libc/DOS4G/drivers, < `0x60000`) | ≈ 74 700 instrucciones, ≈ 34 % identificado |
 | Formatos de datos propios descifrados | 10 de 21 (TRI, POS y TAB solo en parte) |
 | Código del port | ≈ 2 300 líneas de C (`src/`) |
@@ -108,7 +108,11 @@ src/render/raster.{c,h} rasterizador por software de 8 bits 320×200, z-buffer, 
 src/platform/main.c     SDL3: ventana, entrada, bucle fijo de 72 Hz, cámaras, modos sin ventana y visor
 docs/formats.md         referencia técnica detallada (formatos, fórmulas, direcciones)
 tools/le2elf.py         LE (DOS/4GW) → ELF32 plano con reubicaciones aplicadas
-tools/disasm.py         desensamblador recursivo (Capstone) con símbolos, referencias y tablas de salto
+tools/disasm.py         desensamblador recursivo (Capstone): símbolos, referencias, tablas de salto, barrido de huecos, clasificación de libc y exportación a Ghidra/IDA
+tools/gap_seeds.txt     inicios de función hallados por `disasm.py sweep` (se cargan como semillas)
+tools/structs.txt       estructuras verificadas (coche, cuerpo, tramo, estado de IA) para la exportación
+tools/trace_compare.py  primera divergencia entre dos trazas por tick (port vs original en DOSBox-X)
+tests/regress.py        regresión determinista sin ventana (23 casos; `ctest --test-dir build`)
 tools/ignassets.py      PIC/COL/TEX/DAT/nivel → PNG
 tools/symbols.txt       símbolos identificados (funciones, globales, tablas)
 .github/skills/ignition-re/SKILL.md   skill del proyecto para agentes de IA
@@ -121,7 +125,10 @@ tools/symbols.txt       símbolos identificados (funciones, globales, tablas)
 ```sh
 python3 -m venv .venv && .venv/bin/pip install capstone
 .venv/bin/python tools/disasm.py funcs            # lista de funciones
-.venv/bin/python tools/disasm.py coverage         # estados por función y cobertura del código
+.venv/bin/python tools/disasm.py coverage         # estados por función (incl. `library`) y cobertura del código
+.venv/bin/python tools/disasm.py sweep            # barrido de huecos de código → tools/gap_seeds.txt (≈ 2 min)
+.venv/bin/python tools/disasm.py export ghidra -o build/ghidra_symbols.py   # o `ida`: nombres, comentarios y estructuras
+python3 tests/regress.py                          # regresión determinista (`--update` regenera tests/expected.json)
 .venv/bin/python tools/disasm.py dis 1aea0        # una función
 .venv/bin/python tools/disasm.py all > build/all.asm   # todo, para buscar con grep
 .venv/bin/python tools/disasm.py xref "LAP"       # funciones que usan cadenas con "LAP"
@@ -209,19 +216,24 @@ Instrucciones únicas por zona del segmento de código. "Identificado" cuenta la
 
 | Zona | Contenido | Funciones | Instrucciones | Identificado |
 |---|---|---:|---:|---:|
-| `0x10000–0x1a000` | frontend: menús, idioma, opciones, fantasmas, coche del menú | 30 | 7 048 | 31 % |
-| `0x1a000–0x20000` | IA, cuerpo físico, choques entre coches | 14 | 5 701 | **93 %** |
-| `0x20000–0x2b000` | arranque, carga, creación del mundo, coches, sonido de coche | 47 | 10 893 | 51 % |
-| `0x2b000–0x34000` | bucle de carrera, actualización de coches, eventos | 20 | 7 460 | 57 % |
-| `0x34000–0x43000` | objetos móviles, colisiones con objetos, efectos, clima | 33 | 14 689 | **11 %** |
-| `0x43000–0x4c000` | resultados, pausa, HUD, colocación de objetos | 15 | 8 572 | 51 % |
-| `0x4c000–0x54000` | controles, entrada, turbo, fantasmas, utilidades | 40 | 7 474 | 18 % |
-| `0x54000–0x60000` | motor Lisa 2: escena, rasterizador, sprites, fuentes | 109 | 12 884 | **6 %** |
-| `0x60000–0x86000` | libc de Watcom, DOS/4G, drivers de sonido | 501 | 32 753 | 2 % |
-| **Total** | | **809** | **107 474** | **24 %** |
+| `0x10000–0x1a000` | frontend: menús, idioma, opciones, fantasmas, coche del menú | 62 | 10 943 | 20 % |
+| `0x1a000–0x20000` | IA, cuerpo físico, choques entre coches | 20 | 5 941 | **91 %** |
+| `0x20000–0x2b000` | arranque, carga, creación del mundo, coches, sonido de coche | 55 | 11 951 | 46 % |
+| `0x2b000–0x34000` | bucle de carrera, actualización de coches, eventos | 24 | 8 622 | 56 % |
+| `0x34000–0x43000` | objetos móviles, colisiones con objetos, efectos, clima | 37 | 14 983 | **9 %** |
+| `0x43000–0x4c000` | resultados, pausa, HUD, colocación de objetos | 20 | 9 028 | 49 % |
+| `0x4c000–0x54000` | controles, entrada, turbo, fantasmas, utilidades | 50 | 8 284 | 18 % |
+| `0x54000–0x60000` | motor Lisa 2: escena, rasterizador, sprites, fuentes | 126 | 13 933 | **3 %** |
+| `0x60000–0x86000` | libc de Watcom, DOS/4G, drivers de sonido (20 499 instrucciones clasificadas como `library`) | 735 | 45 570 | 1 % |
+| **Total** | | **1 129** | **129 255** | **20 %** |
 
-Aún queda un 17 % de bytes de código sin cubrir: datos intercalados, relleno y funciones a las que solo se llega por
-caminos que el analizador todavía no sigue.
+Quedan 6 000 bytes (1,3 %) de código sin cubrir: tablas de salto, relleno y datos intercalados. Los 320 inicios de
+función nuevos de `tools/gap_seeds.txt` salen del barrido de huecos (`disasm.py sweep`): cada candidato debe
+decodificar limpio, terminar en `ret`/`jmp`, no solaparse con código ya conocido y no contener opcodes BCD ni cargas
+de segmento. La clasificación `library` (C runtime y DOS/4G) no usa firmas FLIRT, porque no existe una base para
+Watcom 10.x: parte de las funciones conocidas de la libc (`sprintf`, `atan2`, `memset`, `open`…) y añade sus
+llamadas y las funciones que solo tocan datos del runtime (`0xd7d00`, `0xe6000`, BSS `0x25a000`); es heurística y
+deja sin clasificar parte de `0x70000–0x74000` (cuerpos solapados del rasterizador/mezclador).
 
 ---
 
@@ -343,18 +355,20 @@ Cada tarea indica las direcciones de partida.
 ### Fase 0 — Infraestructura de ingeniería inversa
 
 - [x] **P1** Inicializar git y subir solo código, documentación y herramientas (los datos ya están excluidos).
-- [ ] **P1** Separar la libc de Watcom y DOS/4G del código del juego con firmas (estilo FLIRT) generadas a partir de
-      Watcom C 10.x/11, para descartar unas 33 000 instrucciones de `0x60000–0x86000` sin revisarlas.
-- [ ] **P1** Cubrir el 17 % de bytes restante: barrido lineal de huecos con heurísticas de prólogo Watcom
-      (`push ebx; push ecx…; sub esp`), validando cada candidata con las reubicaciones.
-- [ ] **P2** Exportar `symbols.txt` como script de Ghidra o IDA (nombres, comentarios y tipos de estructura) para
-      decompilar las funciones grandes (`0x43fe0`, `0x2ed00`, `0x3731c`, `0x1aea0`).
-- [x] **P2** Generar estados por función en `symbols.txt` (`unknown` / `identified` / `ported` / `verified`) y un
-      informe automático de cobertura (`disasm.py coverage`).
-- [ ] **P2** Pruebas de regresión deterministas: carreras sin ventana por pista con resultados esperados (tramos,
-      vueltas, sin NaN) e imágenes de referencia del visor.
-- [ ] **P3** Trazas de ejecución del original en DOSBox-X (depurador o registro de memoria) para comparar valores
-      tick a tick con el port: posición, velocidad y tramo.
+- [~] **P1** Separar la libc de Watcom y DOS/4G del código del juego: no hay base de firmas FLIRT para Watcom 10.x, así
+      que `disasm.py` la clasifica por grafo de llamadas y datos de runtime (estado `library`, 497 funciones,
+      20 744 instrucciones). Quedan sin clasificar ≈ 25 000 instrucciones de `0x60000–0x86000` (motor y mezclador).
+- [x] **P1** Cubrir el 17 % de bytes restante: `disasm.py sweep` (barrido de huecos con prólogos Watcom, validación
+      por decodificación limpia y sin solapes) subió la cobertura del 83,0 % al **98,7 %** (+320 funciones).
+- [x] **P2** Exportar `symbols.txt` como script de Ghidra o IDA (nombres, comentarios y tipos de estructura):
+      `disasm.py export ghidra|ida -o FICHERO` (estructuras en `tools/structs.txt`). No probado en Ghidra/IDA reales.
+- [x] **P2** Generar estados por función en `symbols.txt` (`unknown` / `identified` / `ported` / `verified`, más
+      `library` automático) y un informe automático de cobertura (`disasm.py coverage`).
+- [x] **P2** Pruebas de regresión deterministas: `tests/regress.py` (23 casos: 7 pistas solo, con 3 rivales y con turbo,
+      visor y cámara de parrilla; sección, fase, vuelta, NaN y hash del framebuffer; `ctest --test-dir build`).
+      Los resultados esperados son una instantánea del estado actual (incluye el atasco de CANADA en la sección 22).
+- [~] **P3** Trazas de ejecución del original en DOSBox-X: hecho `tools/trace_compare.py` y el procedimiento en
+      [`docs/dosbox-trace.md`](docs/dosbox-trace.md); falta capturar la traza real (no había DOSBox-X disponible).
 
 ### Fase 1 — Carrera completa de un jugador (jugabilidad)
 

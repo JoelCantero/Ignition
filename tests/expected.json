@@ -1,0 +1,438 @@
+{
+ "AUSTRIA 3 rivals 40s": {
+  "image": "9f7821050c913796f336b41fc02629da",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    59,
+    200,
+    1,
+    0
+   ],
+   [
+    17,
+    0,
+    0,
+    0
+   ],
+   [
+    18,
+    0,
+    0,
+    0
+   ],
+   [
+    135,
+    0,
+    2,
+    0
+   ]
+  ]
+ },
+ "AUSTRIA solo 40s": {
+  "image": "1b8f31c533522f384e0bba2deeb15df2",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    111,
+    200,
+    2,
+    0
+   ]
+  ]
+ },
+ "AUSTRIA turbo 8s": {
+  "image": "6c260ae03e154397c4d2429ab16113ea",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    27,
+    200,
+    0,
+    0
+   ]
+  ]
+ },
+ "BRAZIL 3 rivals 40s": {
+  "image": "3c961bac55df9ab8871c7d8ee6963f0a",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    55,
+    204,
+    1,
+    0
+   ],
+   [
+    58,
+    0,
+    1,
+    0
+   ],
+   [
+    77,
+    0,
+    1,
+    0
+   ],
+   [
+    -82,
+    0,
+    1,
+    0
+   ]
+  ]
+ },
+ "BRAZIL solo 40s": {
+  "image": "4777bf56848bd0ed61f26881f495a928",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    57,
+    204,
+    1,
+    0
+   ]
+  ]
+ },
+ "BRAZIL turbo 8s": {
+  "image": "bd5cf4a42ab4d768aa3b932e5be0c15c",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    19,
+    204,
+    0,
+    0
+   ]
+  ]
+ },
+ "CANADA 3 rivals 40s": {
+  "image": "4d3261b37e02849ee65874572d06512c",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    22,
+    175,
+    0,
+    0
+   ],
+   [
+    15,
+    0,
+    0,
+    0
+   ],
+   [
+    93,
+    0,
+    2,
+    0
+   ],
+   [
+    -38,
+    0,
+    1,
+    0
+   ]
+  ]
+ },
+ "CANADA solo 40s": {
+  "image": "fa639b41bead40f00b1cfe3a44567528",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    22,
+    175,
+    0,
+    0
+   ]
+  ]
+ },
+ "CANADA turbo 8s": {
+  "image": "a354fbb79132e9cb78a9106dc3ef83a9",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    21,
+    175,
+    0,
+    0
+   ]
+  ]
+ },
+ "CARIB 3 rivals 40s": {
+  "image": "db95c651ae68773b4464a0805ac18a88",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    68,
+    207,
+    1,
+    0
+   ],
+   [
+    96,
+    0,
+    1,
+    0
+   ],
+   [
+    81,
+    0,
+    1,
+    0
+   ],
+   [
+    91,
+    0,
+    1,
+    0
+   ]
+  ]
+ },
+ "CARIB solo 40s": {
+  "image": "824fa6ed8c6d6828dd439faa9ffe6787",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    97,
+    207,
+    1,
+    0
+   ]
+  ]
+ },
+ "CARIB turbo 8s": {
+  "image": "4583577f818ea6ad694e97c0b70731b7",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    161,
+    207,
+    0,
+    0
+   ]
+  ]
+ },
+ "ICELAND 3 rivals 40s": {
+  "image": "ada3a27dc30314dddf7d0100f272931d",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    73,
+    172,
+    1,
+    0
+   ],
+   [
+    28,
+    0,
+    1,
+    0
+   ],
+   [
+    84,
+    0,
+    1,
+    0
+   ],
+   [
+    84,
+    0,
+    1,
+    0
+   ]
+  ]
+ },
+ "ICELAND solo 40s": {
+  "image": "6f4012487f760c31a6c055ee601edfa2",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    73,
+    172,
+    1,
+    0
+   ]
+  ]
+ },
+ "ICELAND turbo 8s": {
+  "image": "a03dc30d9430d39a605163e831bca882",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    26,
+    172,
+    0,
+    0
+   ]
+  ]
+ },
+ "JAPAN 3 rivals 40s": {
+  "image": "436a2df5e1ea7592e2321dd4c6e44bc9",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    59,
+    238,
+    1,
+    0
+   ],
+   [
+    -215,
+    0,
+    1,
+    0
+   ],
+   [
+    81,
+    0,
+    1,
+    0
+   ],
+   [
+    203,
+    0,
+    1,
+    0
+   ]
+  ]
+ },
+ "JAPAN solo 40s": {
+  "image": "07d67dc49a7590eb469cf0f1755234d3",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    53,
+    238,
+    1,
+    0
+   ]
+  ]
+ },
+ "JAPAN turbo 8s": {
+  "image": "66c42594421650ae0e4ff764c5d9afb3",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    63,
+    238,
+    1,
+    0
+   ]
+  ]
+ },
+ "USA 3 rivals 40s": {
+  "image": "4b4d479d70a21d3a436a83e87dcc371f",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    43,
+    139,
+    1,
+    0
+   ],
+   [
+    -118,
+    0,
+    3,
+    0
+   ],
+   [
+    50,
+    0,
+    2,
+    0
+   ],
+   [
+    43,
+    0,
+    1,
+    0
+   ]
+  ]
+ },
+ "USA grid camera": {
+  "image": "510ba1e76e2c8a46b72cf98054da31b0",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    0,
+    139,
+    0,
+    0
+   ],
+   [
+    0,
+    0,
+    0,
+    0
+   ],
+   [
+    0,
+    0,
+    0,
+    0
+   ],
+   [
+    0,
+    0,
+    0,
+    0
+   ]
+  ]
+ },
+ "USA solo 40s": {
+  "image": "3181c71d8d26bb760a403ca17111bd66",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    82,
+    139,
+    2,
+    0
+   ]
+  ]
+ },
+ "USA turbo 8s": {
+  "image": "bd2bc83064c02b9ec2e30f0b283653b6",
+  "nan": false,
+  "rc": 0,
+  "states": [
+   [
+    6,
+    139,
+    0,
+    0
+   ]
+  ]
+ },
+ "USA viewer car 9": {
+  "image": "514b9670f7ac7ef936bf1bef455e75bc",
+  "nan": false,
+  "rc": 0,
+  "states": []
+ }
+}

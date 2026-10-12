@@ -2,8 +2,10 @@
 """Recursive-descent disassembler for MAINDOS.EXE (LE) using Capstone.
 
   disasm.py funcs [--strings]          list discovered functions
-  disasm.py coverage                   report function states and code coverage
+  disasm.py coverage                   report function states (incl. auto-detected library) and coverage
   disasm.py dis ADDR                   disassemble one function
+  disasm.py sweep                      linear sweep of uncovered code; writes tools/gap_seeds.txt
+  disasm.py export ghidra|ida [-o F]   Ghidra/IDA script with function names, comments and structures
   disasm.py all                        disassemble every function (grep the output instead of looping `dis`)
   disasm.py xref TEXT                  functions referencing strings containing TEXT
   disasm.py callers ADDR               functions that call ADDR
@@ -15,6 +17,7 @@ push/mov immediates, and Watcom switch jump tables.
 """
 import argparse
 import os
+import re
 import struct
 import sys
 
@@ -26,10 +29,11 @@ from le2elf import LE, convert  # noqa: E402
 
 DEFAULT_EXE = "/Users/Shared/Epic Games/Ignition/ignition/MAINDOS.EXE"
 SYMBOLS = os.path.join(os.path.dirname(__file__), "symbols.txt")
+GAP_SEEDS = os.path.join(os.path.dirname(__file__), "gap_seeds.txt")
 END_MNEMONICS = {"ret", "retf", "iret", "iretd", "jmp", "hlt"}
 
 
-FUNCTION_STATUSES = {"unknown", "identified", "ported", "verified"}
+FUNCTION_STATUSES = {"unknown", "identified", "ported", "verified", "library"}
 
 
 def load_symbols():
@@ -51,6 +55,13 @@ def load_symbols():
 
 
 NAMES, STATUSES = load_symbols()
+
+
+def load_gap_seeds():
+    if not os.path.exists(GAP_SEEDS):
+        return []
+    with open(GAP_SEEDS) as f:
+        return [int(line, 16) for line in f if line.strip() and not line.startswith("#")]
 
 
 def name(addr):
@@ -139,14 +150,14 @@ def jump_table(img, ins):
     return out
 
 
-def analyze(img, pointer_seeds=True):
+def analyze(img, pointer_seeds=True, extra_seeds=()):
     """Return {func_addr: {"insns": {addr: ins}, "calls": set, "refs": set}}.
 
     Seeds: entry point, code addresses stored in data (function pointer tables) and code addresses used as
     immediates (callbacks). Jump-table targets stay inside their function.
     """
     funcs = {}
-    pending = [img.entry]
+    pending = [img.entry] + list(extra_seeds)
     if pointer_seeds:
         pending += sorted({t for s, t in img.fixups.items() if img.is_code(t) and not img.is_code(s)})
     case_labels = set()
@@ -154,13 +165,14 @@ def analyze(img, pointer_seeds=True):
         start = pending.pop()
         if start in funcs or start in case_labels or not img.is_code(start):
             continue
-        f = funcs[start] = {"insns": {}, "calls": set(), "refs": set()}
+        f = funcs[start] = {"insns": {}, "calls": set(), "refs": set(), "bad": 0}
         blocks = [start]
         while blocks:
             a = blocks.pop()
             while a not in f["insns"] and img.is_code(a):
                 ins = img.insn(a)
                 if ins is None:
+                    f["bad"] += 1
                     break
                 f["insns"][a] = ins
                 m = ins.mnemonic
@@ -198,6 +210,224 @@ def func_strings(img, f):
     return out
 
 
+# Watcom/DOS4G runtime evidence (no FLIRT database exists for Watcom 10.x, so the library is recognised
+# from the call graph and the data it touches).
+LIB_ANCHORS = (0x55f9c, 0x62775, 0x64774, 0x647ef, 0x64c2a, 0x65367, 0x652fa, 0x653d3, 0x65645, 0x65682, 0x6577d, 0x65782)
+LIB_DATA = ((0xd7d00, 0xd8100), (0xe6000, 0xe7400), (0x20a000, 0x20b000), (0x25a000, 0x26f640))
+LIB_MIN_ADDR = 0x60000
+
+
+def classify_library(img, funcs):
+    """Functions of the C runtime / DOS4G: callees of known runtime anchors, plus functions at or above
+    LIB_MIN_ADDR that only touch runtime data, reference no string and call only runtime functions."""
+
+    def in_lib_data(v):
+        return any(a <= v < b for a, b in LIB_DATA)
+
+    lib = {a for a in LIB_ANCHORS if a in funcs}
+    changed = True
+    while changed:
+        changed = False
+        for a in list(lib):
+            for c in funcs[a]["calls"]:
+                if c in funcs and c not in lib:
+                    lib.add(c)
+                    changed = True
+        for a, f in funcs.items():
+            if a in lib or a < LIB_MIN_ADDR or a == img.entry:
+                continue
+            data = [v for v in f["refs"] if 0x90000 <= v < 0x300000]
+            if (all(in_lib_data(v) for v in data) and not any(img.string_at(v) for v in f["refs"])
+                    and all(c in lib or c not in funcs for c in f["calls"])):
+                lib.add(a)
+                changed = True
+    return lib
+
+
+PADDING = (b"\x8d\x40\x00", b"\x8d\x49\x00", b"\x8b\xc0", b"\x8b\xc9", b"\x90", b"\xcc", b"\x00")
+PROLOGUE = re.compile(rb"(?:[\x50-\x57]){1,6}(?:\x83\xec.|\x81\xec....|\x8b\xec|[\x89\x8b][\xc0-\xff])", re.S)
+
+
+def code_gaps(img, funcs):
+    base, data, _ = img.objs[0]
+    cov = bytearray(len(data))
+    for f in funcs.values():
+        for a, i in f["insns"].items():
+            cov[a - base:a - base + i.size] = b"\1" * i.size
+    gaps, i = [], 0
+    while i < len(cov):
+        if cov[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(cov) and not cov[j]:
+            j += 1
+        gaps.append((base + i, j - i))
+        i = j
+    return gaps
+
+
+def skip_padding(data, base, a, end):
+    while a < end:
+        for pad in PADDING:
+            if data[a - base:a - base + len(pad)] == pad:
+                a += len(pad)
+                break
+        else:
+            return a
+    return a
+
+
+def is_table(img, a, n):
+    """A run of 32-bit relocated code pointers (switch jump table) or ASCII text."""
+    if n >= 4 and all((a + k) in img.fixups and img.is_code(img.fixups[a + k]) for k in range(0, n - n % 4, 4)):
+        return "jumptable"
+    return None
+
+
+IMPLAUSIBLE = {"aaa", "aas", "daa", "das", "aam", "aad", "bound", "arpl", "into", "les", "lds", "enter", "salc"}
+
+
+def plausible(f):
+    """Reject data that happens to decode: BCD/segment-load opcodes or runs of `add [eax], al`."""
+    zero_run = 0
+    for _, ins in sorted(f["insns"].items()):
+        if ins.mnemonic in IMPLAUSIBLE:
+            return False
+        zero_run = zero_run + 1 if ins.bytes == b"\0\0" else 0
+        if zero_run >= 2:
+            return False
+    return True
+
+
+def sweep_gaps(img, funcs):
+    """Linear sweep of the uncovered code bytes: validate Watcom function candidates at gap starts (after
+    padding) and at prologue patterns, iterating until no new clean function appears."""
+    base, data, _ = img.objs[0]
+    added = set()
+    for _round in range(12):
+        cands = set()
+        for a, n in code_gaps(img, funcs):
+            end = a + n
+            s = skip_padding(data, base, a, end)
+            if s < end and not is_table(img, s, end - s):
+                cands.add(s)
+            for m in PROLOGUE.finditer(data, s - base, end - base):
+                cands.add(base + m.start())
+        cands -= set(funcs)
+        trial = analyze(img, extra_seeds=sorted(cands))
+        new = []
+        for c in sorted(cands):
+            f = trial.get(c)
+            last = max(f["insns"], default=0) if f else 0
+            ends = f and f["insns"] and f["insns"][last].mnemonic in END_MNEMONICS
+            # clean: decodes fully, no overlap with already-known instructions, more than a few instructions
+            overlap = f and any(a in funcs_insn_set(funcs) for a in f["insns"])
+            if f and not f["bad"] and ends and len(f["insns"]) >= 3 and not overlap and plausible(f):
+                new.append(c)
+        if not new:
+            break
+        for c in new:
+            funcs[c] = trial[c]
+            added.add(c)
+        # pull in the callees of the accepted functions
+        more = analyze(img, extra_seeds=sorted(funcs))
+        for a, f in more.items():
+            if a not in funcs and not f["bad"]:
+                funcs[a] = f
+    return added
+
+
+_INSN_CACHE = {}
+
+
+def funcs_insn_set(funcs):
+    key = id(funcs), len(funcs)
+    if key not in _INSN_CACHE:
+        _INSN_CACHE.clear()
+        _INSN_CACHE[key] = {a for f in funcs.values() for a in f["insns"]}
+    return _INSN_CACHE[key]
+
+
+STRUCTS = os.path.join(os.path.dirname(__file__), "structs.txt")
+
+
+def load_symbol_notes():
+    """{address: (name, note)} from symbols.txt (status= fields removed)."""
+    out = {}
+    with open(SYMBOLS) as f:
+        for line in f:
+            parts = line.split(None, 2)
+            if len(parts) >= 2 and not line.lstrip().startswith("#"):
+                note = " ".join(w for w in (parts[2].split() if len(parts) > 2 else []) if not w.startswith("status="))
+                out[int(parts[0], 16)] = (parts[1], note)
+    return out
+
+
+def load_structs():
+    structs, cur = [], None
+    with open(STRUCTS) as f:
+        for line in f:
+            line = line.split("#", 1)[0].rstrip()
+            parts = line.split(None, 3)
+            if not parts:
+                continue
+            if parts[0] == "struct":
+                cur = {"name": parts[1], "size": int(parts[2], 16), "fields": []}
+                structs.append(cur)
+            else:
+                cur["fields"].append((int(parts[0], 16), parts[1], parts[2], parts[3] if len(parts) > 3 else ""))
+    return structs
+
+
+def export_script(kind, funcs):
+    """Ghidra (Jython) or IDAPython script: function starts, symbol names/comments and structures."""
+    notes = load_symbol_notes()
+    sizes = {"double": 8, "int": 4, "uint": 4, "short": 2, "byte": 1, "ptr": 4}
+    out = ["# generated by tools/disasm.py export %s -- addresses are the LE linear addresses of MAINDOS.EXE" % kind,
+           "# set BASE if the loader relocated the image", "BASE = 0"]
+    if kind == "ghidra":
+        out += ["from ghidra.program.model.data import StructureDataType, DoubleDataType, IntegerDataType, UnsignedIntegerDataType, ShortDataType, ByteDataType, PointerDataType",
+                "from ghidra.program.model.symbol import SourceType",
+                "def A(a): return toAddr(BASE + a)",
+                "T = {'double': DoubleDataType.dataType, 'int': IntegerDataType.dataType, 'uint': UnsignedIntegerDataType.dataType,",
+                "     'short': ShortDataType.dataType, 'byte': ByteDataType.dataType, 'ptr': PointerDataType.dataType}",
+                "dtm = currentProgram.getDataTypeManager()"]
+    else:
+        out += ["import idc, ida_name, ida_funcs, ida_bytes", "def A(a): return BASE + a"]
+    for fa in sorted(funcs):
+        nm, note = notes.get(fa, ("sub_%08x" % fa, "%s%d instructions" % (
+            "library, " if function_status(fa) == "library" else "", len(funcs[fa]["insns"]))))
+        if kind == "ghidra":
+            out.append("createFunction(A(0x%x), %r)" % (fa, nm))
+            out.append("setEOLComment(A(0x%x), %r)" % (fa, note)) if note else None
+        else:
+            out.append("ida_funcs.add_func(A(0x%x)); idc.set_name(A(0x%x), %r, ida_name.SN_NOWARN)" % (fa, fa, nm))
+            out.append("idc.set_func_cmt(A(0x%x), %r, 1)" % (fa, note)) if note else None
+    for a, (nm, note) in sorted(notes.items()):
+        if a in funcs:
+            continue
+        if kind == "ghidra":
+            out.append("createLabel(A(0x%x), %r, True)" % (a, nm))
+            out.append("setEOLComment(A(0x%x), %r)" % (a, note)) if note else None
+        else:
+            out.append("idc.set_name(A(0x%x), %r, ida_name.SN_NOWARN)" % (a, nm))
+            out.append("idc.set_cmt(A(0x%x), %r, 1)" % (a, note)) if note else None
+    for st in load_structs():
+        if kind == "ghidra":
+            out.append("s = StructureDataType(%r, 0x%x)" % (st["name"], st["size"]))
+            for off, ty, nm, cm in st["fields"]:
+                out.append("s.replaceAtOffset(0x%x, T[%r], %d, %r, %r)" % (off, ty, sizes[ty], nm, cm))
+            out.append("dtm.addDataType(s, None)")
+        else:
+            out.append("sid = idc.add_struc(-1, %r, 0)" % st["name"])
+            fl = {"double": "idc.FF_QWORD", "int": "idc.FF_DWORD", "uint": "idc.FF_DWORD", "short": "idc.FF_WORD",
+                  "byte": "idc.FF_BYTE", "ptr": "idc.FF_DWORD"}
+            for off, ty, nm, cm in st["fields"]:
+                out.append("idc.add_struc_member(sid, %r, 0x%x, %s | idc.FF_DATA, -1, %d)" % (nm, off, fl[ty], sizes[ty]))
+    return "\n".join(l for l in out if l) + "\n"
+
+
 def owner(funcs, addr):
     for fa, f in funcs.items():
         if addr in f["insns"]:
@@ -214,6 +444,10 @@ def main():
     sub.add_parser("coverage")
     sub.add_parser("dis").add_argument("addr")
     sub.add_parser("all")
+    sub.add_parser("sweep")
+    p = sub.add_parser("export")
+    p.add_argument("kind", choices=["ghidra", "ida"])
+    p.add_argument("-o", "--output")
     sub.add_parser("xref").add_argument("text")
     sub.add_parser("callers").add_argument("addr")
     sub.add_parser("refs").add_argument("addr")
@@ -246,8 +480,29 @@ def main():
             print("%08x  %s%s" % (a, v, note))
             a += struct.calcsize(code)
         return
-    funcs = analyze(img)
+    if args.cmd == "sweep":
+        funcs = analyze(img, extra_seeds=[])
+        added = sweep_gaps(img, funcs)
+        with open(GAP_SEEDS, "w") as out:
+            out.write("# function starts found by `disasm.py sweep` (gap sweep with Watcom prologue heuristics)\n")
+            for a in sorted(added):
+                out.write("%08x\n" % a)
+        print("%d functions, %d added from gaps, %d uncovered gaps left" % (
+            len(funcs), len(added), len(code_gaps(img, funcs))))
+        return
+    funcs = analyze(img, extra_seeds=load_gap_seeds())
+    for fa in classify_library(img, funcs):
+        STATUSES.setdefault(fa, "library")
 
+    if args.cmd == "export":
+        text = export_script(args.kind, funcs)
+        if args.output:
+            with open(args.output, "w") as out:
+                out.write(text)
+            print("wrote %s (%d functions)" % (args.output, len(funcs)))
+        else:
+            sys.stdout.write(text)
+        return
     if args.cmd == "coverage":
         code_objects = [(base, data) for base, data, flags in img.objs if flags & 4]
         covered = {base: bytearray(len(data)) for base, data in code_objects}
@@ -272,8 +527,10 @@ def main():
         print("functions: %d (%s)" % (
             len(funcs),
             ", ".join("%s=%d" % (s, totals[s]) for s in
-                      ("unknown", "identified", "ported", "verified")),
+                      ("unknown", "identified", "ported", "verified", "library")),
         ))
+        lib_insns = {a for fa in funcs if function_status(fa) == "library" for a in funcs[fa]["insns"]}
+        print("library (C runtime / DOS4G) unique instructions: %d, to exclude from game review" % len(lib_insns))
         print("unique instructions: %d" % len(unique_insns))
         print("code bytes covered: %d/%d (%.1f%%)" % (
             covered_bytes, total_bytes, 100 * covered_bytes / total_bytes if total_bytes else 0,

@@ -36,3 +36,7 @@ add_custom_target(elf
   COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/le2elf.py "${GAME_DIR}/MAINDOS.EXE"
           ${CMAKE_BINARY_DIR}/maindos.elf --map ${CMAKE_BINARY_DIR}/maindos.json
   VERBATIM)
+
+# Deterministic headless regression (needs the game data); run with `ctest --test-dir build`.
+enable_testing()
+add_test(NAME regress COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/regress.py --binary $<TARGET_FILE:ignition>)

@@ -1,0 +1,91 @@
+# Verified structure layouts exported by `disasm.py export`.
+#   struct NAME SIZE [@ADDRESS array element count: ADDRESS COUNT]
+#   OFFSET TYPE NAME [comment]      TYPE: double | int | uint | short | byte | ptr
+struct IgnCar 0x484c  @ 0x1fefe0
+0x000 double x             world x
+0x008 double y             height
+0x010 double z
+0x018 double step_x        last tick displacement
+0x020 double vy            vertical speed
+0x028 double step_x_prev
+0x030 double step_z_prev
+0x040 double step_z_prev2
+0x098 double heading_ref
+0x0a0 double steer_angle
+0x0b0 double visual_dir    degrees
+0x0f8 double heading
+0x100 double travel_angle
+0x108 double ground_roll
+0x110 double ground_pitch
+0x118 double kmh
+0x120 double ground_cur
+0x128 double ground_prev
+0x148 double avg_grip
+0x270 int    airborne
+0x27c int    gear_state
+0x2fc double wheel_x0      4 wheels, x
+0x31c double wheel_z0      4 wheels, z
+0x344 int    steer_input   +-100
+0x364 int    ai_section
+0x370 int    section
+0x374 int    lap
+0x378 int    phase
+0x534 uint   turbo_charge_lo  double 0..100, starts at 100
+0x538 uint   turbo_charge_hi
+0x53c int    turbo_mode
+0x544 int    sound_channel
+0x548 int    turbo_wait
+0x554 int    flip_counter
+0x558 int    overlap0
+0x55c int    overlap1
+0x560 int    overlap2
+0x57c int    wheel_on_edge
+0x584 double body_tilt0    tenths of a degree
+0x58c double body_tilt1
+0x604 int    control_flag
+
+struct IgnBody 0x1d0  @ 0x1fefe8
+0x000 double mass
+0x008 double inertia
+0x010 double restitution
+0x018 double axis_a
+0x020 double axis_b
+0x028 double heading
+0x030 double yaw
+0x068 double px
+0x070 double pz
+0x078 double vx
+0x080 double vz
+0x098 double v_fwd
+0x0a0 double v_lat
+0x0ac double steer_dir
+0x0b4 double pitch
+0x0bc double roll
+0x0c4 double grip_a
+0x0cc double grip_b
+0x0d8 double drive_force
+0x0e0 double limit_a
+0x0e8 double limit_b
+0x130 double radius
+0x1b8 double impact
+
+struct IgnSection 0x18 @ 0x1feff8
+0x00 int    object
+0x08 double angle
+
+struct IgnAiState 0x7c @ 0xeb7c0
+0x00 double s00     scaled by difficulty
+0x08 double s08
+0x10 double s10
+0x18 double s18
+0x20 double s20
+0x28 double s28
+0x38 double s38
+0x40 double s40
+0x48 double s48
+0x54 int    accel
+0x58 double side
+0x60 int    stuck
+0x68 int    section
+0x6c int    rand
+0x74 double steer
