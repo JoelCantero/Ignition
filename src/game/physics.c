@@ -234,6 +234,8 @@ int ign_body_collide_pair(IgnBody *a, IgnBody *b) {
         }
     double tz = hz[bi] - hz[bj], tx = hx[bi] - hx[bj];
     double theta = (tx != 0 || tz != 0) ? atan2(tz, tx) : 0.0;
+    a->contact_x = b->contact_x = mx;
+    a->contact_z = b->contact_z = mz;
     return pair_impulse(a, b, mx, mz, theta);
 }
 

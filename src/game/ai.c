@@ -11,7 +11,7 @@
 /* Port of sub_0001aea0 (see docs/formats.md, "IA original"). Deviations: the per-section records of
  * load_tri are rebuilt on the fly from the gate edges (angles +0x2e), the lane/branch choice tables
  * at 0xbf9a0 are not used (the port's progress code already picks the branch from the car position),
- * the slope term (record Y, x90 = 1), the collision-overlap spin (car+0x558), the control-type 5/8
+ * the slope term (record Y, x90), the collision-overlap spin (car+0x558), the control-type 5/8
  * steering gain and the avoidance sign flip from the rival's own side ratio are omitted. */
 
 static int track_id = 1;
@@ -149,12 +149,6 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnInput *in)
     } else if (override != -1 && override * 0.2777 < b->v_fwd) {
         brake = (int)clampd((kmh - override) * 50 * 0.01, 0, 50);
     }
-    else {
-        /* Port heuristic (not in the original, which brakes only for the override table): the records
-         * rebuilt from the gates are coarser than the original ones, so brake for the turn seen ahead. */
-        double lim = fmax(70.0, 240.0 / (1 + 1.2 * sum * (grip + 0.3) * 1.34 / used));
-        if (kmh > lim) brake = (int)clampd((kmh - lim) * 0.5, 0, 50);
-    }
     double A = fmin(T * 1.5, 100);
 
     /* Steering (0x1c07a...): aim at the lookahead mid-point from the blended travel direction. */
@@ -240,7 +234,7 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnInput *in)
     int zone = 1;
     if (track_id == 4 && s > 0x28 && s < 0x36) zone = 0;
     if (track_id == 0 && ((sec < -156 && sec > -162) || (sec < 102 && sec > 90))) zone = 0;
-    in->turbo = car->turbo_charge >= 100.0 && !car->airborne && !brake && want && zone;
+    in->turbo = car->turbo_charge == 100.0 && !car->airborne && !brake && want && zone;
     in->a_steer = (int)ai->steer;
     if (brake)
         in->a_brake = brake;

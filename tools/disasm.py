@@ -150,7 +150,7 @@ def jump_table(img, ins):
     return out
 
 
-def analyze(img, pointer_seeds=True, extra_seeds=()):
+def analyze(img, pointer_seeds=True, extra_seeds=(), follow_calls=True):
     """Return {func_addr: {"insns": {addr: ins}, "calls": set, "refs": set}}.
 
     Seeds: entry point, code addresses stored in data (function pointer tables) and code addresses used as
@@ -184,7 +184,8 @@ def analyze(img, pointer_seeds=True, extra_seeds=()):
                     t = branch_target(ins)
                     if t is not None:
                         f["calls"].add(t)
-                        pending.append(t)
+                        if follow_calls:
+                            pending.append(t)
                 elif m.startswith("j"):
                     t = branch_target(ins)
                     if t is not None:
@@ -300,9 +301,26 @@ def plausible(f):
     return True
 
 
+def relocations_valid(img, f):
+    """Require every code relocation overlapping a decoded instruction to occupy its encoded operand."""
+    for a, ins in f["insns"].items():
+        disp_start = ins.disp_offset
+        disp_end = disp_start + ins.disp_size
+        imm_start = ins.imm_offset
+        imm_end = imm_start + ins.imm_size
+        for site in range(a, a + ins.size):
+            if site not in img.fixups:
+                continue
+            offset = site - a
+            if not (disp_start <= offset < disp_end or imm_start <= offset < imm_end):
+                return False
+    return True
+
+
 def sweep_gaps(img, funcs):
     """Linear sweep of the uncovered code bytes: validate Watcom function candidates at gap starts (after
-    padding) and at prologue patterns, iterating until no new clean function appears."""
+    padding) and at prologue patterns, iterating until no new clean function appears. Candidates must not
+    overlap an accepted instruction and every LE relocation in their instructions must align to an operand."""
     base, data, _ = img.objs[0]
     added = set()
     for _round in range(12):
@@ -317,14 +335,16 @@ def sweep_gaps(img, funcs):
         cands -= set(funcs)
         trial = analyze(img, extra_seeds=sorted(cands))
         new = []
+        claimed = funcs_insn_set(funcs)
         for c in sorted(cands):
             f = trial.get(c)
             last = max(f["insns"], default=0) if f else 0
             ends = f and f["insns"] and f["insns"][last].mnemonic in END_MNEMONICS
-            # clean: decodes fully, no overlap with already-known instructions, more than a few instructions
-            overlap = f and any(a in funcs_insn_set(funcs) for a in f["insns"])
-            if f and not f["bad"] and ends and len(f["insns"]) >= 3 and not overlap and plausible(f):
+            overlaps = f and any(a in claimed for a in f["insns"])
+            if (f and not f["bad"] and ends and len(f["insns"]) >= 3 and not overlaps
+                    and plausible(f) and relocations_valid(img, f)):
                 new.append(c)
+                claimed.update(f["insns"])
         if not new:
             break
         for c in new:
@@ -332,9 +352,12 @@ def sweep_gaps(img, funcs):
             added.add(c)
         # pull in the callees of the accepted functions
         more = analyze(img, extra_seeds=sorted(funcs))
+        claimed = funcs_insn_set(funcs)
         for a, f in more.items():
-            if a not in funcs and not f["bad"]:
+            if (a not in funcs and not f["bad"] and not any(i in claimed for i in f["insns"])
+                    and relocations_valid(img, f)):
                 funcs[a] = f
+                claimed.update(f["insns"])
     return added
 
 
@@ -482,15 +505,23 @@ def main():
         return
     if args.cmd == "sweep":
         funcs = analyze(img, extra_seeds=[])
-        added = sweep_gaps(img, funcs)
+        original_starts = set(funcs)
+        gap_added = sweep_gaps(img, funcs)
+        added = gap_added | (set(funcs) - original_starts)
         with open(GAP_SEEDS, "w") as out:
-            out.write("# function starts found by `disasm.py sweep` (gap sweep with Watcom prologue heuristics)\n")
+            out.write("# validated function starts added by `disasm.py sweep` (do not recursively reseed their calls)\n")
             for a in sorted(added):
                 out.write("%08x\n" % a)
-        print("%d functions, %d added from gaps, %d uncovered gaps left" % (
-            len(funcs), len(added), len(code_gaps(img, funcs))))
+        print("%d functions, %d gap candidates accepted, %d total new starts persisted, %d uncovered gaps left" % (
+            len(funcs), len(gap_added), len(added), len(code_gaps(img, funcs))))
         return
-    funcs = analyze(img, extra_seeds=load_gap_seeds())
+    funcs = analyze(img)
+    gap_seeds = load_gap_seeds()
+    if gap_seeds:
+        additions = analyze(img, pointer_seeds=False, extra_seeds=gap_seeds, follow_calls=False)
+        for fa, f in additions.items():
+            if fa not in funcs:
+                funcs[fa] = f
     for fa in classify_library(img, funcs):
         STATUSES.setdefault(fa, "library")
 

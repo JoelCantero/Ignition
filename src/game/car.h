@@ -7,12 +7,15 @@
 #include "physics.h"
 
 #define IGN_MAX_CAR_PARTS 8
+#define IGN_MAX_WALLS 500 /* car+0x9b0..0x4830: 32 bytes per wall */
 
 typedef struct {
     bool accel, brake, left, right, turbo;
     /* car_input (0x4d5f4) analog form used by the AI: accel 0..100, brake 0..50, steer -100..100 (+ = left). */
     bool analog;
     int a_accel, a_brake, a_steer;
+    bool manual_gear;
+    int gear_shift;                  /* one-shot request: -1 down, +1 up */
 } IgnInput;
 
 typedef struct {
@@ -24,22 +27,31 @@ typedef struct {
     float part_off[IGN_MAX_CAR_PARTS][3]; /* part origin in the car frame (x/z from PLC, y per cars_init) */
     float body_stretch;            /* 3 with the BANARNE cheat ([0x1fb2f0]), else 1 */
     float front, rear, half_width; /* wheel offsets in world units (model +x = forward) */
+    /* car+0x2fc/+0x31c: body box corners x1.1, (min x, min z), (min x, max z), (max x, max z), (max x, min z). */
+    float corner_x[4], corner_z[4];
     int16_t torque[3][IGN_TORQUE_POINTS];
     int gear;                      /* 0 reverse, 1-2 forward */
+    int forward_gear;              /* retained while braking selects reverse */
     double steer_visual;           /* car+0xb0 */
     IgnBody body;
     float x, y, z, heading;        /* render pose; heading 0 = +z */
     float kmh;
     int surface_type;
     int wall_hit;
+    int jump_mode;                 /* car+0x274: set on surfaces 0x0a-0x13, widens the wall search */
+    double walls[IGN_MAX_WALLS][4]; /* car+0x9b0: cached wall segments x0, z0, x1, z1 in metres */
+    int nwalls;                    /* car+0x4830 */
+    float wall_x, wall_z;          /* car+0x4834/+0x483c: position of the last wall search */
     /* Vertical state in world units, up positive (car+0x08/+0x20/+0x120/+0x128/+0x270). */
     double height, fall_speed, ground, ground_prev;
     int airborne;
-    int ground_object;             /* track object under the front-left wheel */
+    int ground_object;             /* track object under the last probe with ground */
     int section, phase, lap;       /* car+0x370 / +0x378 / +0x374 */
     double turbo_charge;           /* car+0x534: 0..100, starts full */
     int turbo_mode;                /* car+0x53c: 0 off, 1 button, 2 forced */
     int turbo_wait;                /* car+0x548: ticks before another refused request */
+    int turbo_key;                 /* car+0x530: last tick's turbo request (0, 1 held, 2 start boost) */
+    int turbo_started;             /* the turbo started this tick (sub_0004e688 effects), cleared by the caller */
     /* Visual pose, model frame (x forward, y down, z = physics side): radians unless noted. */
     double lean_roll, lean_pitch;  /* car+0xb8/+0xc0: degrees, from acceleration (sub_0002e6f8) */
     double body_roll, body_pitch;  /* car+0x584/+0x58c: smoothed body tilt (sub_00040ec8) */
@@ -48,19 +60,80 @@ typedef struct {
     double blow;                   /* car+0x60c: 0 until eliminated, then 1.0 */
     int finish_tick, place;        /* car+0x3a0 and the [0x1fee60] counter at the finish */
     double step_x, step_z;         /* car+0x18/+0x28: last tick displacement, world units */
+    /* Wrecks (car_vertical 0x2e3a7, car_update 0x2fd63) and the respawn of sub_0003a788. */
+    int wreck_kind;                /* 1 exploded (car+0x354), 2 sunk (car+0x358), 3 slid off (car+0x35c) */
+    int wreck_slid;                /* kind 3: next slide frame of sub_0003db4c (0..30) */
+    int wrecks;                    /* port statistic */
+    double wreck_frame;            /* effect frame, 1/36 s; 80 frames, the last 40 glide to the respawn point */
+    double wreck_from[4];          /* car+0x384/+0x38c/+0x394/+0x37c: x, height, z, physics heading */
+    double wreck_at[3];            /* effect origin: rear axle point (explosion) or car position (sink), y up */
+    float body_min_x;              /* car+0x5b8: rearmost body vertex, model x (turbo exhaust) */
+    int turbo_frames;              /* car+0x54c: frames of turbo effects */
+    int wheel_type[4];             /* car+0x150..: last surface found under each wheel */
+    int offroad;                   /* car+0x5c8: ticks with all wheels on types > 0x28 */
+    int special_ground;            /* car+0x5fc: some wheel on a type > 0x13 */
+    int ai;                        /* [0x1fefd0]+4 == 1: computer car (steering, turbo force and revs of profile 11) */
+    int torque_bonus;              /* car+0x524: computer cars, by model and difficulty */
+    int creep, creep_ticks;        /* car+0x51c/+0x520: torque added while the curve gives <= 3 */
+    double catchup, catchup_clock; /* car+0x594/+0x59c: human torque bonus by place, renewed every 182 frames */
+    int position;                  /* car+0x39c: race position (1 = leader), set by the caller */
+    int level_change;              /* every corner was an outlier (car_update 0x30265 keeps them) */
+    int spark_timer;               /* car+0x33c: frames of wall sparks left */
+    int spark_types[4];            /* car+0x5e8: wheel types when the wall sparks started */
+    double revs;                   /* car+0x288: engine revs 0..~100, picks the ENGINE.INF entries */
+    double wall_impact;            /* body +0x1b8 after this tick's wall pass, 0 without a wall hit */
+    int landed;                    /* car+0x278: set by a landing this tick */
+    /* Skid state (sub_0003731c). */
+    double slip;                   /* car+0x90: velocity angle minus heading, [0, 2pi) */
+    int skid_timer;                /* car+0x2f8: wheelspin, saturated grip or hard braking */
+    int skidding;
+    float tyre_half;               /* half width of a tyre track, world units */
+    int mark_valid[2];             /* per axle (0 rear car+0x48, 1 front car+0x68) */
+    float mark_at[2][2];           /* car+0x2c4/+0x2c8: axle point of the last mark */
+    float mark_prev[2][2][2][2];   /* [axle][tyre][edge] x, z of the last mark's leading edge */
 } IgnCar;
+
+#define IGN_WRECK_FRAMES 80.0
+
+/* sub_0003a788 / sub_0003c208 hide the car at frame 0, sub_0003db4c at frame 30. */
+static inline int ign_car_visible(const IgnCar *car) {
+    return !car->wrecked || (car->wreck_kind == 3 && car->wreck_frame < 30.0);
+}
 
 /* Difficulty level 0..3 ([0x1fedd8]): scales the rear grip of every car by 1, 1.15, 1.3, 1.3. */
 void ign_set_difficulty(int level);
+/* Race clock [0x1fb4e8] < 0: before it, cars are held and cannot use the turbo. */
+void ign_set_race_started(int started);
+/* [0x1fb540]: seconds since the start, for the start boost. */
+void ign_set_race_time(double seconds);
+/* [0x1fb4d8]: 1/36 s frames since the level started (catch-up bonus). */
+void ign_set_level_clock(double frames);
+/* sub_00022d08: model of the k-th computer car for the difficulty (0xc5520); a model a human drives is replaced by
+ * the next spare of the list, from index `*spare` (start at 5). */
+int ign_computer_model(int k, const int *humans, int nhumans, int *spare);
+/* sub_00022d08: marks a car as computer-driven, with its torque bonus (car+0x524). */
+void ign_car_set_computer(IgnCar *car);
 int ign_get_difficulty(void);
 /* Returns 0 if the car id exists in CARS.PLC. */
 int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, float heading);
 /* Advances one original physics tick (1/72 s). */
 void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in);
+/* Starts a wreck (kind 1 explosion, 2 sinking): the car is hidden and no longer driven. */
+void ign_car_wreck(IgnCar *car, int kind);
+/* Moves a wrecked car (glide of sub_0003a788). */
+void ign_car_set_pose(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height);
+/* sub_00041430: puts a wrecked car back at a respawn point, still and airborne. Returns -1 (car untouched) if the
+ * port's ground lookup finds nothing there. */
+int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height);
 int ign_first_car_id(const IgnLevel *lv);
 
-/* Pair pass of cars_update_all (0x2d2f8): |dx|,|dz| < 200, |dy| < 70, then sub_0001ebb4. */
-int ign_cars_collide(IgnCar *const *cars, int n);
+/* Pair pass of cars_update_all (0x2d2f8): |dx|,|dz| < 200, |dy| < 70, then sub_0001ebb4. Each contact goes to `hits`
+ * (contact point in world units, mean impact of both bodies). Returns the contacts. */
+typedef struct {
+    int a, b;
+    double x, z, impact;
+} IgnCarHit;
+int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, int *nhits);
 
 struct IgnTrack;
 /* Lap progress from the section under the car (car_update 0x2f2cc / 0x2fc1c). */

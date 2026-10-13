@@ -1,4 +1,5 @@
 #include "assets.h"
+#include "pos.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -109,6 +110,8 @@ int ign_load_model(const char *plc_path, const char *msh_path, const char *tex_p
         IgnObject *o = &out->objs[i];
         o->type = rd32(r + 4);
         for (int k = 0; k < 3; k++) o->pos[k] = (int32_t)rd32(r + 8 + k * 4);
+        /* PLC y points up: the original builds world y as vertex.y - plc.y (0x20a2b, 0x28f77). */
+        o->pos[1] = -o->pos[1];
         const int32_t *m = (const int32_t *)(out->msh + off);
         o->nv = m[0];
         o->nf = m[1];
@@ -134,6 +137,31 @@ void ign_free_model(IgnModel *m) {
     free(m->msh);
     free(m->objs);
     memset(m, 0, sizeof *m);
+}
+
+void ign_object_rotation_matrix(const IgnObject *o, float out[9]) {
+    const float scale = 3.14159265358979323846f / 1800.0f;
+    float ax = o->rotation[0] * scale, ay = o->rotation[1] * scale, az = o->rotation[2] * scale;
+    float cx = cosf(ax), sx = sinf(ax), cy = cosf(ay), sy = sinf(ay), cz = cosf(az), sz = sinf(az);
+    /* The Euler order is not established from the engine; use Z(Y(X(v))) as a rendering approximation. */
+    out[0] = cz * cy;
+    out[1] = -sz * cx + cz * sy * sx;
+    out[2] = sz * sx + cz * sy * cx;
+    out[3] = sz * cy;
+    out[4] = cz * cx + sz * sy * sx;
+    out[5] = -cz * sx + sz * sy * cx;
+    out[6] = -sy;
+    out[7] = cy * sx;
+    out[8] = cy * cx;
+}
+
+void ign_object_vertex(const IgnObject *o, int vertex, float out[3]) {
+    float rotation[9];
+    ign_object_rotation_matrix(o, rotation);
+    const int32_t *v = o->verts + vertex * 3;
+    for (int row = 0; row < 3; row++)
+        out[row] = rotation[row * 3] * v[0] + rotation[row * 3 + 1] * v[1] +
+                   rotation[row * 3 + 2] * v[2] + o->pos[row];
 }
 
 /* The engine registers PLC objects in order but skips some decorations, so SRF object indices
@@ -188,14 +216,17 @@ static int map_engine_objects(IgnLevel *lv) {
     return 0;
 }
 
+static int wall_height(const char *name);
+
 int ign_load_level(const char *data_dir, const char *name, IgnLevel *out) {
     memset(out, 0, sizeof *out);
-    char col[1024], pic[1024], plc[1024], msh[1024], tex[1024];
+    char col[1024], pic[1024], plc[1024], msh[1024], tex[1024], pos[1024];
     snprintf(col, sizeof col, "%s/LEVELS/%s/%s.COL", data_dir, name, name);
     snprintf(pic, sizeof pic, "%s/LEVELS/%s/%s.PIC", data_dir, name, name);
     snprintf(plc, sizeof plc, "%s/LEVELS/%s/%s.PLC", data_dir, name, name);
     snprintf(msh, sizeof msh, "%s/LEVELS/%s/%s.MSH", data_dir, name, name);
     snprintf(tex, sizeof tex, "%s/LEVELS/%s/%s.TEX", data_dir, name, name);
+    snprintf(pos, sizeof pos, "%s/LEVELS/%s/%s.POS", data_dir, name, name);
 
     size_t col_size;
     uint8_t *col_data = read_or_warn(col, &col_size);
@@ -203,6 +234,10 @@ int ign_load_level(const char *data_dir, const char *name, IgnLevel *out) {
     if (!col_data || ign_parse_col(col_data, col_size, &out->palette)) goto done;
     if (ign_load_pic(pic, &out->backdrop)) goto done;
     if (ign_load_model(plc, msh, tex, &out->track)) goto done;
+    if (ign_pos_load(pos, out->track.nobj, &out->pos)) {
+        fprintf(stderr, "invalid or unreadable POS animation file %s\n", pos);
+        goto done;
+    }
 
     snprintf(plc, sizeof plc, "%s/CARS/CARS.PLC", data_dir);
     snprintf(msh, sizeof msh, "%s/CARS/CARS.MSH", data_dir);
@@ -235,6 +270,36 @@ int ign_load_level(const char *data_dir, const char *name, IgnLevel *out) {
     snprintf(plc, sizeof plc, "%s/LEVELS/%s/%s.TRI", data_dir, name, name);
     out->tri = read_or_warn(plc, &out->tri_size);
     if (!out->tri || out->tri_size < 4) goto done;
+    out->wall_height = wall_height(name);
+
+    snprintf(plc, sizeof plc, "%s/LEVELS/%s/%s.SHD", data_dir, name, name);
+    size_t shd_size;
+    out->shd = read_or_warn(plc, &shd_size);
+    if (!out->shd || shd_size != 65536) goto done;
+
+    snprintf(plc, sizeof plc, "%s/LEVELS/%s/%s.TAB", data_dir, name, name);
+    size_t tab_size;
+    out->tab = read_or_warn(plc, &tab_size);
+    if (!out->tab || tab_size != 65536) goto done;
+
+    /* Effect texture slots 2-7 (0x23c9c); DARKSMOK.TEX has only 128 rows, padded to a full page. */
+    static const char *const FX_TEX[8] = {NULL, NULL, "DIVSPR", "LIGHT", "SMOKE", "DARKSMOK", "BOOM", "EXSMOKE"};
+    for (int i = 2; i < 8; i++) {
+        snprintf(plc, sizeof plc, "%s/GENERAL/%s.TEX", data_dir, FX_TEX[i]);
+        size_t size;
+        uint8_t *tex = read_or_warn(plc, &size);
+        if (!tex || size > 65536) {
+            free(tex);
+            goto done;
+        }
+        out->fx_tex[i] = calloc(1, 65536);
+        if (!out->fx_tex[i]) {
+            free(tex);
+            goto done;
+        }
+        memcpy(out->fx_tex[i], tex, size);
+        free(tex);
+    }
     rc = 0;
 done:
     free(col_data);
@@ -246,9 +311,13 @@ void ign_free_level(IgnLevel *lv) {
     ign_free_pic(&lv->backdrop);
     ign_free_model(&lv->track);
     ign_free_model(&lv->cars);
+    ign_pos_free(&lv->pos);
     free(lv->surface.data);
     free(lv->surface.engine_to_plc);
     free(lv->tri);
+    free(lv->shd);
+    free(lv->tab);
+    for (int i = 0; i < 8; i++) free(lv->fx_tex[i]);
     memset(lv, 0, sizeof *lv);
 }
 
@@ -274,15 +343,17 @@ int ign_level_start(const IgnLevel *lv, float *x, float *z, float *heading) {
 /* Plane height of a face at world (x, z); returns 0 on success. */
 static int face_height(const IgnObject *o, const IgnFace *f, float x, float z, float *y) {
     float p[3][3];
-    for (int k = 0; k < 3; k++)
-        for (int c = 0; c < 3; c++) p[k][c] = (float)(o->verts[f->v[k] * 3 + c] + o->pos[c]);
+    for (int k = 0; k < 3; k++) ign_object_vertex(o, f->v[k], p[k]);
     float ux = p[1][0] - p[0][0], uy = p[1][1] - p[0][1], uz = p[1][2] - p[0][2];
     float vx = p[2][0] - p[0][0], vy = p[2][1] - p[0][1], vz = p[2][2] - p[0][2];
     float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     float len = sqrtf(nx * nx + ny * ny + nz * nz);
-    /* Deviation: near-vertical faces extrapolate to absurd heights, so they are not ground. */
-    if (len == 0 || fabsf(ny) < 0.17f * len) return -1;
+    if (len == 0 || fabsf(ny) < 1e-4f * len) return -1;
     *y = p[0][1] - (nx * (x - p[0][0]) + nz * (z - p[0][2])) / ny;
+    /* Inside the face's x/z projection (the SRF span) the plane height lies between its vertices; the clamp only
+     * guards the rounding of spans on near-vertical faces (cliffs). */
+    float lo = fminf(p[0][1], fminf(p[1][1], p[2][1])), hi = fmaxf(p[0][1], fmaxf(p[1][1], p[2][1]));
+    *y = *y < lo ? lo : *y > hi ? hi : *y;
     return 0;
 }
 
@@ -292,9 +363,13 @@ static int wall_type(int t) {
 
 /* Mean vertex height of a face, up positive (sub_00020bbc). */
 static float face_avg_up(const IgnObject *o, const IgnFace *f) {
-    int32_t s = 0;
-    for (int k = 0; k < 3; k++) s += o->verts[f->v[k] * 3 + 1];
-    return -(float)(s / 3) - (float)o->pos[1];
+    float sum = 0;
+    for (int k = 0; k < 3; k++) {
+        float p[3];
+        ign_object_vertex(o, f->v[k], p);
+        sum -= p[1];
+    }
+    return sum / 3.0f;
 }
 
 static void check_list(const IgnLevel *lv, const uint8_t *list, int off, int n, int descending,
@@ -358,30 +433,49 @@ int ign_ground_at(const IgnLevel *lv, float x, float z, float y_hint, IgnGroundH
 }
 
 #define WALL_RADIUS 600
-#define WALL_HEIGHT 350 /* 0x15e for most track styles */
+#define WALL_RADIUS_JUMP 700
+#define WALL_HEIGHT_JUMP 2500
 #define WALL_SHARED_EPS 16
 
-static int drivable(uint32_t type) {
-    return type < 0x28 || type == 0x64 || type == 0x65;
+static int wall_face(uint32_t type, int jump) {
+    return type < 0x28 || type == 0x64 || type == 0x65 || (jump && type >= 0x6e && type <= 0x83);
 }
 
-int ign_collect_walls(const IgnLevel *lv, float x, float y, float z, IgnWall *out, int max) {
+/* collect_walls 0x33f1b: vertical reach by track id. */
+static int wall_height(const char *name) {
+    static const struct {
+        const char *name;
+        int height;
+    } t[] = {{"CANADA", 0x15e}, {"USA", 0x15e}, {"CARIB", 0xc8},  {"BRAZIL", 0x1c2},
+             {"AUSTRIA", 0x15e}, {"ICELAND", 0x15e}, {"JAPAN", 0x7d}};
+    for (size_t i = 0; i < sizeof t / sizeof t[0]; i++)
+        if (!strcmp(name, t[i].name)) return t[i].height;
+    return 0x15e;
+}
+
+int ign_collect_walls(const IgnLevel *lv, float x, float y, float z, int jump, IgnWall *out, int max) {
     enum { MAX_EDGES = 2048 };
     static IgnWall edges[MAX_EDGES];
     static uint8_t shared[MAX_EDGES];
     int n = 0;
+    int radius = jump ? WALL_RADIUS_JUMP : WALL_RADIUS;
+    int height = jump ? WALL_HEIGHT_JUMP : lv->wall_height;
+    int32_t ix = (int32_t)x, iy = (int32_t)y, iz = (int32_t)z;
     for (int oi = 0; oi < lv->track.nobj; oi++) {
         const IgnObject *o = &lv->track.objs[oi];
-        if (fabsf(x - (float)o->pos[0]) >= WALL_RADIUS || fabsf(y - (float)o->pos[1]) >= WALL_HEIGHT ||
-            fabsf(z - (float)o->pos[2]) >= WALL_RADIUS)
+        /* |height - raw PLC y|: the per-track reaches just cover each track's road vertices (AUSTRIA 346 < 350,
+         * JAPAN 71 < 125); with the literal `add` at 0x34027 JAPAN and CARIB would have no walls at all. */
+        if (abs(ix - o->pos[0]) >= radius || abs(iy + o->pos[1]) >= height || abs(iz - o->pos[2]) >= radius ||
+            (o->type & 0xfff) >= 100)
             continue;
         for (int fi = 0; fi < o->nf; fi++) {
             const IgnFace *f = &o->faces[fi];
-            if (!drivable(f->flags >> 16)) continue;
+            if (!wall_face(f->flags >> 16, jump)) continue;
             for (int k = 0; k < 3 && n < MAX_EDGES; k++) {
-                const int32_t *a = o->verts + f->v[k] * 3, *b = o->verts + f->v[(k + 1) % 3] * 3;
-                edges[n] = (IgnWall){a[0] + o->pos[0], a[2] + o->pos[2], b[0] + o->pos[0],
-                                     b[2] + o->pos[2]};
+                float a[3], b[3];
+                ign_object_vertex(o, f->v[k], a);
+                ign_object_vertex(o, f->v[(k + 1) % 3], b);
+                edges[n] = (IgnWall){a[0], a[2], b[0], b[2]};
                 shared[n++] = 0;
             }
         }

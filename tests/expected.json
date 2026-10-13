@@ -1,55 +1,55 @@
 {
  "AUSTRIA 3 rivals 40s": {
-  "image": "9f7821050c913796f336b41fc02629da",
+  "image": "fd2ea159853a475a52a589e4164ff5cb",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    59,
+    11,
     200,
-    1,
-    0
-   ],
-   [
-    17,
-    0,
     0,
     0
    ],
    [
-    18,
+    11,
     0,
     0,
     0
    ],
    [
-    135,
+    11,
     0,
-    2,
+    0,
+    0
+   ],
+   [
+    11,
+    0,
+    0,
     0
    ]
   ]
  },
  "AUSTRIA solo 40s": {
-  "image": "1b8f31c533522f384e0bba2deeb15df2",
+  "image": "0263671877d312c316526b00fcf8cce9",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    111,
+    11,
     200,
-    2,
+    0,
     0
    ]
   ]
  },
  "AUSTRIA turbo 8s": {
-  "image": "6c260ae03e154397c4d2429ab16113ea",
+  "image": "71c8b5cdb5666f8d7500a9ee81edc984",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    27,
+    8,
     200,
     0,
     0
@@ -57,12 +57,12 @@
   ]
  },
  "BRAZIL 3 rivals 40s": {
-  "image": "3c961bac55df9ab8871c7d8ee6963f0a",
+  "image": "94f072d3b5786088001ae3b6857983c5",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    55,
+    59,
     204,
     1,
     0
@@ -74,13 +74,13 @@
     0
    ],
    [
-    77,
+    58,
     0,
     1,
     0
    ],
    [
-    -82,
+    59,
     0,
     1,
     0
@@ -88,12 +88,12 @@
   ]
  },
  "BRAZIL solo 40s": {
-  "image": "4777bf56848bd0ed61f26881f495a928",
+  "image": "71658dae4f9131ff58792b1df3d4d5ed",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    57,
+    59,
     204,
     1,
     0
@@ -101,12 +101,12 @@
   ]
  },
  "BRAZIL turbo 8s": {
-  "image": "bd5cf4a42ab4d768aa3b932e5be0c15c",
+  "image": "fd8841676fb839dc6ea48a72c346ee8e",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    19,
+    22,
     204,
     0,
     0
@@ -114,56 +114,56 @@
   ]
  },
  "CANADA 3 rivals 40s": {
-  "image": "4d3261b37e02849ee65874572d06512c",
+  "image": "9991fe33f93f8a84d677c97e251fcf24",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    22,
+    113,
     175,
-    0,
+    2,
     0
    ],
    [
-    15,
-    0,
-    0,
-    0
-   ],
-   [
-    93,
+    85,
     0,
     2,
     0
    ],
    [
-    -38,
+    86,
     0,
-    1,
+    2,
+    0
+   ],
+   [
+    106,
+    0,
+    2,
     0
    ]
   ]
  },
  "CANADA solo 40s": {
-  "image": "fa639b41bead40f00b1cfe3a44567528",
+  "image": "9b67db56e224024a138cbbd1f68ff5ec",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    22,
+    63,
     175,
-    0,
+    2,
     0
    ]
   ]
  },
  "CANADA turbo 8s": {
-  "image": "a354fbb79132e9cb78a9106dc3ef83a9",
+  "image": "3852c515ee36f350f5a70e63b05fd319",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    21,
+    10,
     175,
     0,
     0
@@ -171,30 +171,30 @@
   ]
  },
  "CARIB 3 rivals 40s": {
-  "image": "db95c651ae68773b4464a0805ac18a88",
+  "image": "00a230ab951ef8140387f99dc6a8c2ad",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    68,
+    118,
     207,
-    1,
+    2,
     0
    ],
    [
-    96,
+    102,
+    0,
+    2,
+    0
+   ],
+   [
+    89,
     0,
     1,
     0
    ],
    [
-    81,
-    0,
-    1,
-    0
-   ],
-   [
-    91,
+    97,
     0,
     1,
     0
@@ -202,25 +202,25 @@
   ]
  },
  "CARIB solo 40s": {
-  "image": "824fa6ed8c6d6828dd439faa9ffe6787",
+  "image": "807f5259d1661246d85a9e752489c042",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    97,
+    120,
     207,
-    1,
+    2,
     0
    ]
   ]
  },
  "CARIB turbo 8s": {
-  "image": "4583577f818ea6ad694e97c0b70731b7",
+  "image": "9fce0c269ec4f4383d1fe661934d5a0f",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    161,
+    16,
     207,
     0,
     0
@@ -228,56 +228,56 @@
   ]
  },
  "ICELAND 3 rivals 40s": {
-  "image": "ada3a27dc30314dddf7d0100f272931d",
+  "image": "d8d95e9e86fbbaebdb28b6f61f4efcb5",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    73,
+    17,
     172,
-    1,
+    0,
     0
    ],
    [
-    28,
+    17,
     0,
-    1,
+    0,
     0
    ],
    [
-    84,
+    17,
     0,
-    1,
+    0,
     0
    ],
    [
-    84,
+    17,
     0,
-    1,
+    0,
     0
    ]
   ]
  },
  "ICELAND solo 40s": {
-  "image": "6f4012487f760c31a6c055ee601edfa2",
+  "image": "1b756a293a56ad0244d542644aaeafcd",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    73,
+    17,
     172,
-    1,
+    0,
     0
    ]
   ]
  },
  "ICELAND turbo 8s": {
-  "image": "a03dc30d9430d39a605163e831bca882",
+  "image": "02f9779b4c43862d2e945f41450c08b3",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    26,
+    20,
     172,
     0,
     0
@@ -285,30 +285,30 @@
   ]
  },
  "JAPAN 3 rivals 40s": {
-  "image": "436a2df5e1ea7592e2321dd4c6e44bc9",
+  "image": "4a79997277c7833d62790ef484ee2b73",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    59,
+    87,
     238,
     1,
     0
    ],
    [
-    -215,
+    93,
     0,
     1,
     0
    ],
    [
-    81,
+    9,
     0,
-    1,
+    0,
     0
    ],
    [
-    203,
+    199,
     0,
     1,
     0
@@ -316,12 +316,12 @@
   ]
  },
  "JAPAN solo 40s": {
-  "image": "07d67dc49a7590eb469cf0f1755234d3",
+  "image": "e7b02a7017e02717a870db991f6d5a27",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    53,
+    197,
     238,
     1,
     0
@@ -329,51 +329,51 @@
   ]
  },
  "JAPAN turbo 8s": {
-  "image": "66c42594421650ae0e4ff764c5d9afb3",
+  "image": "393fef8ac3dee84f6b59e253b6b9b9f7",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    63,
+    13,
     238,
-    1,
+    0,
     0
    ]
   ]
  },
  "USA 3 rivals 40s": {
-  "image": "4b4d479d70a21d3a436a83e87dcc371f",
+  "image": "31960e9e759c9090a73d5255570fbc9e",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    43,
+    126,
     139,
-    1,
+    3,
     0
    ],
    [
-    -118,
+    95,
     0,
     3,
     0
    ],
    [
-    50,
+    49,
     0,
-    2,
+    1,
     0
    ],
    [
-    43,
+    -110,
     0,
-    1,
+    3,
     0
    ]
   ]
  },
  "USA grid camera": {
-  "image": "510ba1e76e2c8a46b72cf98054da31b0",
+  "image": "b46d18a39ea48dab372f8069cc090475",
   "nan": false,
   "rc": 0,
   "states": [
@@ -404,25 +404,25 @@
   ]
  },
  "USA solo 40s": {
-  "image": "3181c71d8d26bb760a403ca17111bd66",
+  "image": "b283434d8d5af77087a601b891797184",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    82,
+    120,
     139,
-    2,
+    3,
     0
    ]
   ]
  },
  "USA turbo 8s": {
-  "image": "bd2bc83064c02b9ec2e30f0b283653b6",
+  "image": "753791382f7baaba60134afaf9ba30fc",
   "nan": false,
   "rc": 0,
   "states": [
    [
-    6,
+    8,
     139,
     0,
     0
@@ -430,7 +430,7 @@
   ]
  },
  "USA viewer car 9": {
-  "image": "514b9670f7ac7ef936bf1bef455e75bc",
+  "image": "d07427a381f97dd6abbdce6cfe18cc1b",
   "nan": false,
   "rc": 0,
   "states": []

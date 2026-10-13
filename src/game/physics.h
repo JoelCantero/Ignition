@@ -29,6 +29,7 @@ typedef struct {
     double corner_x[4], corner_z[4]; /* +0xf0/+0x110: body-local box corners, metres */
     double radius;      /* +0x130: 4 m bounding circle */
     double impact;      /* +0x1b8: last wall impact speed */
+    double contact_x, contact_z; /* +0x1c0/+0x1c8: last car-car contact point, metres */
 } IgnBody;
 
 /* sub_0001ebb4 + sub_0001e638: box vs box impulse between two cars; returns 1 on contact. */

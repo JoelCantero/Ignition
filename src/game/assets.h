@@ -35,6 +35,7 @@ typedef struct {
 typedef struct {
     uint32_t type;
     int32_t pos[3];
+    int32_t rotation[3]; /* POS rotation in tenths of a degree */
     int nv, nf;
     const int32_t *verts; /* nv * {x, y, z}; y points down */
     const IgnFace *faces;
@@ -47,6 +48,12 @@ typedef struct {
     IgnObject *objs;
     uint8_t *plc, *msh;
 } IgnModel;
+
+typedef struct {
+    uint8_t *data;
+    size_t size;
+    int nobj;
+} IgnPos;
 
 typedef struct {
     uint8_t *data;
@@ -66,9 +73,14 @@ typedef struct {
     IgnPic backdrop;
     IgnModel track;
     IgnModel cars; /* CARS: object type = car * 10 + part (0 body, 1-4 wheels) */
+    IgnPos pos;
     IgnSurface surface;
     uint8_t *tri; /* u32 n + 500-byte block per PLC object */
     size_t tri_size;
+    uint8_t *shd; /* 64 KB SHD: shd[row * 256 + colour] darkens colour by row */
+    uint8_t *tab; /* 64 KB TAB: shade ramp tab[colour * 256 + light] (shaded points) */
+    uint8_t *fx_tex[8]; /* effect texture slots 2-7 (0x1fe8e0): DIVSPR, LIGHT, SMOKE, DARKSMOK, BOOM, EXSMOKE */
+    int wall_height; /* collect_walls vertical reach for this track */
 } IgnLevel;
 
 int ign_load_model(const char *plc_path, const char *msh_path, const char *tex_path,
@@ -78,6 +90,10 @@ void ign_free_model(IgnModel *m);
 /* data_dir: game root; name: e.g. "USA". Returns 0 on success. */
 int ign_load_level(const char *data_dir, const char *name, IgnLevel *out);
 void ign_free_level(IgnLevel *lv);
+
+/* Rotates one mesh-space vertex using its current POS angles. */
+void ign_object_rotation_matrix(const IgnObject *o, float out[9]);
+void ign_object_vertex(const IgnObject *o, int vertex, float out[3]);
 
 typedef struct {
     float y;          /* ground height (y down) */
@@ -95,7 +111,8 @@ typedef struct {
     double x0, z0, x1, z1; /* world units */
 } IgnWall;
 
-/* sub_00033ee8: unshared edges of drivable faces near (x, y, z). Returns the count. */
-int ign_collect_walls(const IgnLevel *lv, float x, float y, float z, IgnWall *out, int max);
+/* sub_00033ee8: unshared edges of the static objects' drivable faces near (x, height up, z); jump mode (car+0x274)
+ * widens the reach and adds faces 0x6e-0x83. Returns the count. */
+int ign_collect_walls(const IgnLevel *lv, float x, float y, float z, int jump, IgnWall *out, int max);
 
 #endif

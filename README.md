@@ -28,19 +28,26 @@ original (`MAINDOS.EXE`, DOS/4GW, Watcom C). El objetivo es un juego nativo para
 
 ## Estado en una línea
 
-Se pueden **recorrer vueltas completas** en las 7 pistas: física, choques con muros y entre coches, turbo, vueltas,
-parrilla de salida y coches bien montados (sombra y dirección incluidas), contra hasta 7 rivales. Los rivales usan una
-**IA aproximada**. Todavía no hay fin de carrera ni clasificación, y faltan el sombreado original, los objetos
-animados, los efectos, el HUD, los menús, el sonido, los fantasmas y el multijugador.
+Se pueden **completar carreras de 3 vueltas** en las 7 pistas: física, choques con muros y entre coches, turbo,
+parrilla de salida y coches bien montados (sombra y dirección incluidas), contra hasta 7 rivales. Hay fin de carrera y
+clasificación básicos; los rivales usan una **IA aproximada**. POS ya carga y anima los objetos de pista, con rotación
+aproximada. El HUD de carrera ya usa el panel y fuentes LFT originales para tiempos, posición y velocidad; faltan la
+reproducción exacta de sus estados, aguja/medidores dinámicos y avisos. También faltan colisiones móviles completas, la
+IA fiel, el sombreado original, los menús, la música y el multijugador.
 
 | Métrica | Valor |
 |---|---|
-| Funciones candidatas detectadas | **1 129** (bytes de código cubiertos: 98,7 %; 497 son libc/DOS4G) |
-| Instrucciones únicas desensambladas | **129 255** (20 744 de la libc de Watcom y DOS/4G) |
-| Funciones con nombre en `tools/symbols.txt` | 61 (≈ 25 900 instrucciones, el 20 %) |
-| Código propio del juego (sin libc/DOS4G/drivers, < `0x60000`) | ≈ 74 700 instrucciones, ≈ 34 % identificado |
+| Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 488 clasificadas como runtime) |
+| Instrucciones únicas desensambladas | **128 832** (20 323 de runtime/libc/DOS/4G) |
+| Código del juego marcado como portado | **18 115 de 108 509 instrucciones (16,7 %)**; **42 de 624 funciones (6,7 %)** |
+| Código del segmento anterior a `0x60000` | 83 768 instrucciones (25 655 identificadas, 30,6 %) |
 | Formatos de datos propios descifrados | 10 de 21 (TRI, POS y TAB solo en parte) |
-| Código del port | ≈ 2 300 líneas de C (`src/`) |
+| Código del port | ≈ 4 865 líneas de C (`src/`) |
+
+El porcentaje portado cuenta las instrucciones únicas que pertenecen a funciones marcadas `ported` o `verified` en
+`tools/symbols.txt`, excluyendo las funciones clasificadas como runtime; mide cobertura de funciones originales, no
+equivalencia instrucción por instrucción. El **98,5 %** es cobertura del desensamblado, no del port. Queda código del
+ejecutable sin desensamblar y la clasificación de runtime es heurística.
 
 ---
 
@@ -65,7 +72,11 @@ Pistas: `USA`, `CANADA`, `AUSTRIA`, `BRAZIL`, `CARIB`, `ICELAND`, `JAPAN`. La ru
 | ↓ / S | frenar / marcha atrás |
 | ← → / A D | girar |
 | Espacio | turbo (la carga aparece en el título de la ventana) |
+| M | alternar cambio manual/automático |
+| Q / E | bajar / subir marcha en modo manual |
 | F1 | cámara libre (W/A/S/D, Q/E, flechas, Shift = rápido) |
+| R (mantener) | vista trasera |
+| TAB | tras la meta: cámaras fijas 1–3 / seguir al coche en cabeza |
 | Esc | salir |
 | Teclear `BANARNE` | truco original: carrocerías ×3 de alto |
 
@@ -74,15 +85,50 @@ Pistas: `USA`, `CANADA`, `AUSTRIA`, `BRAZIL`, `CARIB`, `ICELAND`, `JAPAN`. La ru
 | Opción | Uso |
 |---|---|
 | `--rivals N` | número de rivales (0–7; 3 por defecto en ventana) |
-| `--shot out.ppm` | modo sin ventana: simula y guarda un fotograma 320×200 |
+| `--car N` | modelo del jugador (0–10 de `CARS.PLC`; 0 por defecto) |
+| `--shot out.ppm` | modo sin ventana: simula y guarda un fotograma (a la resolución de `--res`) |
+| `--res WxH` | resolución interna: 640x480 por defecto (VESA del DOS), 320x200 (modo bajo) u 800x600 (`Ign_win.exe`); siempre a 4:3 |
+| `--persp` | texturas con corrección de perspectiva (PERSP. POLY); por defecto afines como el original |
 | `--sim SEG DIR` | simula `SEG` segundos; `DIR` = −1/0/1 (dirección fija), `auto` (IA) o `turbo` (recta con turbo) |
 | `--cam x y z yaw pitch` | cámara fija para `--shot` |
+| `--countdown` | con `--shot`: incluye la cuenta atrás de 5,56 s (la ventana siempre la hace) |
+| `--rear` | con `--shot`: fotograma con la vista trasera |
 | `--probe PISTA x z alto` | consulta de suelo en un punto |
 | `--model ID yaw giro balanceo cabeceo PISTA` | visor de coches (requiere `--shot` antes) |
+| `--record-ghost F.GST` | con `--sim`: guarda la vuelta del jugador como fantasma del original (302 412 bytes) |
+| `--ghost F.GST` | dibuja el fantasma (sin choques) en ventana y sin ventana; con `--sim` mide la desviación en x/z |
 
 Variables de entorno de depuración: `IGN_TRACE=1` (traza por tick y estadísticas de tramos y puertas),
 `IGN_TRACK_DUMP=archivo` (vuelca los tramos), `IGN_LIFT=u` (eleva el coche en el visor para ver la sombra) e
 `IGN_BANARNE=1` (carrocería alta en el visor).
+
+### Verificación diferencial de la física original
+
+Prueba opcional, sin ventana ni DOSBox: ejecuta los bytes originales de `body_step` (`0x1e090`) en Unicorn x86-32
+y compara cada tick con la biblioteca C del port. Requiere la versión de `MAINDOS.EXE` identificada por SHA-256;
+una dependencia ausente, otro ejecutable, una ruta no admitida o una divergencia hacen fallar la prueba.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r tests/requirements-original.txt
+cmake -S . -B build -DIGN_VERIFY_ORIGINAL=ON -DPython3_EXECUTABLE="$PWD/.venv/bin/python"
+cmake --build build
+ctest --test-dir build -R '^physics_original$' --output-on-failure
+```
+
+El informe `build/physics-original-report.json` conserva hashes del original, del ejecutable de prueba, de las
+fuentes y de las entradas, versiones y errores máximos. Hay **190 casos / 1 658 ticks**: tracción, marcha atrás,
+saturación y sus límites, giro, fricción, derrape, pendientes y movimiento en el aire. Se comparan 33 campos
+`double` y dos indicadores enteros. La tolerancia de las salidas es `2e-11 + 2e-12·|original|`; los indicadores
+y los campos no modificados deben coincidir exactamente. No se ha encontrado una divergencia que justifique
+cambiar `ign_body_step`.
+
+Esto verifica **la rutina aislada, con x87 emulado y palabra de control `0x037f`**, no el juego completo,
+`car_update`, colisiones, IA ni una carrera DOS. Véanse los límites y la
+[revisión de los avisos de Ghidra](docs/formats.md#auditoría-de-la-decompilación-ghidra).
+En la comprobación del estado actual, `physics_original`, `gearbox` y `pos` pasan, pero la regresión general
+preexistente solo pasa **1/23** casos (divergencias de imágenes y de estado de carrera). No se han cambiado
+la física ni los resultados esperados para convertir esas diferencias en un éxito.
 
 Ejemplos:
 
@@ -91,6 +137,9 @@ Ejemplos:
 ./build/ignition BRAZIL --sim 200 auto --rivals 7 --shot /tmp/x.ppm
 ./build/ignition --shot coche.ppm --model 9 0.6 30 0.15 0 USA
 python3 build/ppm2png.py coche.ppm && open coche.png
+./build/ignition CANADA --sim 200 auto --record-ghost /tmp/MOOSEJAW.GST --shot /tmp/x.ppm
+python3 tools/gst.py info /tmp/MOOSEJAW.GST --sections 175
+python3 tools/gst.py plot /tmp/MOOSEJAW.GST -o /tmp/ghost.png
 ```
 
 ---
@@ -104,7 +153,12 @@ src/game/physics.{c,h}  cuerpo rígido (modelo bicicleta), par motor, muros, cho
 src/game/car.{c,h}      coche: suelo bajo 4 ruedas, vertical, dirección, acelerador, turbo, pose visual, vueltas
 src/game/track.{c,h}    clases PLC, orden de tramos y bifurcaciones, puertas por tramo (TRI)
 src/game/ai.{c,h}       IA de rivales (port parcial de 0x1aea0)
-src/render/raster.{c,h} rasterizador por software de 8 bits 320×200, z-buffer, texturas con perspectiva
+src/game/ghost.{c,h}    fantasmas GST: leer, grabar a 72 Hz y guardar con el formato exacto del original
+src/game/skid.{c,h}     efectos de derrape: marcas en la pista y polvo (`sub_0003731c`)
+src/game/fx.{c,h}       huecos de efectos del original: sprites, piezas, salpicaduras, explosión, turbo, reaparición
+src/render/raster.{c,h} rasterizador por software de 8 bits (320×200 a 800×600, 4:3), z-buffer, texturas afines
+src/render/hud.{c,h}    superposición de carrera con H_PAN1.PIC y fuentes LFT originales (port parcial)
+src/render/camera.{c,h} cámaras del original: persecución, trasera y fijas tras la meta (`sub_00047f94`, `0xc464c`)
 src/platform/main.c     SDL3: ventana, entrada, bucle fijo de 72 Hz, cámaras, modos sin ventana y visor
 docs/formats.md         referencia técnica detallada (formatos, fórmulas, direcciones)
 tools/le2elf.py         LE (DOS/4GW) → ELF32 plano con reubicaciones aplicadas
@@ -113,7 +167,11 @@ tools/gap_seeds.txt     inicios de función hallados por `disasm.py sweep` (se c
 tools/structs.txt       estructuras verificadas (coche, cuerpo, tramo, estado de IA) para la exportación
 tools/trace_compare.py  primera divergencia entre dos trazas por tick (port vs original en DOSBox-X)
 tests/regress.py        regresión determinista sin ventana (23 casos; `ctest --test-dir build`)
+tests/gearbox.c         prueba unitaria de cambios manuales y marcha atrás (`ctest --test-dir build -R gearbox`)
+tests/body_step.c       ejecuta la física C para el verificador diferencial
+tests/physics_original.py replay aislado del integrador LE contra el port, con Unicorn opcional
 tools/ignassets.py      PIC/COL/TEX/DAT/nivel → PNG
+tools/gst.py            fantasmas GST: cabecera, validación, tiempos por vuelta y trayectoria sobre la pista
 tools/symbols.txt       símbolos identificados (funciones, globales, tablas)
 .github/skills/ignition-re/SKILL.md   skill del proyecto para agentes de IA
 ```
@@ -129,6 +187,7 @@ python3 -m venv .venv && .venv/bin/pip install capstone
 .venv/bin/python tools/disasm.py sweep            # barrido de huecos de código → tools/gap_seeds.txt (≈ 2 min)
 .venv/bin/python tools/disasm.py export ghidra -o build/ghidra_symbols.py   # o `ida`: nombres, comentarios y estructuras
 python3 tests/regress.py                          # regresión determinista (`--update` regenera tests/expected.json)
+ctest --test-dir build --output-on-failure        # regresiones de carrera + caja de cambios
 .venv/bin/python tools/disasm.py dis 1aea0        # una función
 .venv/bin/python tools/disasm.py all > build/all.asm   # todo, para buscar con grep
 .venv/bin/python tools/disasm.py xref "LAP"       # funciones que usan cadenas con "LAP"
@@ -168,38 +227,41 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | MSH | mallas: vértices + caras de 44 B (UV 8.8, página, tipo de superficie) | ✅ portado |
 | SRF | rejilla de consulta de suelo (celdas, listas A/B, spans trapezoidales) | ✅ portado |
 | TRI | bordes izquierdo/derecho por tramo (puertas de la IA) | 🟡 bordes portados; `double`s sin descifrar |
-| POS | animaciones de objetos (fotogramas pos+rot) | 🟡 descifrado y verificado byte a byte; no se aplica |
+| POS | animaciones de objetos (fotogramas pos+rot) | 🟡 parser, avance a 36 Hz y render aplicados; rotación aproximada y colisiones incompletas |
 | TAB | tabla de sombreado `color×nivel` (64 niveles) | 🟡 significado conocido; no se usa |
-| PAN / SHD | tablas 256×256 de 64 KB | 🔴 función exacta desconocida |
+| PAN / SHD | tablas 256×256 de 64 KB | � SHD fila 0x28 = sombra; PAN desconocida |
 | CARS | 11 coches × (carrocería + 4 ruedas) | ✅ portado y montado como en `cars_init` |
 | LFT / FNT | fuentes | 🔴 solo cabeceras |
 | CDP | vídeos de introducción | 🔴 solo cabecera |
 | PSQ / PFM | coche 3D del menú | 🔴 |
-| GST | coches fantasma | 🔴 |
+| GST | coches fantasma | 🟡 leer, escribir y reproducir (`ghost.c`, `tools/gst.py`); falta la contrarreloj |
 | BTZ | configuración y récords | 🔴 |
-| INF | curvas del sonido del motor por coche | 🔴 |
-| WAV / PAT / XI / OGG | sonido (PCM, Gravis, FastTracker, pistas de CD) | 🔴 formatos estándar; falta el motor de sonido |
+| INF | curvas del sonido del motor por coche | � 4 tablas de 200 B: tono y volumen de `00_A`/`01_A` por régimen (`sound.c`) |
+| WAV / PAT / XI / OGG | sonido (PCM, Gravis, FastTracker, pistas de CD) | 🟢 WAV, PAT y XI (`audio.c`); falta OGG (música) |
 
 ### Sistemas del juego descifrados y portados
 
 | Sistema | Original | Port | Fidelidad |
 |---|---|---|---|
 | Bucle fijo de física a 72 Hz | `frame_time` `0x2b734` | `main.c` | fiel |
-| Cuerpo rígido (modelo bicicleta) | `body_step` `0x1e090` | `physics.c` | fiel |
+| Cuerpo rígido (modelo bicicleta) | `body_step` `0x1e090` | `physics.c` | verificación diferencial de la rutina aislada; 190 casos |
 | Curvas de par (Hermite) | `torque_spline` `0x53e70` | `physics.c` | fiel |
-| Acelerador, freno y marcha atrás | `car_throttle` `0x4db90`, `car_gearbox` `0x502c4` | `car.c` | acelerador fiel; caja de cambios simplificada |
+| Acelerador, freno y marcha atrás | `car_throttle` `0x4db90`, `car_gearbox` `0x502c4` | `car.c` | acelerador fiel (bonos de par, freno −25000); caja de cambios simplificada |
+| Coches de la IA: modelos, bono de par, perfil 11 | `sub_00022d08`, `car_steer`, `car_turbo`, `car_throttle` | `car.c`, `main.c` | fiel |
 | Dirección | `car_steer` `0x500f0` | `car.c` | fiel |
 | Agarre por superficie y coche | tablas `0xc33f0`, `0xc4dc0` | `car.c` | fiel (dificultad `0xc5470` = 1) |
-| Consulta de suelo | `ground_query` `0x20814` | `assets.c` | fiel + desviación (caras > 80°) |
-| Suelo bajo 4 ruedas, ruedas anómalas | `car_update` `0x303xx` | `car.c` | fiel |
-| Vertical: gravedad, saltos, aterrizaje | `car_vertical` `0x2e234` | `car.c` | fiel + desviación (límite hacia arriba) |
-| Muros (aristas no compartidas) | `collect_walls` `0x33ee8` | `assets.c` | fiel |
+| Consulta de suelo | `ground_query` `0x20814` | `assets.c` | fiel (altura acotada a los vértices de la cara) |
+| Suelo bajo 4 ruedas, ruedas anómalas | `car_update` `0x2eea4`–`0x30d98` | `car.c` | fiel: esquinas de la caja ×1,1 escaladas por `1 + km/h / 220`, cabeceo `asin` limitado a 0,1 rad/tick |
+| Vertical: gravedad, saltos, aterrizaje | `car_vertical` `0x2e234` | `car.c` | fiel + desviación (subidas en cambio de nivel) |
+| Muros (aristas no compartidas, activación por superficie, modo salto, caché de 150) | `collect_walls` `0x33ee8`, `car_update` `0x2f856`, `cars_update_all` `0x2d77a` | `assets.c`, `car.c` | fiel |
 | Choque con muros | `box_vs_walls` `0x1f708`, `wall_impulse` `0x1f3fc` | `physics.c` | fiel |
 | Choque entre coches | pase en `0x2d2f8`, `0x1ebb4`, `0x1e638` | `physics.c`, `car.c` | fiel (falta el caso de solape) |
 | Tramos, bifurcaciones y saltos | `split_plc_types` `0x247b0`, `build_sections` `0x28f08` | `track.c` | fiel |
 | Vueltas y fases | `car_update` | `car.c` | fiel |
 | Parrilla de salida | `cars_init` `0x26458` | `main.c` | fiel |
-| Turbo | `car_turbo` `0x4e2d8`, `car_input` `0x4d8eb` | `car.c` | fiel (sin sonido) |
+| Turbo | `car_turbo` `0x4e2d8`, `car_input` `0x4d8eb`, `human_input` `0x2c99e` | `car.c` | fiel (con el arranque turbo de 0,25 s) |
+| Destrucción y reaparición | `sub_0003a788`, `sub_00041430` | `race.c`, `car.c` | fiel + desviación (huecos de la consulta de suelo) |
+| Humo de la pista y polvo al aterrizar | `sub_0003636c`, `sub_00036ce0`, `sub_0003f37c` | `fx.c` | fiel (opciones de detalle activadas) |
 | Montaje del coche | `cars_init` `0x265f6` | `car.c` | fiel |
 | Pose: dirección visual, inclinación | `0x48a14`, `0x40ec8`, `0x2e6f8` | `car.c`, `raster.c` | fiel |
 | Sombra del coche | `0x48a14` | `raster.c` | geometría fiel; sombreado aproximado |
@@ -216,24 +278,23 @@ Instrucciones únicas por zona del segmento de código. "Identificado" cuenta la
 
 | Zona | Contenido | Funciones | Instrucciones | Identificado |
 |---|---|---:|---:|---:|
-| `0x10000–0x1a000` | frontend: menús, idioma, opciones, fantasmas, coche del menú | 62 | 10 943 | 20 % |
+| `0x10000–0x1a000` | frontend: menús, idioma, opciones, fantasmas, coche del menú | 61 | 10 943 | 20 % |
 | `0x1a000–0x20000` | IA, cuerpo físico, choques entre coches | 20 | 5 941 | **91 %** |
 | `0x20000–0x2b000` | arranque, carga, creación del mundo, coches, sonido de coche | 55 | 11 951 | 46 % |
 | `0x2b000–0x34000` | bucle de carrera, actualización de coches, eventos | 24 | 8 622 | 56 % |
 | `0x34000–0x43000` | objetos móviles, colisiones con objetos, efectos, clima | 37 | 14 983 | **9 %** |
 | `0x43000–0x4c000` | resultados, pausa, HUD, colocación de objetos | 20 | 9 028 | 49 % |
-| `0x4c000–0x54000` | controles, entrada, turbo, fantasmas, utilidades | 50 | 8 284 | 18 % |
-| `0x54000–0x60000` | motor Lisa 2: escena, rasterizador, sprites, fuentes | 126 | 13 933 | **3 %** |
-| `0x60000–0x86000` | libc de Watcom, DOS/4G, drivers de sonido (20 499 instrucciones clasificadas como `library`) | 735 | 45 570 | 1 % |
-| **Total** | | **1 129** | **129 255** | **20 %** |
+| `0x4c000–0x54000` | controles, entrada, turbo, fantasmas, utilidades | 50 | 8 292 | 18 % |
+| `0x54000–0x60000` | motor Lisa 2: escena, rasterizador, sprites, fuentes | 126 | 14 008 | **4 %** |
+| `0x60000–0x86000` | libc de Watcom, DOS/4G, drivers de sonido (20 323 instrucciones clasificadas como `library`) | 719 | 45 290 | 1 % |
+| **Total** | | **1 112** | **128 832** | **20 %** |
 
-Quedan 6 000 bytes (1,3 %) de código sin cubrir: tablas de salto, relleno y datos intercalados. Los 320 inicios de
-función nuevos de `tools/gap_seeds.txt` salen del barrido de huecos (`disasm.py sweep`): cada candidato debe
-decodificar limpio, terminar en `ret`/`jmp`, no solaparse con código ya conocido y no contener opcodes BCD ni cargas
-de segmento. La clasificación `library` (C runtime y DOS/4G) no usa firmas FLIRT, porque no existe una base para
-Watcom 10.x: parte de las funciones conocidas de la libc (`sprintf`, `atan2`, `memset`, `open`…) y añade sus
-llamadas y las funciones que solo tocan datos del runtime (`0xd7d00`, `0xe6000`, BSS `0x25a000`); es heurística y
-deja sin clasificar parte de `0x70000–0x74000` (cuerpos solapados del rasterizador/mezclador).
+Quedan 7 402 bytes (1,5 %) de código sin cubrir: tablas, relleno y datos intercalados. `tools/gap_seeds.txt` guarda
+303 inicios añadidos por el barrido; se aceptaron 277 candidatos directos a partir de huecos y 26 funciones llamadas.
+Cada candidato debe decodificar limpiamente, terminar en `ret`/`jmp`, no solaparse con instrucciones aceptadas, pasar
+las comprobaciones de instrucciones plausibles y ubicar toda reubicación LE dentro de un operando. La clasificación
+`library` no usa firmas FLIRT: parte de funciones conocidas de libc (`sprintf`, `atan2`, `memset`, `open`…) y añade
+sus llamadas y funciones que solo tocan datos de runtime; es heurística, no una identificación exhaustiva.
 
 ---
 
@@ -257,7 +318,7 @@ crear clima `0x26154` · pantalla de carga `0x21d68` · nombres de pista `0x22f3
 `0x502c4` · `torque_spline` `0x53e70`.
 
 **Objetos y efectos** (cadenas `FEL VID LI_MOVEOBJECT …`, "error en LI_MOVEOBJECT"): `collisions_pass` `0x3fd04` ·
-`car_ground_contact` `0x350f0` (colisión con objetos) · objetos deslizantes `0x3731c` · sprites translúcidos `0x39d1c`,
+`car_ground_contact` `0x350f0` (colisión con objetos) · derrape (marcas y polvo) `0x3731c` · explosión y reaparición `0x3a788` · sprites translúcidos `0x39d1c`,
 `0x39fe8`, `0x3e6ec` · *plots* `0x3a2b4`, `0x3a498` · piezas volando `0x3b744` · relámpagos `0x3bdac` · salpicaduras
 `0x3d808` · clima `0x403c8` · animación POS `0x412e8` · crear efecto *¿?* `0x3fee8` · tipos de objeto `0x360f0`,
 `0x3636c`, `0x36ce0`.
@@ -320,7 +381,7 @@ pulsada `0x55c28` · palabra tecleada `0x55cd0` · `atan2` `0x647ef` · `pow` `0
 | `+0x544` | canal de sonido |
 | `+0x554` | contador de vuelco *¿?* |
 | `+0x558/+0x55c/+0x560` | solape con otro coche |
-| `+0x57c` | rueda sobre borde (0x50/0x51) |
+| `+0x57c` | muros activos este tick (ruedas sobre 0x50, 0x5a, 0x5b, 0x51/0x5c/0x5d desde abajo, 0x6e–0x8d sin salto) |
 | `+0x584/+0x58c` | inclinación de la carrocería (décimas de grado) |
 
 **Cuerpo físico** (`g_bodies` `0x1fefe8`, `0x1d0` B): masa `+0x00`, inercia `+0x08`, restitución `+0x10`, ejes
@@ -337,13 +398,36 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 ## Desviaciones conocidas respecto al original
 
 1. **IA**: port parcial de `0x1aea0` (`ai.c`): registros de puerta reconstruidos al vuelo, sin tablas de carril `0xbf9a0`, acelerador (`0x1b9a2`) aproximado y frenada por curvatura propia. 
-2. **Render**: z-buffer propio en lugar del rasterizador del motor Lisa 2; sin sombreado TAB/SHD/PAN; la sombra se
-   oscurece con una tabla de paleta al 50 %.
-3. **Suelo**: se ignoran las caras de más de ~80° y las degeneradas.
-4. **Vertical**: el límite de seguimiento del suelo también se aplica hacia arriba (evita saltos de capa).
-5. **Cámara**: cámara de persecución propia (falta la original de `camera_angles`).
+2. **Render**: z-buffer propio en lugar del orden del pintor del motor Lisa 2 (el original no usa profundidad por
+   píxel). Texturas afines como el original (`--persp` activa la corrección de perspectiva, la opción PERSP. POLY).
+   Sin TAB: el motor la pasa al rasterizador (`[0xc484c]`) pero las caras texturizadas se dibujan sin sombrear (en
+   `Ign_win.exe` la primitiva 0x11 no tiene campo de luz); solo la usan primitivas planas y de Gouraud que el port aún
+   no dibuja. El modo de cara decide la transparencia: 17 y 21 opacos, el resto con el índice 0 transparente. La sombra
+   usa `SHD[0x28*256 + destino]`, como la primitiva 0x13 de `Ign_win.exe`.
+3. **Suelo**: se ignoran las caras degeneradas, y la altura de una cara se acota a la de sus vértices (los bordes de los
+   *spans* del SRF caen a veces fuera de las caras casi verticales).
+4. **Vertical**: cuando las cuatro esquinas cambian de nivel a la vez (un talud de tipo ≥ 0x50 o un hueco de la
+   consulta de suelo del port, CARIB tramos 1–4), una subida mayor que `|km/h · 0,05| + 1` no se sigue con su
+   velocidad: el original lanzaría el coche cientos de unidades hacia arriba.
+5. **Cámara**: la de `sub_00047f94` se actualiza a 36 Hz para todos los coches. Mientras sigue al coche, la vista se
+   recalcula con la posición actual del coche (el port dibuja más deprisa que las actualizaciones de la cámara). La
+   media de ángulos de tramo con `car+0x36c == 3` no está portada. La cuenta atrás solo sale en el título de la
+   ventana (faltan los sprites y sonidos), y sin ventana empieza la carrera directamente salvo con `--countdown`.
 6. **Posiciones**: la clasificación (`ign_race_position`) es propia; falta la rutina original del HUD `0x4a320`.
-7. **Dificultad**: solo se aplica el agarre trasero (`0xc5470`); `[0x1fedd8]` se fija con `--difficulty`.
+7. **Dificultad**: `[0x1fedd8]` se fija con `--difficulty` (agarre trasero, índice de velocidad, modelos y bono de par
+   de la IA).
+8. **Efectos**: los sprites se ordenan de lejos a cerca como en el original, pero además se prueban contra el z-buffer
+   del port (con la profundidad `z·2,8` que usa el original para ordenarlos frente a los triángulos). Si el punto de
+   reaparición no tiene suelo en la consulta del port, se prueban los tramos siguientes (CARIB, tramos 1–4). Los
+   emisores de humo se portan con las dos opciones de detalle (`[0x1fed70]`, `[0x1fed64]`) activadas.
+   Las líneas de lluvia (cara `0x0d`) se dibujan como degradado de las filas SHD `0x77`→`0x7b`: no está claro si el
+   original interpola el color. La destrucción por objeto `0x130` (alud de AUSTRIA, `0x3db4c`) está portada; las rocas
+   avanzan con POS, pero su rotación usa un orden de Euler aproximado.
+9. **POS**: el avance se ejecuta a 36 Hz para todas las entradas animadas (sin equivalente portado del flag activo del
+   motor original). La rotación `Z(Y(X(v)))` y la geometría transformada son aproximaciones; la rejilla SRF conserva
+   sus spans estáticos, por lo que la consulta de suelo y las colisiones de objetos trasladados no son completas.
+10. **Sonido**: mezclador propio en SDL3 (mono, 44,1 kHz) en lugar del driver GUS/Sound Blaster; volumen 0..`0x10000`
+   y frecuencia en Hz como en `0x625f4`. Sin panorama estéreo, sin música y sin los sonidos de objetos móviles.
 
 ---
 
@@ -352,14 +436,37 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 Prioridad: **P1** = necesario para un juego completo de un jugador · **P2** = fidelidad y contenido · **P3** = extras.
 Cada tarea indica las direcciones de partida.
 
+### Siguientes portes recomendados
+
+Orden sugerido según impacto, tamaño y lo que ya está identificado. Los recuentos son instrucciones desensambladas
+del original, no líneas de C; `identified` significa que falta portar, y no implica que el comportamiento ya esté
+implementado.
+
+1. **Contacto y colisiones con objetos móviles (P1, impacto alto):** `car_ground_contact` (`0x350f0`, 841) y
+   `collisions_pass` (`0x3fd04`, 136). Conectar el contacto del coche con el pase de colisiones y los tipos de objeto;
+   las animaciones POS ya están conectadas, pero la geometría móvil aún no se refleja en toda la consulta de suelo.
+   Véase Fase 2.
+2. **Entrada y controles fieles (P1, alcance medio):** completar `human_input` (`0x2c5b8`, 424),
+   `car_input` (`0x4d5f4`, 335), `car_steer` (`0x500f0`, 121), `car_throttle` (`0x4db90`, 389) y
+   `car_turbo` (`0x4e2d8`, 215). Esto permite reemplazar los controles aproximados, conservar las reglas originales
+   de salida y añadir el joystick; véase Fase 1.
+3. **Terminar la IA original (P1, grande):** completar `ai_drive` (`0x1aea0`, 1 869) y `ai_find_section`
+   (`0x1decc`, 94): selección de carril y puertas reales, velocidad según curvatura/pendiente, adelantamientos y
+   frenada. Ya hay un núcleo portado; véase Fase 1.
+4. **Fidelidad del paso de coche (P1, muy grande):** portar por partes `car_update` (`0x2ed00`, 2 335) y
+   `cars_update_all` (`0x2d008`, 846), empezando por paridad de IA a 36 Hz y actualización de superficies. Requiere
+   mantener las regresiones de las siete pistas; no conviene abordarlo como un único porte monolítico. Véase Fase 3.
+
 ### Fase 0 — Infraestructura de ingeniería inversa
 
 - [x] **P1** Inicializar git y subir solo código, documentación y herramientas (los datos ya están excluidos).
 - [~] **P1** Separar la libc de Watcom y DOS/4G del código del juego: no hay base de firmas FLIRT para Watcom 10.x, así
-      que `disasm.py` la clasifica por grafo de llamadas y datos de runtime (estado `library`, 497 funciones,
-      20 744 instrucciones). Quedan sin clasificar ≈ 25 000 instrucciones de `0x60000–0x86000` (motor y mezclador).
-- [x] **P1** Cubrir el 17 % de bytes restante: `disasm.py sweep` (barrido de huecos con prólogos Watcom, validación
-      por decodificación limpia y sin solapes) subió la cobertura del 83,0 % al **98,7 %** (+320 funciones).
+      que `disasm.py` la clasifica heurísticamente por grafo de llamadas y datos de runtime (estado `library`,
+      488 funciones, 20 323 instrucciones). Quedan sin clasificar ≈ 25 000 instrucciones de `0x60000–0x86000`;
+      la separación completa requiere mejores firmas o verificación manual.
+- [x] **P1** Cubrir el 17 % de bytes restante: `disasm.py sweep` (barrido de huecos con prólogos Watcom, decodificación
+      limpia, validación de relocaciones y rechazo de solapes) subió la cobertura del 83,0 % al **98,5 %**
+      (277 candidatos de huecos aceptados; 303 inicios validados persistidos, incluidos los llamados).
 - [x] **P2** Exportar `symbols.txt` como script de Ghidra o IDA (nombres, comentarios y tipos de estructura):
       `disasm.py export ghidra|ida -o FICHERO` (estructuras en `tools/structs.txt`). No probado en Ghidra/IDA reales.
 - [x] **P2** Generar estados por función en `symbols.txt` (`unknown` / `identified` / `ported` / `verified`, más
@@ -367,12 +474,14 @@ Cada tarea indica las direcciones de partida.
 - [x] **P2** Pruebas de regresión deterministas: `tests/regress.py` (23 casos: 7 pistas solo, con 3 rivales y con turbo,
       visor y cámara de parrilla; sección, fase, vuelta, NaN y hash del framebuffer; `ctest --test-dir build`).
       Los resultados esperados son una instantánea del estado actual (incluye el atasco de CANADA en la sección 22).
-- [~] **P3** Trazas de ejecución del original en DOSBox-X: hecho `tools/trace_compare.py` y el procedimiento en
-      [`docs/dosbox-trace.md`](docs/dosbox-trace.md); falta capturar la traza real (no había DOSBox-X disponible).
+- [~] **P3** Trazas de ejecución del original en DOSBox-X: hecho `tools/trace_compare.py`; DOSBox-X 2026.10.01 está
+      instalado; se confirmó la entrada MZ de `MAINDOS.EXE` y que DOS lo mantiene cargado, pero tras reanudar solo se
+      observó el bucle de espera de BIOS. Aún falta llegar a carrera, validar el mapeo LE, el muestreo por tick y la
+      comparación ([`docs/dosbox-trace.md`](docs/dosbox-trace.md)).
 
 ### Fase 1 — Carrera completa de un jugador (jugabilidad)
 
-- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: núcleo de dirección/atasco/turbo/límites; álgebra exacta de acelerador/dirección/turbo; falta carriles, registros `load_tri` reales, pendiente Y y giro por solape) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
+- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: núcleo de dirección/atasco/turbo/límites y álgebra exacta; pendiente decodificada pero no portada, falta elección de carril y selección de registros `load_tri` reales, más giro por solape) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
       byte `+0x6d` de TRI), consulta de puertas `0x1decc`, velocidad objetivo por curvatura y pendiente
       (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
       Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.
@@ -382,11 +491,18 @@ Cada tarea indica las direcciones de partida.
       (`--elimination`); faltan explosión (`0x3fee8`), sonido y mensajes "%s IS OUT" / "WARNING, YOU'RE LAST!" (`0x4a320`).
 - [ ] **P1** (decodificado: `0x31858` es solo cambio de malla + sonido y `0x2ea44` un efecto; falta portarlos con los efectos de Fase 2) Solape entre coches `0x31858` (|dx|,|dz| < 25: cambio de malla y reaparición) y efectos de golpe
       `0x2ea44` (impacto > 15).
-- [ ] **P1** Reaparición o recolocación tras caer o volcar. `car+0x554` **no** es de reaparición: es el contador (1–0x50) de la animación de giro tras un golpe (`car_update` `0x30d05`); buscar otro mecanismo o confirmar que no existe.
-- [ ] **P1** Entrada original: teclado `0x2c5b8` decodificado (dirección digital, sin rampas; ver `docs/formats.md`); faltan joystick `0x4c9b4`, cambio manual y `car_input` completo
+- [x] **P1** Destrucción y reaparición (`car_vertical` `0x2e397`, `car_update` `0x2fd63`, `sub_0003a788`): al aterrizar
+      en superficies prohibidas, sin suelo bajo las 4 ruedas o 6 ticks con las 4 sobre tipos > 0x28, el coche explota
+      (o se hunde) y 80 fotogramas después reaparece dos tramos más adelante, con explosión, piezas y humo
+      (`0x3a788`), salpicadura (`0x3c208`) y destellos al volver (`0x3e6ec`). La colocación de `0x41430` deja el
+      coche quieto, en el aire 250 unidades sobre la media de las caras de carretera, en primera, y le asigna el tramo
+      del punto de reaparición (si vuelve a explotar, reaparece dos tramos más allá). Falta el disparador por objetos
+      `0x12c`.
+- [~] **P1** Entrada original: teclado `0x2c5b8` decodificado (dirección digital, sin rampas; ver `docs/formats.md`); cambio manual básico disponible (M, Q/E); faltan joystick `0x4c9b4` y `car_input` completo
       (`0x4f874`, `0x50464`, `0x50824`, `0x4e1bc` sin identificar).
-- [ ] **P2** Caja de cambios `0x502c4` decodificada (ver `docs/formats.md`); falta el cambio manual y la histéresis, el port usa selección automática.
-- [x] **P2** Dificultad `0xc5470` (agarre trasero ×1/1,15/1,3/1,3, `--difficulty N`). Pendiente: tipos de control `0x1fefd0[coche]+4` (1, 2, 7).
+- [~] **P2** Caja de cambios `0x502c4` decodificada (ver `docs/formats.md`); cambio manual de 2 marchas en el port (M, Q/E); falta la histéresis y el retardo original de cambio.
+- [x] **P2** Dificultad `0xc5470` (agarre trasero ×1/1,15/1,3/1,3, `--difficulty N`) y tipo de control
+      `0x1fefd0[coche]+4` = 1 (IA: perfil 11, bono de par, modelos de `0xc5520`). Pendiente: tipos 2 y 7.
 - [ ] **P2** Superficies especiales `0x12c–0x131` (meta, rampas…) y `0x6e–0x83`.
 - [ ] **P2** Trucos restantes: identificar el efecto de SURMULE (`0x1fb2f4`), SLASKTRATT (`0x1fb2f8`),
       FILMJOLK (`0x1fb2fc`, `0x420cc`), SKUNK (`0x1fb300`, muy usado en efectos y `0x48a14`), SVINPOLE (`0x1fb304`) y
@@ -394,15 +510,25 @@ Cada tarea indica las direcciones de partida.
 
 ### Fase 2 — Mundo vivo: objetos, colisiones y efectos
 
-- [ ] **P1** Aplicar las animaciones **POS** (`pos_apply_frame` `0x412e8`) a los objetos de la pista.
+- [~] **P1** Animaciones **POS** (`pos_make_relative` `0x41244`, `pos_apply_frame` `0x412e8`): parser, deltas cíclicos,
+      transformaciones y avance a 36 Hz integrados. Pendiente verificar regresiones, el orden exacto de rotación y la
+      cobertura de suelo/colisiones para objetos trasladados.
 - [ ] **P1** Colisiones con objetos móviles `car_ground_contact` `0x350f0` y los tipos `0x360f0`, `0x3636c` y
       `0x36ce0` (pase `collisions_pass` `0x3fd04`).
-- [ ] **P1** Objetos deslizantes `0x3731c` (2 264 instrucciones; puertas, barreras…).
+- [x] **P1** Derrape `0x3731c`: marcas (anillo de 700, fila SHD por superficie `0xc34e0`) y polvo (efecto 1,
+      `sub_00039d1c`, sprite de `SMOKE.TEX` mezclado con la SHD) y sonido de `GENERAL/SOUND/SKID`.
 - [ ] **P2** Objeto especial PLC tipo `0xfa` (`0x2abdc`).
-- [ ] **P2** Efectos: piezas volando `0x3b744`, humo y explosiones (texturas `GENERAL/*.TEX`), salpicaduras `0x3d808`,
-      relámpagos `0x3bdac`, *plots* `0x3a2b4`/`0x3a498`, sprites translúcidos `0x39d1c`/`0x39fe8`/`0x3e6ec`, crear
-      efecto `0x3fee8`.
-- [ ] **P2** Clima *¿?*: creación `0x26154` y actualización `0x403c8`.
+- [x] **P2** Efectos (`fx.c`, 200 huecos de `0x1d5f10`, `sub_0003fee8`): sprites `0x39d1c`/`0x39fe8`, piezas
+      `0x3b744`, salpicadura `0x3d808`, destellos de reaparición `0x3e6ec`; explosión y hundimiento (`0x3a788`,
+      `0x3c208`) y turbo (`0x4e97c`), con las texturas `GENERAL/*.TEX`.
+- [x] **P2** Efectos de chispas (*plots* `0x3a2b4`/`0x3a498`, tipos 2 y 8: roce con muro `0x3ea00` y ruedas sobre
+      superficies 6/0x10/0x1a `0x3ee70`), golpes entre coches `0x2ea44`, relámpagos `0x3bdac` (malla `0xbfe90` y
+      destello de paleta) y destrucción por alud `0x3db4c` (tipo `0xa`).
+- [x] **P2** Clima (`weather.c`): creación `0x26154`, zonas `0x400f4` y actualización `0x403c8` (lluvia de CANADA,
+      nieve de AUSTRIA, viento de USA; mosaico de 3×3 alrededor del coche y oscurecimiento de paleta).
+- [x] **P2** Emisores de objetos especiales `0x36ce0` (humo `0x12e` de USA, géiseres `0x131` de ICELAND) y `0x3636c`
+      (chimeneas y vapor `0x15e`/`0x15f`, `0x161`, `0x164`, `0x130`, niebla `0x166`, columnas `0x167`), y polvo al
+      aterrizar `0x3f37c`.
 - [ ] **P2** Mapeo exacto entre los objetos del motor y la PLC (hoy se infiere al 88–98 %): portar la creación del
       mundo `0x2489c` ("Error while creating the world") para obtener el orden real.
 
@@ -412,18 +538,32 @@ Cada tarea indica las direcciones de partida.
       relleno y z (o algoritmo del pintor).
 - [ ] **P1** Sombreado **TAB**: cómo se elige el nivel por cara (bits bajos de `flags`: `0x11/0x13/0x15`; byte alto
       ≥ 64 = sin sombra) y luz por distancia o normal.
-- [ ] **P1** Función de **SHD** y **PAN** (tablas de 64 KB indexadas con `(a<<8)|b`: ¿transparencia, mezcla, niebla?).
-- [ ] **P1** Cámara original `camera_angles` `0x5891c` (décimas de grado) y sus modos de vista.
+- [ ] **P1** Función de **PAN** (tabla de 64 KB `PAN[a*256+b]`; filas 16–159 a cero, así que no es la mezcla de las
+      caras 18/19/22). **SHD**: fila 0x28 = sombra de coche (hecho); resto de filas por confirmar en el DOS.
+- [ ] **P1** USA tramos 48–50: la IA no salta el barranco a ~70 km/h, cae al fondo y no hay reaparición
+      (`0x00435910` en `Ign_win.exe`), así que se queda atascada.
+- [ ] **P1** IA contra los muros: ahora los bordes contienen a los coches en las 7 pistas, y la IA (que apunta al punto
+      medio de puertas a +1…+8 tramos) corta las curvas contra el borde interior a toda velocidad y se queda empujando
+      (ICELAND tramo 17 a 157 km/h, tramo ~65, JAPAN, CARIB). Falta la línea de carrera y los registros por tramo
+      originales de `load_tri`; la marcha atrás de 0.75 s no basta para reorientar el coche.
+- [ ] **P1** IA a 36 Hz: el DOS alterna la paridad `[0x1fed68]` en cada paso de 1/72 s (`0x2de01`) y solo llama a
+      `ai_drive` con paridad 1 (`0x2dcbc`); el port la llama en cada paso.
+- [x] **P1** Cámara de persecución original (`sub_00047f94`, `sub_000420cc`, focales de `race_setup_video`).
+- [x] **P2** Cámara trasera (`car+0x5a4`, campos `+0x90/+0xa0/+0x70`) y cámaras fijas tras la meta (`0xc464c`).
+- [x] **P1** Cuenta atrás y reloj de salida (`sub_0002b850`) con sus pitidos; faltan los sprites 3-2-1-GO.
 - [ ] **P2** `render_scene` `0x56410`: capas según los flags de configuración `[0x24c05c]+0x38..0x54`.
-- [ ] **P2** Resoluciones 320×200 / 640×480 / 800×600 y viewports por jugador (`race_setup_video` `0x492fc`).
+- [x] **P2** Resoluciones 320×200 / 640×480 / 800×600 (`--res`), mostradas a 4:3.
+- [ ] **P2** Viewports por jugador (`race_setup_video` `0x492fc`).
 - [ ] **P2** Sprites (`geputget.c`, `0x771e0`) y señales (`*_SIGNS.PIC`).
 - [ ] **P3** Escalado moderno (pantalla completa, relación de aspecto, filtrado opcional).
 
 ### Fase 4 — HUD, menús y flujo de juego
 
-- [ ] **P1** Fuentes **LFT/FNT** (`load_fonts` `0x240f4`, `0x61220`).
-- [ ] **P1** HUD en carrera `0x4a320`: tiempos, vuelta, posición, velocímetro, turbo, avisos multilingües; gráficos
-      `*_PANGFX.PIC`, `H_PAN*.PIC`.
+- [ ] **P1** Fuentes **LFT/FNT** (`load_fonts` `0x240f4`, `0x61220`): LFT ya se lee para los campos del HUD básico;
+      faltan FNT y el resto de las fuentes.
+- [ ] **P1** Completar el HUD en carrera `0x4a320`: ya dibuja partes de `H_PAN1.PIC` y los campos de tiempo, vuelta,
+      posición y velocidad. Pendiente: reconstruir coordenadas/estados exactos, medidores dinámicos, avisos
+      multilingües y los demás paneles `H_PAN*.PIC`, `*_PANGFX.PIC`, `*_SIGNS.PIC`.
 - [ ] **P1** Pantallas de resultados y puntuación (`render_main` `0x43fe0`: TRACK RESULTS, TRACK SCORE, TOTAL SCORE)
       y trofeo `POKAL.PIC`.
 - [ ] **P1** Pausa, continuar, salir y reiniciar (`0x4395c`, `0x43e48`).
@@ -438,18 +578,21 @@ Cada tarea indica las direcciones de partida.
 
 ### Fase 5 — Sonido y música
 
-- [ ] **P1** Sustituir el driver (Sound Blaster/GUS, `0x7a85c` y `0x60000+`) por SDL3 audio con un mezclador propio.
-- [ ] **P1** Cargador de muestras `0x63310` (`.WAV`, `.PAT` de Gravis y `.RW8`) y formato **XI**.
-- [ ] **P1** Motor de cada coche: **ENGINE.INF** (curvas por régimen) + `00_A.WAV`/`01_A.WAV` con tono según las
-      revoluciones.
-- [ ] **P1** Efectos: BOOST, COLL, DIV, ROLL, SKID (`0x2a4ec`); reproducción posicional `0x49a8c` y canales `0x626fc`.
-- [ ] **P2** Ambiente por pista `LEVELS/<pista>/SOUND` (PAT/WAV) y su activación por zona.
+- [x] **P1** Sustituir el driver (Sound Blaster/GUS, `0x7a85c` y `0x60000+`) por SDL3 audio con un mezclador propio.
+- [x] **P1** Cargador de muestras `0x63310` (`.WAV`, `.PAT` de Gravis) y formato **XI**; bancos por prefijo `NN_`.
+- [x] **P1** Motor de cada coche (`0x50824`): **ENGINE.INF** + `00_A.WAV`/`01_A.WAV` con tono según las revoluciones
+      (`car+0x288`, `car_throttle` `0x4e000`).
+- [x] **P1** Efectos: BOOST, COLL, DIV, ROLL, SKID (`0x2a4ec`); reproducción posicional `0x49a8c` y canales `0x626fc`.
+- [x] **P2** Ambiente por pista `LEVELS/<pista>/SOUND`: emisores PLC `0x190+n` (`0x2489c`, `0x360f0`), lluvia,
+      viento y truenos.
 - [ ] **P2** Música `MUSIC/Track02–08.ogg` (antes pistas de CD): asignación por pista y menú.
 
 ### Fase 6 — Fantasmas y persistencia
 
-- [ ] **P2** Formato **GST**: cargar o crear (`0x2adf8`), guardar (`0x2ccc8`) y reproducir (`0x50e94`); compatibilidad
-      con los fantasmas del original (`GHOSTS/*.GST`).
+- [x] **P2** Formato **GST**: lectura (`0x2adf8`), grabación por tick (`0x51204`) y guardado con relleno (`0x2ccc8`).
+- [x] **P2** Reproducir el fantasma (`--ghost`): una muestra por tick, sin choques, con el modelo de la cabecera.
+- [ ] **P2** Modo contrarreloj (`[0x1feefc] == 2`): grabar al terminar si se bate `[0x1fee04]` y cargar al empezar.
+- [ ] **P1** Validar física e IA contra un fantasma real: grabar una contrarreloj en DOSBox y usar `--ghost`.
 - [ ] **P2** Récords de vuelta ("LAP RECORD") y su persistencia.
 
 ### Fase 7 — Multijugador

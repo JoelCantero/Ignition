@@ -8,40 +8,35 @@
 #include "../game/ai.h"
 #include "../game/assets.h"
 #include "../game/car.h"
+#include "../game/ghost.h"
+#include "../game/pos.h"
 #include "../game/race.h"
 #include "../game/track.h"
+#include "../render/camera.h"
+#include "../render/hud.h"
 #include "../render/raster.h"
+#include "sound.h"
 
 #define DEFAULT_DATA_DIR "/Users/Shared/Epic Games/Ignition/ignition"
-#define WINDOW_SCALE 3
+#define WINDOW_W 1280
 #define SIM_DT ((float)IGN_PHYS_DT)
-#define CHASE_DIST 420.0f
-#define CHASE_HEIGHT 520.0f
-#define CHASE_PITCH 0.85f
 
 static IgnFrame frame;
+static IgnHud hud;
 
 static void to_rgb(const IgnFrame *fb, const IgnPalette *pal, uint32_t *out) {
     uint32_t lut[256];
     for (int i = 0; i < 256; i++)
         lut[i] = 0xFF000000u | pal->rgb[i][0] << 16 | pal->rgb[i][1] << 8 | pal->rgb[i][2];
-    for (int i = 0; i < IGN_SCREEN_W * IGN_SCREEN_H; i++) out[i] = lut[fb->color[i]];
+    for (int i = 0; i < fb->w * fb->h; i++) out[i] = lut[fb->color[i]];
 }
 
 static int write_ppm(const char *path, const IgnFrame *fb, const IgnPalette *pal) {
     FILE *f = fopen(path, "wb");
     if (!f) return -1;
-    fprintf(f, "P6\n%d %d\n255\n", IGN_SCREEN_W, IGN_SCREEN_H);
-    for (int i = 0; i < IGN_SCREEN_W * IGN_SCREEN_H; i++) fwrite(pal->rgb[fb->color[i]], 1, 3, f);
+    fprintf(f, "P6\n%d %d\n255\n", fb->w, fb->h);
+    for (int i = 0; i < fb->w * fb->h; i++) fwrite(pal->rgb[fb->color[i]], 1, 3, f);
     return fclose(f);
-}
-
-static void chase_camera(const IgnCar *car, IgnCamera *cam) {
-    cam->yaw = car->heading;
-    cam->pitch = CHASE_PITCH;
-    cam->x = car->x - sinf(car->heading) * CHASE_DIST;
-    cam->z = car->z - cosf(car->heading) * CHASE_DIST;
-    cam->y = car->y - CHASE_HEIGHT;
 }
 
 static void free_camera(IgnCamera *cam, const bool *keys, float dt) {
@@ -66,6 +61,20 @@ static IgnCar rivals[MAX_RIVALS];
 static IgnAi rival_ai[MAX_RIVALS];
 static int nrivals;
 static IgnRace race;
+/* Loaded with --ghost; replayed one sample per physics tick, without collisions. */
+static IgnGhost ghost;
+static IgnCar ghost_car;
+static int ghost_on, ghost_tick;
+/* Per-car cameras [0x1fef9c] (0 = player). */
+static IgnChaseCam cams[MAX_RIVALS + 1];
+static int track_id;
+/* Post-race view of sub_000420cc: [0x1fb4d0] frames since the player finished, camera [0x1fee80] (0-2 fixed,
+ * 3 = following a car) and the followed car [0xc0b34] with its switch delay [0xc0b38]. */
+static double finish_clock;
+static int tv_index = 3, spectated, spectate_wait;
+static IgnSkids skids;
+static IgnFx fx;
+static IgnWeather weather;
 
 /* Start grid of sub_00026458: PLC origin of the type-0 object facing the type-1 object; slot i is
  * (i/2)*180 + 200 units back and 60 units to the side by parity (a lone car: 200 back, centred). */
@@ -80,43 +89,154 @@ static void grid_pose(const IgnLevel *lv, const IgnTrack *t, int slot, int ncars
     *z = (float)a[2] + back * fz + side * fx;
 }
 
-/* Spawns rivals with the other CARS.PLC models in grid slots 1..want. */
+/* sub_00022d08: computer cars in grid slots 1..want with the models of 0xc5520 for the difficulty. */
 static void spawn_rivals(const IgnLevel *lv, const IgnTrack *t, const IgnCar *player, int want) {
-    for (int i = 0; i < lv->cars.nobj && nrivals < want && nrivals < MAX_RIVALS; i++) {
-        const IgnObject *o = &lv->cars.objs[i];
-        int id = (int)(o->type / 10);
-        if (o->type % 10 || id == player->id) continue;
+    int spare = 5;
+    for (int k = 0; nrivals < want && nrivals < MAX_RIVALS && k < 10; k++) {
+        int id = ign_computer_model(k, &player->id, 1, &spare);
         float x, z, h;
         grid_pose(lv, t, nrivals + 1, want + 1, &x, &z, &h);
         if (ign_car_init(&rivals[nrivals], lv, id, x, z, h)) continue;
+        ign_car_set_computer(&rivals[nrivals]);
         ign_ai_init(&rival_ai[nrivals], nrivals);
+        /* 0x22eeb: the computer models' AI parameter +0x28 = 0.19 x difficulty + 0.4. */
+        rival_ai[nrivals].p.s28 = ign_get_difficulty() * 0.19 + 0.4;
         nrivals++;
     }
 }
 
+/* sub_00043590: the leading car still racing (the last one in elimination), switched to after 20 frames.
+ * Returns -1 when every car has finished. */
+static int spectate(IgnCar *const *all, int n) {
+    int best = -1, best_pos = 0;
+    for (int i = 0; i < n; i++) {
+        if (all[i]->out) continue;
+        int pos = ign_race_position((const IgnCar *const *)all, n, i);
+        if (best < 0 || (race.mode == IGN_MODE_ELIMINATION ? pos > best_pos : pos < best_pos)) best = i, best_pos = pos;
+    }
+    if (best < 0) return -1;
+    if (best == spectated) spectate_wait = 0;
+    else if (++spectate_wait > 20) spectated = best;
+    return spectated;
+}
+
 static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player) {
+    ghost_tick++;
+    int started = ign_race_started(&race);
     IgnCar *all[MAX_RIVALS + 1] = {player};
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_ai_set_cars(all, nrivals + 1);
     for (int i = 0; i < nrivals; i++) {
-        IgnInput in;
+        IgnInput in = {0};
         if (!rivals[i].wrecked) {
-            ign_ai_drive(&rival_ai[i], &rivals[i], t, &in);
+            if (started || race.clock > IGN_RACE_AI_WAKE) ign_ai_drive(&rival_ai[i], &rivals[i], t, &in);
             ign_car_tick(&rivals[i], lv, &in);
             ign_car_progress(&rivals[i], t);
         }
         all[i + 1] = &rivals[i];
     }
-    int hits = ign_cars_collide(all, nrivals + 1);
-    ign_race_step(&race, all, nrivals + 1);
+    IgnCarHit impacts[MAX_RIVALS * (MAX_RIVALS + 1) / 2 + 1];
+    int nimpacts = 0;
+    int hits = ign_cars_collide(all, nrivals + 1, impacts, (int)(sizeof impacts / sizeof impacts[0]), &nimpacts);
+    ign_race_wrecks(all, nrivals + 1, lv, t);
+    float focus_x = all[spectated]->x, focus_z = all[spectated]->z;
+    /* sub_0003f37c runs in the frame pass, where car+0x278 is still 1 only after a landing in the frame's last tick. */
+    if (skids.tick % 2 == 0)
+        for (int i = 0; i <= nrivals; i++)
+            if (!all[i]->wrecked && all[i]->landed) ign_fx_landing_dust(&fx, all[i], focus_x, focus_z);
+    ign_sound_tick(all, nrivals + 1, &fx);
+    for (int i = 0; i < nimpacts; i++) {
+        const IgnCarHit *h = &impacts[i];
+        /* cars_update_all 0x2d50f: sub_0002ea44 above a mean impact of 15, then COLL 03_DUNS at the first car. */
+        if (h->impact > 15) {
+            ign_fx_impact(&fx, all[h->a], all[h->b], h->x, h->z, focus_x, focus_z);
+            int v = (int)(h->impact * 30.0);
+            ign_fx_sound(&fx, 0, 2, 0, v > 0x10000 ? 0x10000 : v, 22000, (float)h->x, (float)h->z);
+        }
+        int v = (int)fabs(h->impact * 800.0);
+        ign_fx_sound(&fx, 0, 2, 3, v > 0x10000 ? 0x10000 : v, 22000, all[h->a]->x, all[h->a]->z);
+    }
+    for (int i = 0; i <= nrivals; i++) ign_skids_car(&skids, &fx, all[i], focus_x, focus_z);
+    /* car_input 0x4d949 / 0x4daf2: sub_0004e688 as soon as a turbo starts. */
+    for (int i = 0; i <= nrivals; i++)
+        if (all[i]->turbo_started) ign_fx_turbo_start(&fx, all[i], focus_x, focus_z), all[i]->turbo_started = 0;
+    /* Once per 1/36 s frame: the wreck controllers (sub_0003a788 / sub_0003c208), the turbo exhaust of car_turbo
+     * (sub_0004e97c) and collisions_pass (0x3fd04), which moves every effect. */
+    if (skids.tick % 2 == 0) {
+        for (int i = 0; i <= nrivals; i++) {
+            if (all[i]->wrecked && !all[i]->out)
+                ign_fx_wreck(&fx, all[i], i, (int)all[i]->wreck_frame, focus_x, focus_z);
+            else if (!all[i]->wrecked && all[i]->turbo_mode > 0)
+                ign_fx_turbo(&fx, all[i], focus_x, focus_z);
+            /* cars_body_sway (sub_0003ea00) and sub_00020d60 (sub_0003ee70) for every car still driving. */
+            if (!all[i]->wrecked) {
+                ign_fx_wall_sparks(&fx, all[i], i == 0, focus_x, focus_z);
+                ign_fx_wheel_sparks(&fx, all[i], focus_x, focus_z);
+            }
+        }
+        /* sub_000400f4 (sub_00020d60) and sub_000403c8 (end of cars_body_sway). */
+        ign_weather_zone(&weather, player);
+        ign_weather_frame(&weather, &fx, all[spectated], spectated, t, lv, race.total,
+                          player->out ? finish_clock : -1.0, focus_x, focus_z);
+        ign_fx_emitters(&fx, lv, focus_x, focus_z);
+        ign_fx_frame(&fx, all, nrivals + 1, focus_x, focus_z);
+        ign_sound_frame(all, nrivals + 1, spectated, &race, player->out ? finish_clock : -1.0, &weather, &fx);
+    }
+    ign_skids_step(&skids);
+    int was_out = player->out;
+    if (started) ign_race_step(&race, all, nrivals + 1);
+    /* car_update 0x2f37f: the player's finish restarts [0x1fb4d0] and selects the car-following camera. */
+    if (player->out && !was_out) finish_clock = 0, tv_index = 3, spectate_wait = 100;
+    /* sub_00047f94 runs once per rendered frame for every car; the original renders at most 36 frames per second. */
+    if (ghost_tick % 2 == 0) {
+        for (int i = 0; i <= nrivals; i++) ign_chase_update(&cams[i], all[i], lv, t, started);
+        if (player->out && finish_clock < 120.0) finish_clock += 1.0;
+        if (player->out && finish_clock >= 120.0 && tv_index == 3 && spectate(all, nrivals + 1) < 0)
+            tv_index = 0, spectated = 0;
+    }
+    /* Advanced last so the player (ticked before this function) and the rivals see the same clock. */
+    ign_race_clock(&race);
+    ign_set_race_started(ign_race_started(&race));
+    ign_set_race_time(race.tick * IGN_PHYS_DT);
+    ign_set_level_clock(race.total);
+    for (int i = 0; i <= nrivals; i++) all[i]->position = ign_race_position((const IgnCar *const *)all, nrivals + 1, i);
     return hits;
+}
+
+/* sub_000420cc: chase camera (ahead of the car looking back while `rear`), and 120 frames after the player has
+ * finished the fixed cameras of 0xc464c or the camera of the leading car. */
+static void race_view(const IgnCar *player, int rear, IgnCamera *cam) {
+    if (player->out && finish_clock >= 120.0) {
+        if (tv_index < 3 && ign_fixed_camera(track_id, tv_index, race.total, cam) == 0) return;
+        if (tv_index == 3 && spectated > 0 && spectated <= nrivals) {
+            ign_chase_view(&cams[spectated], &rivals[spectated - 1], 1, cam);
+            return;
+        }
+        if (tv_index == 3) {
+            ign_chase_view(&cams[0], player, 1, cam);
+            return;
+        }
+    }
+    ign_chase_view(&cams[0], player, rear, cam);
 }
 
 static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     ign_frame_clear(&frame);
     ign_render_track(&frame, lv, cam);
-    for (int i = 0; i < nrivals; i++) ign_render_car(&frame, lv, &rivals[i], cam);
-    ign_render_car(&frame, lv, car, cam);
+    ign_render_skids(&frame, lv, &skids, cam);
+    /* sub_0003a788 hides a wrecked car (LI_HIDEOBJECT) until it is put back; sub_0003db4c after its slide. */
+    for (int i = 0; i < nrivals; i++)
+        if (ign_car_visible(&rivals[i])) ign_render_car(&frame, lv, &rivals[i], cam);
+    if (ghost_on) {
+        ign_ghost_pose(&ghost, race.tick > 0 ? race.tick - 1 : 0, &ghost_car);
+        ign_render_car(&frame, lv, &ghost_car, cam);
+    }
+    if (ign_car_visible(car)) ign_render_car(&frame, lv, car, cam);
+    IgnCar *all[MAX_RIVALS + 1] = {(IgnCar *)car};
+    for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
+    ign_render_fx(&frame, lv, &fx, all, nrivals + 1, cam);
+    ign_render_weather(&frame, lv, &weather, cam);
+    ign_hud_draw(&hud, &frame, car, &race, nrivals + 1);
 }
 
 int main(int argc, char **argv) {
@@ -125,12 +245,31 @@ int main(int argc, char **argv) {
     const char *level = "USA";
     const char *shot = NULL;
     float sim_seconds = 0.0f, sim_steer = 0.0f;
-    int autopilot = 0, want_rivals = -1, sim_turbo = 0, race_mode = 0;
+    int autopilot = 0, want_rivals = -1, sim_turbo = 0, race_mode = 0, countdown = 0, rear_view = 0, car_id = -1;
     IgnCamera cam = {0};
     int fixed_cam = 0;
+    const char *ghost_out = NULL, *ghost_in = NULL;
+    ign_frame_init(&frame, 640, 480);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--shot") && i + 1 < argc)
             shot = argv[++i];
+        else if (!strcmp(argv[i], "--res") && i + 1 < argc) {
+            int w = 0, h = 0;
+            if (sscanf(argv[++i], "%dx%d", &w, &h) != 2) {
+                fprintf(stderr, "--res expects WxH, e.g. 640x480\n");
+                return 1;
+            }
+            ign_frame_init(&frame, w, h);
+        } else if (!strcmp(argv[i], "--persp")) {
+            frame.perspective = 1;
+        } else if (!strcmp(argv[i], "--countdown")) {
+            countdown = 1;
+        } else if (!strcmp(argv[i], "--rear")) {
+            rear_view = 1;
+        } else if (!strcmp(argv[i], "--record-ghost") && i + 1 < argc)
+            ghost_out = argv[++i];
+        else if (!strcmp(argv[i], "--ghost") && i + 1 < argc)
+            ghost_in = argv[++i];
         else if (!strcmp(argv[i], "--probe") && i + 4 < argc) {
             const char *lvl = argv[++i];
             float px = strtof(argv[++i], NULL), pz = strtof(argv[++i], NULL);
@@ -155,6 +294,8 @@ int main(int argc, char **argv) {
             sim_steer = autopilot || sim_turbo ? 0 : strtof(argv[i], NULL);
         } else if (!strcmp(argv[i], "--difficulty") && i + 1 < argc) {
             ign_set_difficulty(atoi(argv[++i]));
+        } else if (!strcmp(argv[i], "--car") && i + 1 < argc) {
+            car_id = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--elimination")) {
             race_mode = IGN_MODE_ELIMINATION;
         } else if (!strcmp(argv[i], "--rivals") && i + 1 < argc) {
@@ -215,12 +356,39 @@ int main(int argc, char **argv) {
     if (want > MAX_RIVALS) want = MAX_RIVALS;
     float sx, sz, sh;
     grid_pose(&lv, &track, 0, want + 1, &sx, &sz, &sh);
-    if (ign_car_init(&car, &lv, ign_first_car_id(&lv), sx, sz, sh)) {
+    if (ign_car_init(&car, &lv, car_id >= 0 ? car_id : ign_first_car_id(&lv), sx, sz, sh)) {
         fprintf(stderr, "no car models in CARS.PLC\n");
         return 1;
     }
     spawn_rivals(&lv, &track, &car, want);
+    ign_skids_init(&skids);
+    ign_fx_init(&fx);
+    ign_fx_emitters_init(&fx, &lv);
+    ign_weather_init(&weather, level);
+    ign_chase_init(&cams[0], &car);
+    for (int i = 0; i < nrivals; i++) ign_chase_init(&cams[i + 1], &rivals[i]);
+    track_id = ign_ghost_track_id(level);
+    if (ghost_in) {
+        if (ign_ghost_load(ghost_in, &ghost)) {
+            fprintf(stderr, "cannot read ghost %s\n", ghost_in);
+            return 1;
+        }
+        if (ghost.track != track_id)
+            fprintf(stderr, "ghost track id %d, level %s is %d\n", ghost.track, level, track_id);
+        if (ign_car_init(&ghost_car, &lv, ghost.car, sx, sz, sh) &&
+            ign_car_init(&ghost_car, &lv, car.id, sx, sz, sh))
+            return 1;
+        ghost_on = 1;
+    }
+    if (ign_hud_init(&hud, data_dir, &lv.palette)) {
+        fprintf(stderr, "cannot load HUD panel or fonts from %s\n", data_dir);
+        ign_free_level(&lv);
+        return 1;
+    }
     ign_race_init(&race, race_mode, nrivals + 1);
+    /* Headless runs start at once unless --countdown; the game window always counts down. */
+    if (shot && !countdown) ign_race_skip_countdown(&race);
+    ign_set_race_started(ign_race_started(&race));
     IgnAi player_ai;
     ign_ai_init(&player_ai, MAX_RIVALS);
     if (getenv("IGN_TRACE")) {
@@ -262,13 +430,33 @@ int main(int argc, char **argv) {
         IgnInput in = {.accel = sim_seconds > 0, .left = sim_steer < 0, .right = sim_steer > 0,
                        .turbo = sim_turbo};
         int hits = 0, air = 0, car_hits = 0;
+        static IgnGhost rec;
+        int ticks = 0;
+        int pos_ticks = 0;
+        double dev_sum = 0, dev_max = 0;
+        if (ghost_out) ign_ghost_begin(&rec, car.id, track_id, "PL1");
         for (float t = 0; t < sim_seconds; t += SIM_DT) {
-            if (autopilot) ign_ai_drive(&player_ai, &car, &track, &in);
+            if (autopilot) {
+                if (ign_race_started(&race) || race.clock > IGN_RACE_AI_WAKE) ign_ai_drive(&player_ai, &car, &track, &in);
+                else in = (IgnInput){0};
+            }
             if (!car.wrecked) {
                 ign_car_tick(&car, &lv, &in);
                 ign_car_progress(&car, &track);
             }
             car_hits += tick_rivals(&lv, &track, &car);
+            if (++pos_ticks == 2) {
+                ign_pos_step(&lv.pos, &lv.track);
+                pos_ticks = 0;
+            }
+            if (!ign_race_started(&race)) continue;
+            if (ghost_out && !car.out) ign_ghost_record(&rec, &car, track.count);
+            if (ghost_in && ticks < IGN_GHOST_SAMPLES) {
+                double d = hypot(car.x - ghost.s[ticks].x, car.z - ghost.s[ticks].z);
+                dev_sum += d;
+                if (d > dev_max) dev_max = d;
+            }
+            ticks++;
             hits += car.wall_hit;
             air += car.airborne;
             if (getenv("IGN_TRACE"))
@@ -281,7 +469,23 @@ int main(int argc, char **argv) {
                "airborne ticks %d section %d/%d phase %d lap %d\n",
                car.x, car.y, car.z, car.heading, car.kmh, car.gear, car.surface_type, hits, air,
                car.section, track.count, car.phase, car.lap);
-        printf("car-car contacts %d\n", car_hits);
+        printf("car-car contacts %d, wrecks %d\n", car_hits, car.wrecks);
+        if (ghost_in) {
+            int n = ticks < IGN_GHOST_SAMPLES ? ticks : IGN_GHOST_SAMPLES;
+            printf("ghost %s: car %d track %d %.2f s, name %.3s; deviation over %d ticks mean %.0f max %.0f\n",
+                   ghost_in, ghost.car, ghost.track, ghost.time_cs / 100.0, ghost.name, n, n ? dev_sum / n : 0.0,
+                   dev_max);
+        }
+        if (ghost_out) {
+            ign_ghost_finish(&rec, (car.out ? car.finish_tick : ticks) * IGN_PHYS_DT);
+            if (ign_ghost_save(ghost_out, &rec)) {
+                fprintf(stderr, "cannot write ghost %s%s\n", ghost_out, rec.overflow ? " (over 300 s)" : "");
+                ign_hud_destroy(&hud);
+                ign_free_level(&lv);
+                return 1;
+            }
+            printf("ghost written: %d samples, %.2f s\n", rec.count, rec.time_cs / 100.0);
+        }
         {
             const IgnCar *all[MAX_RIVALS + 1] = {&car};
             for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
@@ -293,39 +497,55 @@ int main(int argc, char **argv) {
                            all[i]->wrecked ? " (eliminated)" : "");
         }
         for (int i = 0; i < nrivals; i++)
-            printf("rival %d (car %d): section %d phase %d lap %d %.0f km/h\n", i, rivals[i].id,
-                   rivals[i].section, rivals[i].phase, rivals[i].lap, rivals[i].kmh);
-        if (!fixed_cam) chase_camera(&car, &cam);
+            printf("rival %d (car %d): section %d phase %d lap %d %.0f km/h wrecks %d\n", i, rivals[i].id,
+                   rivals[i].section, rivals[i].phase, rivals[i].lap, rivals[i].kmh, rivals[i].wrecks);
+        if (!fixed_cam) race_view(&car, rear_view, &cam);
         draw(&lv, &car, &cam);
-        int rc = write_ppm(shot, &frame, &lv.palette);
+        IgnPalette shown;
+        ign_fx_palette(&fx, &lv.palette, &shown);
+        int rc = write_ppm(shot, &frame, &shown);
+        ign_hud_destroy(&hud);
         ign_free_level(&lv);
         return rc ? 1 : 0;
     }
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
+        ign_hud_destroy(&hud);
+        ign_free_level(&lv);
         return 1;
     }
     SDL_Window *win;
     SDL_Renderer *ren;
-    if (!SDL_CreateWindowAndRenderer("Ignition", IGN_SCREEN_W * WINDOW_SCALE,
-                                     IGN_SCREEN_H * WINDOW_SCALE, SDL_WINDOW_RESIZABLE, &win,
+    if (!SDL_CreateWindowAndRenderer("Ignition", WINDOW_W,
+                                     WINDOW_W * 3 / 4, SDL_WINDOW_RESIZABLE, &win,
                                      &ren)) {
         fprintf(stderr, "SDL: %s\n", SDL_GetError());
+        ign_hud_destroy(&hud);
+        ign_free_level(&lv);
         return 1;
     }
     SDL_SetRenderVSync(ren, 1);
-    SDL_SetRenderLogicalPresentation(ren, IGN_SCREEN_W, IGN_SCREEN_H,
-                                     SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    /* The original modes are all shown at 4:3, so 320x200 gets tall pixels as on a CRT. */
+    SDL_SetRenderLogicalPresentation(ren, frame.w, frame.w * 3 / 4, SDL_LOGICAL_PRESENTATION_LETTERBOX);
     SDL_Texture *tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_XRGB8888,
-                                         SDL_TEXTUREACCESS_STREAMING, IGN_SCREEN_W, IGN_SCREEN_H);
+                                         SDL_TEXTUREACCESS_STREAMING, frame.w, frame.h);
     SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
-    static uint32_t rgb[IGN_SCREEN_W * IGN_SCREEN_H];
+    static uint32_t rgb[IGN_MAX_W * IGN_MAX_H];
+    {
+        IgnCar *all[MAX_RIVALS + 1] = {&car};
+        for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
+        if (ign_sound_start(data_dir, level, &lv, all, nrivals + 1, &weather))
+            fprintf(stderr, "audio: %s\n", SDL_GetError());
+    }
 
     bool free_cam = false;
+    bool manual_gear = false;
+    int pending_gear_shift = 0;
     char typed[16] = {0};
     SDL_StartTextInput(win);
     float accumulator = 0.0f;
+    int pos_ticks = 0;
     Uint64 last = SDL_GetTicks();
     for (bool running = true; running;) {
         SDL_Event ev;
@@ -333,7 +553,14 @@ int main(int argc, char **argv) {
             if (ev.type == SDL_EVENT_QUIT ||
                 (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE))
                 running = false;
-            if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F1) free_cam = !free_cam;
+            if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) {
+                if (ev.key.key == SDLK_F1) free_cam = !free_cam;
+                else if (ev.key.key == SDLK_M) manual_gear = !manual_gear;
+                else if (!free_cam && ev.key.key == SDLK_Q) pending_gear_shift = -1;
+                else if (!free_cam && ev.key.key == SDLK_E) pending_gear_shift = 1;
+                /* sub_0002b9e4 0x2c017: TAB (scancode 0x0f) steps the post-race camera 0, 1, 2, 3. */
+                else if (ev.key.key == SDLK_TAB) tv_index = (tv_index + 1) % 4;
+            }
             /* Cheat words are typed during play (0x160c4); BANARNE toggles 3x tall bodies. */
             if (ev.type == SDL_EVENT_TEXT_INPUT) {
                 for (const char *c = ev.text.text; *c; c++) {
@@ -363,34 +590,50 @@ int main(int argc, char **argv) {
                 .left = keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A],
                 .right = keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D],
                 .turbo = keys[SDL_SCANCODE_SPACE],
+                .manual_gear = manual_gear,
             };
             for (accumulator += dt; accumulator >= SIM_DT; accumulator -= SIM_DT) {
+                IgnInput tick_input = in;
+                tick_input.gear_shift = pending_gear_shift;
+                pending_gear_shift = 0;
                 if (!car.wrecked) {
-                    ign_car_tick(&car, &lv, &in);
+                    ign_car_tick(&car, &lv, &tick_input);
                     ign_car_progress(&car, &track);
                 }
                 tick_rivals(&lv, &track, &car);
+                if (++pos_ticks == 2) {
+                    ign_pos_step(&lv.pos, &lv.track);
+                    pos_ticks = 0;
+                }
             }
-            chase_camera(&car, &cam);
-            char title[128];
-            snprintf(title, sizeof title, "Ignition - lap %d - section %d/%d - %.0f km/h - turbo %.0f%%%s",
-                     car.lap + 1, car.section, track.count, car.kmh, car.turbo_charge,
-                     car.turbo_mode ? " ON" : "");
+            /* human_input 0x2c9df: the rear view (car+0x5a4) lasts while its key is held. */
+            race_view(&car, keys[SDL_SCANCODE_R], &cam);
+            static const char *const COUNT[] = {" - GO!", " - 1", " - 2", " - 3"};
+            int count = ign_race_countdown(&race);
+            char title[160];
+            snprintf(title, sizeof title, "Ignition - lap %d - section %d/%d - %.0f km/h - gear %d %s - turbo %.0f%%%s%s",
+                     car.lap + 1, car.section, track.count, car.kmh, car.gear,
+                     manual_gear ? "manual" : "auto", car.turbo_charge,
+                     car.turbo_mode ? " ON" : "", count >= 0 ? COUNT[count] : "");
             SDL_SetWindowTitle(win, title);
         }
 
         draw(&lv, &car, &cam);
-        to_rgb(&frame, &lv.palette, rgb);
-        SDL_UpdateTexture(tex, NULL, rgb, IGN_SCREEN_W * 4);
+        IgnPalette shown;
+        ign_fx_palette(&fx, &lv.palette, &shown);
+        to_rgb(&frame, &shown, rgb);
+        SDL_UpdateTexture(tex, NULL, rgb, frame.w * 4);
         SDL_RenderClear(ren);
         SDL_RenderTexture(ren, tex, NULL, NULL);
         SDL_RenderPresent(ren);
     }
 
+    ign_sound_stop();
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();
+    ign_hud_destroy(&hud);
     ign_free_level(&lv);
     return 0;
 }

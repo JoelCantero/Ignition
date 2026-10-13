@@ -183,3 +183,32 @@ void ign_track_gates(IgnTrack *t, const IgnLevel *lv) {
     for (int s = 1; s < t->count; s++)
         if (t->section_obj[s] < 0) memcpy(t->gate[s], t->gate[s - 1], sizeof t->gate[s]);
 }
+
+int ign_track_section_object(const IgnTrack *t, int s) {
+    if (t->count <= 0) return -1;
+    if (s >= 0) return t->section_obj ? t->section_obj[s % t->count] : -1;
+    for (int i = 0; i < t->nobj; i++)
+        if (t->section[i] == s) return i;
+    return -1;
+}
+
+int ign_track_section_angle(const IgnTrack *t, const IgnLevel *lv, int s, double *out) {
+    int o0 = ign_track_section_object(t, s), o1 = ign_track_section_object(t, s >= 0 ? s + 1 : s - 1);
+    /* The last branch B section leads to the merge object (class 6) closest to it. */
+    if (s < 0 && o0 >= 0 && o1 < 0) {
+        double best = INFINITY;
+        for (int i = 0; i < t->nobj; i++) {
+            if (t->klass[i] != 6 || t->section[i] < 0 || t->section[i] == IGN_NO_SECTION) continue;
+            double dx = t->center[i][0] - t->center[o0][0], dz = t->center[i][2] - t->center[o0][2];
+            if (dx * dx + dz * dz < best) best = dx * dx + dz * dz, o1 = i;
+        }
+    }
+    if (s < 0 && o1 < 0) o1 = ign_track_section_object(t, -s + 1);
+    if (o0 < 0 || o1 < 0) return 0;
+    const int32_t *a = lv->track.objs[o0].pos, *b = lv->track.objs[o1].pos;
+    double ang = -atan2((double)a[0] - b[0], (double)a[2] - b[2]);
+    if (ang < 0) ang += 2 * 3.14159265358979323846;
+    if (ang >= 2 * 3.14159265358979323846) ang -= 2 * 3.14159265358979323846;
+    *out = ang;
+    return 1;
+}

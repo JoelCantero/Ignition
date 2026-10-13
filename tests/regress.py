@@ -29,7 +29,7 @@ for t in TRACKS:
     CASES["%s 3 rivals 40s" % t] = [t, "--sim", "40", "auto", "--rivals", "3"]
     CASES["%s turbo 8s" % t] = [t, "--sim", "8", "turbo", "--rivals", "0"]
 CASES["USA viewer car 9"] = ["--model", "9", "0.6", "30", "0.15", "0", "USA"]
-CASES["USA grid camera"] = ["USA", "--sim", "0.3", "0", "--rivals", "3", "--cam", "900", "20", "2700", "0.0", "0.25"]
+CASES["USA grid camera"] = ["USA", "--sim", "0.3", "0", "--rivals", "3", "--cam", "900", "-165", "2700", "0.0", "0.25"]
 
 STATE = re.compile(r"section (-?\d+)(?:/(\d+))? phase (\d+) lap (\d+)")
 

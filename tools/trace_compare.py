@@ -27,7 +27,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("port")
     ap.add_argument("original")
-    ap.add_argument("--tol", nargs="*", default=["x=2", "z=2", "kmh=1"], help="field=tolerance pairs")
+    ap.add_argument("--tol", nargs="+", default=["x=2", "z=2", "kmh=1"], help="field=tolerance pairs")
     args = ap.parse_args()
     tol = {k: float(v) for k, v in (t.split("=") for t in args.tol)}
     a, b = load(args.port), load(args.original)
@@ -36,13 +36,19 @@ def main():
     worst = {k: 0.0 for k in tol}
     for i, (ra, rb) in enumerate(zip(a, b)):
         for k, lim in tol.items():
-            if k in ra and k in rb:
-                d = abs(ra[k] - rb[k])
-                worst[k] = max(worst[k], d)
-                if d > lim:
-                    print("first divergence at row %d (t=%.3f): %s port=%g original=%g (tol %g)" % (
-                        i, ra.get("t", 0), k, ra[k], rb[k], lim))
-                    return 1
+            if k not in ra or k not in rb:
+                missing = "both" if k not in ra and k not in rb else "port" if k not in ra else "original"
+                print("first divergence at row %d: field %s missing from %s trace" % (i, k, missing))
+                return 1
+            d = abs(ra[k] - rb[k])
+            worst[k] = max(worst[k], d)
+            if d > lim:
+                print("first divergence at row %d (t=%.3f): %s port=%g original=%g (tol %g)" % (
+                    i, ra.get("t", 0), k, ra[k], rb[k], lim))
+                return 1
+    if len(a) != len(b):
+        print("trace lengths differ: port=%d rows, original=%d rows" % (len(a), len(b)))
+        return 1
     print("traces agree over %d rows; worst differences: %s" % (
         min(len(a), len(b)), ", ".join("%s=%.3g" % kv for kv in worst.items())))
     return 0

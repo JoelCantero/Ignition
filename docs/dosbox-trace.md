@@ -1,28 +1,38 @@
-# Capturing reference traces from the original game in DOSBox-X
+# Original-game trace comparison
 
-Status: **tooling only**. No DOSBox-X build was available while writing this, so the capture procedure below is
-untested. The comparison side (`tools/trace_compare.py`) is tested against the port's own traces.
+**Status: pending a real DOSBox-X capture.** DOSBox-X 2026.10.01 is installed and the debugger accepted commands, but
+it has not been verified that `MAINDOS.EXE` reached a race. The DOS MZ entry was observed at `0824:038C`, and DOS
+reported `MAINDOS` in its memory-control-block chain. After resuming execution, the debugger later stopped at
+`F000:8DB4` in the BIOS idle loop. A delayed `ADDKEY` sequence was accepted and `MAINDOS` allocations appeared in
+the DOS MCB chain, but no race screen or protected-mode game state was confirmed; a subsequent debugger-inserted
+Enter did not advance execution. The BIOS keyboard queue was empty when first inspected. These observations do not
+establish an LE load-address mapping. The instructions below establish the port-side format and comparison tool
+only; they do not claim the original-memory sampling procedure has been verified.
 
-## Port side
+## Port-side trace
 
 ```sh
 IGN_TRACE=1 ./build/ignition USA --sim 20 auto --rivals 0 --shot /tmp/x.ppm 2>&1 | grep '^t=' > build/port.txt
 ```
 
-Each line is `t=… x=… z=… h=… v=… kmh=…` every 0.0139 s (one 1/72 s physics tick) in the port's world units.
+This records one row per 1/72-second simulation tick, with `t`, `x`, `z`, heading, forward speed and `kmh`.
 
-## Original side
+## Required original-side capture work
 
-1. Install DOSBox-X with the debugger enabled and mount the game directory (`ignition`), then start `MAINDOS.EXE`.
-2. The executable is DOS/4GW LE: linear addresses in `tools/symbols.txt` are LE-object addresses. DOS/4GW loads the
-   code object at a run-time base, so find it once: break in the debugger (`Alt+Pause`), search for the `_cstart_`
-   bytes (`DOS /4GW` banner string `RATIONAL DOS/4G` at `0xab29c` is a good anchor) with `MEMDUMPBIN` and compute
-   `base = found - 0xab29c`.
-3. Log per tick with a breakpoint on `cars_update_all` (`0x2d008` + base) using `BPM` / `LOGC`:
-   `g_cars` pointer at `0x1fefe0`; per car x `+0x00`, z `+0x10` (doubles), kmh `+0x118`, heading `+0xf8`.
-4. Convert the log to the port's `t=… x=… z=… kmh=…` lines (the original works in the same world units; heading is
-   `π/2 − render heading`).
-5. Compare: `tools/trace_compare.py build/port.txt build/original.txt --tol x=2 z=2 kmh=1`.
+Before this task can be marked complete:
 
-The first divergence reported is the first tick where the port differs from the original; start the physics review
-from the function that writes that field (`awk '/^; ----/{f=$3} /<field offset>/{print f,$0}' build/all.asm`).
+1. Run `MAINDOS.EXE` under a DOS/4GW-compatible DOSBox-X build with its debugger enabled.
+2. Confirm how the debugger exposes LE object addresses after DOS/4GW loading. Do not assume a single additive base
+   from an on-disk address; verify the code and data selectors/linear addresses in the running process.
+3. Determine a repeatable way to sample the player's `g_cars` fields (`+0x00` x, `+0x10` z, `+0x118` km/h) at
+   each physics update. Confirm the player-car index and tick cadence before collecting the reference.
+4. Convert verified samples into `t=… x=… z=… kmh=…` rows; retain the debugger transcript and the conversion script
+   alongside the trace, not in the repository.
+5. Compare the reference and port:
+
+   ```sh
+   tools/trace_compare.py build/port.txt build/original.txt --tol x=2 z=2 kmh=1
+   ```
+
+The comparator reports the first field or row-count divergence and fails on missing fields or unequal trace lengths.
+Its mechanics are tested with synthetic traces; the original capture procedure is not.

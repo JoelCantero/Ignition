@@ -20,6 +20,11 @@ typedef struct IgnTrack {
 
 /* Road edges per section from the TRI blocks (vertex indices at +1 and +0x17). */
 void ign_track_gates(IgnTrack *t, const IgnLevel *lv);
+/* Object of a signed section: g_sections+0 on the main route, +0xc (branch B object) for negative sections. */
+int ign_track_section_object(const IgnTrack *t, int s);
+/* build_sections 0x2970f-0x2a30a: g_sections+4 (+0x10 on branch B) = -atan2(x - x_next, z - z_next) of the PLC
+ * origins of the section object and the next one (atan2 0x647ef swaps st0/st1 before fpatan), in [0, 2pi). */
+int ign_track_section_angle(const IgnTrack *t, const IgnLevel *lv, int s, double *out);
 
 /* sub_000247b0 + sub_00028f08. Returns 0 on success. */
 int ign_build_track(const IgnModel *m, IgnTrack *t);
