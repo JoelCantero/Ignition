@@ -144,10 +144,18 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   procesan y consumen RNG por separado. En el port, `ign_fx_rand15` usa el LCG `seed = seed * 1103515245 + 12345`
   (`rand`, `0x64774`), compartido con el estado de `IgnFx`.
 - `load_tri` se integra al arrancar: registros geométricos extraídos por objeto engine→PLC, incluidas subdivisiones TRI
-  de tipo 1/2. **La topología no es aún equivalente al original**: `build_sections`/`ai_find_section` (`0x1decc`),
-  su wrap/fallback, la excepción de CANADA y la correspondencia de registros divididos con el carril elegido siguen
-  aproximados. Los registros TRI informan las puertas que consulta la IA en el grafo reconstruido, no demuestran por sí
-  solos la ruta/carril que habría escogido el original.
+  de tipo 1/2. **La topología no es aún equivalente al original**: la construcción de `build_sections` y la
+  correspondencia de registros divididos con el carril elegido siguen aproximadas. Los registros TRI informan las
+  puertas que consulta la IA en el grafo reconstruido, no demuestran por sí solos la ruta/carril que habría escogido
+  el original.
+- `ai_find_section` (`0x1decc`) ya tiene un helper portado (`ign_track_find_section`): interpreta sección, rama y
+  avance como entradas de 16 bits; hace un único ajuste de wrap; cambia a la otra rama si la solicitada no existe;
+  ante un registro TRI inválido acepta el actual cuando la condición de bifurcación original lo permite, o avanza
+  según el signo del paso. En CANADA (`track_id=0`), las secciones `0xab..0xad` fuerzan el avance en ese caso.
+  `ai.c` usa el helper al consultar los registros/puertas de lookahead. La prueba `track_route_selection` cubre fallback,
+  aceptación/avance, wrap y excepción de CANADA. El enlace de ramas y los índices/objetos que alimentan esta lógica
+  todavía dependen de la topología aproximada generada por `ign_build_track`; por tanto esto no acredita aún selección
+  de ruta completa equivalente ni correspondencia exacta de carril para cada pista.
 - Al construir puertas, el índice de objeto del motor se traduce a índice PLC mediante
   `surface.engine_to_plc` antes de leer el bloque TRI (`4 + plc_index * 500`). No se presupone que ambos índices
   coincidan; los índices ausentes o bloques fuera de rango usan el centro del objeto como fallback. La prueba

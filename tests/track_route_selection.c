@@ -53,6 +53,7 @@ int main(void) {
                         section == 3 && branch == 0 && object == 3,
                     "falls back to the main route when branch B is absent");
 
+    t.has_b[1] = 0;
     t.ai_records[2][0][0].valid = 0;
     failed |= check(ign_track_find_section(&t, 2, 0, 1, 1, &section, &branch, &object) &&
                         section == 2 && branch == 0,

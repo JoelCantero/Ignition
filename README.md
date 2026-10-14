@@ -420,7 +420,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Muros (aristas no compartidas, activación por superficie, modo salto, caché de 150) | `collect_walls` `0x33ee8`, `car_update` `0x2f856`, `cars_update_all` `0x2d77a` | `assets.c`, `car.c` | fiel |
 | Choque con muros | `box_vs_walls` `0x1f708`, `wall_impulse` `0x1f3fc` | `physics.c` | fiel |
 | Choque entre coches | pase en `0x2d2f8`, `0x1ebb4`, `0x1e638` | `physics.c`, `car.c` | fiel (falta el caso de solape) |
-| Tramos, bifurcaciones y saltos | `split_plc_types` `0x247b0`, `build_sections` `0x28f08` | `track.c` | fiel |
+| Tramos, bifurcaciones y saltos | `split_plc_types` `0x247b0`, `build_sections` `0x28f08` | `track.c` | orden/topología aproximados; pendiente cotejo completo |
 | Vueltas, fases y tiempos | `car_update` `0x2f2be`, `0x2fc1c` | `race.c`, `car.c` | 3 024 casos / 4 112 pasos exactos por fragmentos; geometría, récord guardado y avisos excluidos |
 | Parrilla de salida | `cars_init` `0x26458` | `main.c` | fiel |
 | Turbo | `car_turbo` `0x4e2d8`, `car_input` `0x4d8eb`, `human_input` `0x2c99e` | `car.c` | aritmética: 2 016 casos / 96 768 pasos; arbitraje por fragmentos: 10 728 / 82 440 exactos; generación humana/latch: 5 184 / 31 104 exactos; sondeo, timer DOS, IA/joystick, sonido/efectos y coherencia del rumbo del caller no verificados |
@@ -431,7 +431,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Pose: dirección visual, inclinación | `0x48a14`, `0x40ec8`, `0x2e6f8` | `car.c`, `raster.c` | fiel |
 | Sombra del coche | `0x48a14` | `raster.c` | geometría fiel; sombreado aproximado |
 | Truco BANARNE | `cheat_check` `0x160c4` | `main.c` | fiel |
-| IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG de selección y registros geométricos `load_tri` portados e integrados con mapeo engine→PLC; álgebra de acelerador (0x1b9a2), curvatura, rival, borde, atasco y turbo; aproximados: topología `build_sections`/`ai_find_section` y asignación exacta de registros divididos a carriles, pendiente (Y), giro por solape y frenada de curva (heurística) |
+| IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, registros `load_tri` con mapeo engine→PLC y selección `ai_find_section` (wrap, fallback de rama, avance de registros inválidos y excepción CANADA) implementados; topología `build_sections` y asignación exacta de registros divididos a carriles aún aproximadas; pendiente (Y), giro por solape y frenada de curva (heurística) |
 | Render 3D | motor Lisa 2 | `raster.c` | propio: z-buffer, sin sombreado TAB |
 
 ---
@@ -671,7 +671,7 @@ implementado.
 
 ### Fase 1 — Carrera completa de un jugador (jugabilidad)
 
-- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: núcleo de dirección/atasco/turbo/límites y álgebra exacta; pendiente decodificada pero no portada, falta elección de carril y selección de registros `load_tri` reales, más giro por solape) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
+- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: núcleo de dirección/atasco/turbo/límites y álgebra exacta, elección de carril, registros `load_tri` y selector `0x1decc`; pendiente topología completa de `build_sections`, asignación exacta de registros divididos, pendiente (Y) y giro por solape) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
       byte `+0x6d` de TRI), consulta de puertas `0x1decc`, velocidad objetivo por curvatura y pendiente
       (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
       Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.
