@@ -198,8 +198,11 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player) {
     }
     /* Advanced last so the player (ticked before this function) and the rivals see the same clock. */
     ign_race_clock(&race);
+    for (int i = 0; i <= nrivals; i++) {
+        if (!started && ign_race_started(&race)) ign_race_reset_car_clock(all[i]);
+        ign_race_car_clock(all[i], race.mode, race.elapsed);
+    }
     ign_set_race_started(ign_race_started(&race));
-    ign_set_race_time(race.tick * IGN_PHYS_DT);
     ign_set_level_clock(race.total);
     for (int i = 0; i <= nrivals; i++) all[i]->position = ign_race_position((const IgnCar *const *)all, nrivals + 1, i);
     return hits;
@@ -242,7 +245,7 @@ static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
 }
 
 static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
-    fprintf(stderr, "t=%.17g tick=%d trace_schema=1", tick * IGN_PHYS_DT, tick);
+    fprintf(stderr, "t=%.17g tick=%d trace_schema=4", tick * IGN_PHYS_DT, tick);
 #define CAR_FIELD(field) fprintf(stderr, " " #field "=%.17g", (double)car->field)
 #define BODY_FIELD(field) fprintf(stderr, " b_" #field "=%.17g", (double)car->body.field)
 #define INPUT_FIELD(field) fprintf(stderr, " in_" #field "=%d", (int)in->field)
@@ -251,10 +254,13 @@ static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
     INPUT_FIELD(manual_gear); INPUT_FIELD(gear_shift);
     CAR_FIELD(id); CAR_FIELD(spec); CAR_FIELD(x); CAR_FIELD(y); CAR_FIELD(z); CAR_FIELD(heading);
     CAR_FIELD(kmh); CAR_FIELD(height); CAR_FIELD(ground); CAR_FIELD(ground_prev); CAR_FIELD(fall_speed);
+    CAR_FIELD(grip_avg);
     CAR_FIELD(airborne); CAR_FIELD(ground_object); CAR_FIELD(surface_type); CAR_FIELD(special_ground);
     CAR_FIELD(level_change); CAR_FIELD(jump_mode); CAR_FIELD(wall_hit); CAR_FIELD(wall_impact); CAR_FIELD(nwalls);
     CAR_FIELD(gear); CAR_FIELD(forward_gear); CAR_FIELD(steer_visual); CAR_FIELD(revs);
+    CAR_FIELD(gear_ticks); CAR_FIELD(gear_delay);
     CAR_FIELD(turbo_charge); CAR_FIELD(turbo_mode); CAR_FIELD(turbo_wait); CAR_FIELD(turbo_key);
+    CAR_FIELD(race_elapsed); CAR_FIELD(lap_elapsed); CAR_FIELD(lap_origin);
     CAR_FIELD(creep); CAR_FIELD(creep_ticks); CAR_FIELD(catchup); CAR_FIELD(catchup_clock);
     CAR_FIELD(section); CAR_FIELD(phase); CAR_FIELD(lap); CAR_FIELD(position);
     CAR_FIELD(out); CAR_FIELD(wrecked); CAR_FIELD(wrecks); CAR_FIELD(wreck_kind); CAR_FIELD(wreck_frame);
@@ -542,7 +548,7 @@ int main(int argc, char **argv) {
                    dev_max);
         }
         if (ghost_out) {
-            ign_ghost_finish(&rec, (car.out ? car.finish_tick : ticks) * IGN_PHYS_DT);
+            ign_ghost_finish(&rec, car.race_elapsed);
             if (ign_ghost_save(ghost_out, &rec)) {
                 fprintf(stderr, "cannot write ghost %s%s\n", ghost_out, rec.overflow ? " (over 300 s)" : "");
                 ign_hud_destroy(&hud);

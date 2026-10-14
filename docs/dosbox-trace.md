@@ -26,7 +26,11 @@ IGN_TRACE=full ./build/ignition USA --sim-ticks 1440 auto --rivals 0 --shot /tmp
   2> build/port-full.txt
 ```
 
-Full schema version 1 has 98 numeric fields: controls, sampled car/body state and four wheel/corner entries.
+Full schema version 4 has 104 numeric fields: controls, sampled car/body state and four wheel/corner entries.
+It adds `race_elapsed`, `lap_elapsed` and `lap_origin` in seconds (original car+0x3a4/+0x3ac/+0x3d4).
+Version 3 had 101 fields including `gear_ticks` and `gear_delay` (original ctrl+0x10/+0x14). Version 2 had 99 fields including
+persistent `grip_avg` (original car+0x148); version 1 had 98. The replay rejects older versions rather than
+silently comparing incomplete state. Grip retention and delayed automatic shifts depend on this state.
 It emits an initial row (`tick=0,t=0`), followed by one row after each complete update, at 17-digit precision.
 Tick `n` has timestamp `n/72`; countdown updates are included when requested. This is not a dump of all game
 memory, nor a verified original-game sampling boundary. `--sim-ticks` executes an integer tick count;

@@ -17,10 +17,9 @@ int ign_get_difficulty(void) { return difficulty; }
 void ign_set_difficulty(int level) { difficulty = level < 0 ? 0 : level > 3 ? 3 : level; }
 
 static int race_started = 1;
-static double race_time, level_clock;
+static double level_clock;
 
 void ign_set_race_started(int started) { race_started = started; }
-void ign_set_race_time(double seconds) { race_time = seconds; }
 void ign_set_level_clock(double frames) { level_clock = frames; }
 
 /* Table index 11 is not a CARS.PLC model: it is the profile computer cars use for steering, turbo force and revs. */
@@ -31,6 +30,13 @@ static const int COMPUTER_MODELS[4][10] = {
     {1, 3, 5, 0, 2, 6, 9, 4, 7, 8}, {6, 1, 4, 8, 7, 3, 9, 0, 5, 2}, {9, 6, 1, 3, 5, 4, 7, 0, 8, 2},
     {9, 6, 1, 3, 5, 4, 7, 0, 8, 2}};
 static const int BONUS_INDEX[12] = {8, 3, 10, 5, 4, 6, 2, 7, 9, 1, 0, 0};
+/* 0xc5670, indexed by difficulty and 0xc57d0[model]. */
+static const double AI_REAR_GRIP[4][11] = {
+    {1.4, 1.37, 1.4, 1.4, 1.33, 1.37, 1.33, 1.29, 1.29, 1.24, 1.24},
+    {1.55, 1.5, 1.55, 1.55, 1.45, 1.5, 1.45, 1.4, 1.4, 1.3, 1.3},
+    {1.7, 1.65, 1.7, 1.7, 1.6, 1.65, 1.6, 1.55, 1.55, 1.45, 1.45},
+    {1.7, 1.65, 1.7, 1.7, 1.6, 1.65, 1.6, 1.55, 1.55, 1.45, 1.45},
+};
 static const int TORQUE_BONUS[4][11] = {{0, -8, -3, -6, -9, -6, -4, -7, -13, -7, -16},
                                         {0, -1, 3, 1, -3, -2, 5, -3, -5, 0, -5},
                                         {0, 6, 8, 7, 7, 6, 8, 5, 2, 7, 0},
@@ -68,6 +74,7 @@ void ign_car_progress(IgnCar *car, const IgnTrack *t) {
     int a = abs(s), q = t->count / 4;
     if (car->phase == 3 && a == t->count - 1) {
         car->lap++;
+        car->lap_origin = car->race_elapsed;
         car->phase = 0;
     } else if (car->phase == 0 && a >= q && a < 2 * q) {
         car->phase = 1;
@@ -201,7 +208,7 @@ static int wall_trigger(IgnCar *car, const int types[4], const double wheel_up[4
 
 /* sub_0002e234: gravity, ground following, jumps and landing. Returns 1 on landing; `raw_drop` is the ground step
  * the original tests (car_vertical [esp+8]), before the port's upward limit. */
-static int vertical_step(IgnCar *car, double *raw_drop) {
+int ign_car_vertical_step(IgnCar *car, double *raw_drop) {
     double drop = car->ground_prev - car->ground;
     if (fabs(car->kmh) < 50.0 && fabs(drop) > 4.0) drop = 0;
     if (fabs(car->kmh * 0.05) < drop) drop = 0; /* ground falls away faster than we follow: jump */
@@ -225,7 +232,6 @@ static int vertical_step(IgnCar *car, double *raw_drop) {
             landed = 1;
         }
     }
-    if (car->ground + 30.0 < car->height) car->airborne = 1;
     return landed;
 }
 
@@ -300,6 +306,7 @@ int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, floa
     memset(car, 0, sizeof *car);
     car->id = id;
     car->body_stretch = 1.0f;
+    car->grip_avg = 0.4;
     car->spec = ((id % 12) + 12) % 12;
     int body = -1;
     for (int i = 0; i < lv->cars.nobj && car->nparts < IGN_MAX_CAR_PARTS; i++) {
@@ -340,6 +347,8 @@ int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, floa
 
     for (int g = 0; g < 3; g++) ign_torque_curve(ign_car_gears[car->spec][g], car->torque[g]);
     car->gear = car->forward_gear = 1;
+    car->gear_ticks = 0;
+    car->gear_delay = 30;
 
     /* sub_00026458 body setup. */
     IgnBody *b = &car->body;
@@ -445,25 +454,25 @@ int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double he
     return 0;
 }
 
-/* car_throttle 0x4e000: the revs follow speed / top speed of the gear (x2 of its torque curve, 0xc4fe0) x 66 once the
- * race runs, and the throttle in the air or before the start; a skid below 60 km/h revs up, a finished car winds down. */
-static void update_revs(IgnCar *car, int input) {
-    static const double SPEED_DIV[4] = {1.0, 1.15, 1.3, 1.3};
-    int idx = (int)(fabs(car->body.v_fwd * 3.6) / SPEED_DIV[difficulty]);
-    if (idx > 199) idx = 199;
-    int gear = car->gear < 0 || car->gear > 2 ? 0 : car->gear;
-    double ratio = idx / (double)ign_car_gears[car->ai ? COMPUTER_PROFILE : car->spec][gear][4];
+/* car_throttle 0x4dfbe: reuses the final torque index; human and computer airborne/finish rules differ. */
+void ign_car_update_revs(IgnCar *car, int input, int torque_index) {
+    double ratio = torque_index / (double)ign_car_gears[car->ai ? COMPUTER_PROFILE : car->spec][car->gear][4];
     if (ratio <= 1.5) {
-        if (car->airborne || !race_started) car->revs += (abs(input) - car->revs) * (1.0 / 6.0);
-        else car->revs = ratio * 66.0;
+        if (car->ai) {
+            if (car->airborne && input > 80) car->revs += (input - car->revs) * (1.0 / 6.0);
+            else car->revs = ratio * 66.0;
+        } else {
+            if (car->airborne || !race_started) car->revs += (abs(input) - car->revs) * (1.0 / 6.0);
+            else car->revs = ratio * 66.0;
+        }
     }
     if (car->skidding && car->kmh < 60.0) car->revs += (100.0 - car->revs) * (1.0 / 6.0);
-    if (car->out) car->revs += -car->revs * (1.0 / 6.0);
+    if (!car->ai && car->out) car->revs += -car->revs * (1.0 / 6.0);
 }
 
 /* sub_000500f0: smoothed steering limited by speed and surface grip; computer cars use profile 11's limit and, like
  * analog input, set the wheel angle directly. */
-static void steer(IgnCar *car, int input, double grip_avg, int analog) {
+void ign_car_steer(IgnCar *car, int input, double grip_avg, int analog) {
     IgnBody *b = &car->body;
     int s = car->spec, p = car->ai ? COMPUTER_PROFILE : s;
     car->steer_visual += (10.0 * 0.01 * input * 4.0 - car->steer_visual) * 0.1;
@@ -480,15 +489,91 @@ static void steer(IgnCar *car, int input, double grip_avg, int analog) {
     b->steer += (target - b->steer) / rate;
 }
 
+double ign_car_update_grip(IgnCar *car, const int types[4]) {
+    /* car_update 0x3070a: one invalid wheel skips the entire update. */
+    for (int w = 0; w < 4; w++)
+        if (types[w] < 0 || types[w] >= 30) return car->grip_avg;
+    double sum = 0;
+    for (int w = 0; w < 4; w++)
+        sum += ign_surface_grip[types[w]];
+    double avg = sum * 0.25;
+    car->grip_avg = avg;
+    if (car->ai) {
+        car->body.grip_f = avg * ign_car_grip[COMPUTER_PROFILE];
+        car->body.grip_r = car->body.grip_f * AI_REAR_GRIP[difficulty][BONUS_INDEX[car->spec]];
+    } else {
+        car->body.grip_f = avg * ign_car_grip[car->spec];
+        car->body.grip_r = car->body.grip_f * difficulty_grip[difficulty];
+    }
+    return avg;
+}
+
+static int speed_index(double velocity) {
+    double kmh = velocity * 3.6;
+    int speed = (int)kmh;
+    /* x87 truncates the extended product, not a binary64 product rounded to an integer. */
+    if (speed && kmh == speed) {
+        double residual = fma(velocity, 3.6, -kmh);
+        double half_ulp = ldexp(1.0, ilogb(fabs(kmh)) - 64);
+        if (speed > 0 && residual < -half_ulp) speed--;
+        if (speed < 0 && residual > half_ulp) speed++;
+    }
+
+    return abs(speed);
+}
+
+int ign_car_input_throttle(const IgnCar *car, int accel, int brake, int automatic) {
+    return car->gear > 0 ? accel : -(automatic ? brake : accel);
+}
+
+static int forward_motion_angle(double slip) {
+    return (slip > -1.5707963267949 && slip < 1.5707963267949) || slip > 4.7123889803847;
+}
+
+void ign_car_input_direction(IgnCar *car, int accel, int brake, int automatic) {
+    if (!automatic) {
+        ign_car_brake(car, brake);
+        return;
+    }
+    ign_car_brake(car, 0);
+    if (forward_motion_angle(car->slip) && car->body.v_fwd > 2.0)
+        ign_car_brake(car, brake);
+    else if (brake > 5)
+        car->gear = 0;
+    if (accel > 50 && car->gear == 0) car->gear = 1;
+    if (car->gear > 0) car->forward_gear = car->gear;
+}
+
+void ign_car_gearbox(IgnCar *car, const int16_t curves[3][IGN_TORQUE_POINTS]) {
+    int idx = speed_index(car->body.v_fwd);
+    if (idx >= IGN_TORQUE_POINTS) idx = IGN_TORQUE_POINTS - 1;
+    int target = curves[1][idx] > curves[2][idx] || !forward_motion_angle(car->slip) ? 1 : 2;
+    car->gear_ticks = target != car->gear ? car->gear_ticks + 1 : 0;
+    if (car->gear_ticks > car->gear_delay) car->gear = target;
+    if (car->gear > 0) car->forward_gear = car->gear;
+}
+
+void ign_car_shift(IgnCar *car, int shift) {
+    if (shift > 0 && car->gear < 2) car->gear++;
+    if (shift < 0 && car->gear > 0) car->gear--;
+    if (car->gear > 0) car->forward_gear = car->gear;
+}
+
 /* sub_0004db90: torque curve (speed index divided by 0xc5450[difficulty]) plus the creep, catch-up and computer
  * bonuses, x throttle; reverse selected while rolling forward brakes with -25000; released, engine braking. */
-static void throttle(IgnCar *car, int input) {
+int ign_car_throttle(IgnCar *car, int input) {
     static const double SPEED_DIV[4] = {1.0, 1.15, 1.3, 1.3};
     IgnBody *b = &car->body;
-    int idx = (int)(abs((int)trunc(b->v_fwd * 3.6)) / SPEED_DIV[difficulty]);
+    int magnitude = speed_index(b->v_fwd);
+    double divisor = SPEED_DIV[difficulty], quotient = magnitude / divisor;
+    int idx = (int)quotient;
+    if (idx && quotient == idx &&
+        fma(-idx, divisor, magnitude) < -ldexp(1.0, ilogb(quotient) - 64) * divisor)
+        idx--;
     if (idx > IGN_TORQUE_POINTS - 1) idx = IGN_TORQUE_POINTS - 1;
     /* 0x4dd05: wheelspin against the motion gives no torque. */
-    if (car->slip > PI / 2 && car->slip < 3 * PI / 2 && car->kmh > 2.0 && input > 0) car->skid_timer = 10, idx = 0;
+    if (car->slip > 1.5707963267949 && car->slip < 4.7123889803847 && car->kmh > 2.0 && input > 0)
+        car->skid_timer = 10, idx = 0;
     int torque = car->torque[car->gear][idx];
     /* 0x4dd5e: with the curve at <= 3 the creep grows by one every 8 x creep + 15 ticks; above it, it halves. */
     if (torque <= 3) {
@@ -509,10 +594,18 @@ static void throttle(IgnCar *car, int input) {
     /* 0x4df0e: before the start the drive force keeps its value. */
     if (race_started) b->drive += (target - b->drive) * 0.2;
     if (input == 0) b->drive = -(b->v_fwd * 500.0);
+    if (b->saturated && !car->airborne) car->skid_timer = 30;
+    return idx;
+}
+
+void ign_car_brake(IgnCar *car, int input) {
+    if (input > 80 && car->body.v_fwd > 2.0) car->skid_timer = 10;
+    /* 0x4e233 / 0x4e254: >50 locks the wheels; the nonnegative start clock also locks them. */
+    car->body.sliding = input > 50 || !race_started;
 }
 
 /* sub_0004e2d8: burns 2.5 charge per tick while active; otherwise recharges (it may pass 100 for one tick). */
-static void turbo(IgnCar *car) {
+void ign_car_turbo(IgnCar *car) {
     IgnBody *b = &car->body;
     if (!car->turbo_mode) {
         if (car->turbo_charge < 100.0)
@@ -525,27 +618,45 @@ static void turbo(IgnCar *car) {
     if (car->turbo_charge <= 0) {
         car->turbo_charge = 0;
         car->turbo_mode = 0;
+        car->turbo_frames = 0;
+        return;
     }
     float low = (float)((20.0 - b->v_fwd) * 10000.0);
     if (low < 0) low = 0;
     if (car->turbo_mode == 1) {
         b->drive += ign_car_turbo_force[car->ai ? COMPUTER_PROFILE : car->spec] * car->turbo_charge + low;
-    } else {
+    } else if (car->turbo_mode == 2) {
         b->drive += car->turbo_charge * 20000.0 + low;
         b->vx += cos(b->heading) * car->turbo_charge * 0.01;
         b->vz += sin(b->heading) * car->turbo_charge * 0.01;
     }
 }
 
-/* car_input 0x4d8eb: a full charge starts the turbo; otherwise the request is refused (beep). */
-static void request_turbo(IgnCar *car) {
-    if (car->turbo_charge >= 100.0 && !car->turbo_mode && !car->out) {
+int ign_car_turbo_input(const IgnCar *car, int key, double elapsed) {
+    if (key != 1 || car->wrecked) return 0;
+    return elapsed < 0.25 && !car->turbo_key && !car->turbo_mode ? 2 : 1;
+}
+
+IgnTurboRequestEvent ign_car_turbo_request(IgnCar *car, int request) {
+    IgnTurboRequestEvent event = IGN_TURBO_REQUEST_NONE;
+    if (request == 2) {
+        car->turbo_wait = 0;
+        car->turbo_mode = 2;
+        car->turbo_started = 1;
+        return IGN_TURBO_REQUEST_FORCED;
+    }
+    if (request != 1) return event;
+    if (car->turbo_charge >= 100.0 && !car->turbo_mode && race_started && !car->out) {
         car->turbo_mode = 1;
         car->turbo_wait = 0;
         car->turbo_started = 1;
-    } else if (!car->turbo_mode && car->turbo_wait <= 0 && car->turbo_charge > 20.0) {
+        event = IGN_TURBO_REQUEST_START;
+    } else if (!car->turbo_mode && car->turbo_wait <= 0 && car->turbo_charge > 20.0 && !car->ai) {
         car->turbo_wait = 30;
+        event = IGN_TURBO_REQUEST_REFUSED;
     }
+    if (car->turbo_wait > 0) car->turbo_wait--;
+    return event;
 }
 
 /* sub_0002e6f8 + sub_00040ec8: body lean from per-tick acceleration, smoothed towards ground tilt. */
@@ -619,69 +730,38 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     car->slip = fmod(vel - b->heading, 2 * PI);
     if (car->slip < 0) car->slip += 2 * PI;
 
-    double grip_sum = 0;
-    for (int w = 0; w < 4; w++)
-        grip_sum += ign_surface_grip[types[w] >= 0 && types[w] < 30 ? types[w] : 0];
     int barrier = wall_trigger(car, types, wheel_up);
-    double grip_avg = grip_sum * 0.25; /* car+0x148 */
+    double grip_avg = ign_car_update_grip(car, types); /* car+0x148 */
     car->surface_type = types[0] < 0 ? 0 : types[0];
-    b->grip_f = grip_avg * ign_car_grip[car->spec];
-    b->grip_r = grip_avg * ign_car_grip[car->spec] * difficulty_grip[difficulty];
 
-    /* car_gearbox 0x502c4: brake selects reverse; manual mode bypasses automatic forward-gear selection. */
-    int idx = (int)fabs(trunc(b->v_fwd * 3.6));
-    if (idx > IGN_TORQUE_POINTS - 1) idx = IGN_TORQUE_POINTS - 1;
-    int throttle_in = 0;
-    if (in->analog) {
-        if (in->a_brake > 0) {
-            car->gear = 0;
-            throttle_in = -(in->a_brake > 50 ? 100 : in->a_brake * 2);
-        } else if (in->a_accel > 0) {
-            car->gear = car->torque[2][idx] > car->torque[1][idx] ? 2 : 1;
-            car->forward_gear = car->gear;
-            throttle_in = in->a_accel > 100 ? 100 : in->a_accel;
-        }
-    } else if (in->manual_gear) {
-        if (in->gear_shift > 0 && car->forward_gear < 2) car->forward_gear++;
-        if (in->gear_shift < 0 && car->forward_gear > 1) car->forward_gear--;
-        car->gear = car->forward_gear;
-        if (in->brake) {
-            car->gear = 0;
-            throttle_in = -100;
-        } else if (in->accel) {
-            throttle_in = 100;
-        }
-    } else if (in->brake) {
-        car->gear = 0;
-        throttle_in = -100;
-    } else if (in->accel) {
-        car->gear = car->torque[2][idx] > car->torque[1][idx] ? 2 : 1;
-        car->forward_gear = car->gear;
-        throttle_in = 100;
-    }
-    throttle(car, throttle_in);
-    update_revs(car, throttle_in);
-    /* car_throttle 0x4df99: drive clipped by grip; sub_0004e1bc 0x4e283: hard braking above 2 m/s. */
-    if (b->saturated && !car->airborne) car->skid_timer = 30;
-    if (throttle_in < -80 && b->v_fwd > 2.0) car->skid_timer = 10;
-    /* sub_0004e1bc 0x4e254: the wheels stay locked (sliding) until the race clock starts. */
-    b->sliding = !race_started;
-    turbo(car);
+    int request = car->ai ? (in->turbo && !car->wrecked) :
+                           ign_car_turbo_input(car, in->turbo, car->race_elapsed);
+    int accel = in->analog ? in->a_accel : in->accel ? 100 : 0;
+    int brake = in->analog ? in->a_brake : in->brake ? 100 : 0;
+    int automatic = !in->manual_gear;
+    int throttle_in = ign_car_input_throttle(car, accel, brake, automatic);
+    int torque_index = ign_car_throttle(car, throttle_in);
+    ign_car_update_revs(car, throttle_in, torque_index);
+    ign_car_turbo(car);
+    ign_car_input_direction(car, accel, brake, automatic);
     /* Positive body steering turns towards +z from +x, i.e. left as seen from above. */
-    steer(car, in->analog ? in->a_steer : (in->left ? 100 : 0) - (in->right ? 100 : 0), grip_avg, in->analog);
-    /* car_input 0x4d921: no turbo before the start. human_input 0x2c99e: a new press within 0.25 s of the start
-     * (race time car+0x3a4) is a start boost, request 2, which forces turbo mode 2 whatever the charge (0x4dad1). */
-    int request = in->turbo && race_started && !car->wrecked;
-    if (request && race_time < 0.25 && !car->turbo_key && !car->turbo_mode) request = 2;
-    car->turbo_key = request;
-    if (request == 2) {
-        car->turbo_wait = 0;
-        car->turbo_mode = 2;
-        car->turbo_started = 1;
-    } else if (request) {
-        request_turbo(car);
+    ign_car_steer(car, in->analog ? in->a_steer : (in->left ? 100 : 0) - (in->right ? 100 : 0), grip_avg, in->analog);
+    ign_car_turbo_request(car, request);
+
+    if (!automatic) {
+        ign_car_shift(car, in->gear_shift);
+    } else if (car->gear != 0) {
+        /* 0x502ee/0x502fe use model zero's shared curves, not this car's model or difficulty. */
+        static int16_t curves[3][IGN_TORQUE_POINTS];
+        static int curves_ready;
+        if (!curves_ready) {
+            for (int g = 1; g < 3; g++) ign_torque_curve(ign_car_gears[0][g], curves[g]);
+            curves_ready = 1;
+        }
+        ign_car_gearbox(car, curves);
     }
-    if (car->turbo_wait > 0) car->turbo_wait--;
+
+    car->turbo_key = request;
 
     if (barrier) {
         /* cars_update_all 0x2d77a: the wall list (car+0x9b0) is rebuilt only after moving 150 units in x or z. */
@@ -711,7 +791,9 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
 
     /* cars_update_all 0x2d229: car_vertical runs after body_step with the ground car_update found before it. */
     double drop;
-    if (vertical_step(car, &drop)) car->landed = 1, landing_check(car, drop);
+    int landed = ign_car_vertical_step(car, &drop);
+    if (car->ground + 30.0 < car->height) car->airborne = 1;
+    if (landed) car->landed = 1, landing_check(car, drop);
     place(car);
     body_pose(car, (b->px - px0) * IGN_WORLD_PER_METRE, (b->pz - pz0) * IGN_WORLD_PER_METRE);
 

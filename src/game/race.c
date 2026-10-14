@@ -132,20 +132,58 @@ void ign_race_init(IgnRace *r, int mode, int ncars) {
     r->remaining = ncars;
     r->clock = 0;
     r->total = 0;
+    r->timer_ticks = r->origin_ms = 0;
+    r->elapsed = 0;
 }
 
 void ign_race_skip_countdown(IgnRace *r) {
     r->clock = -1.0;
     r->total = 250.0;
+    r->origin_ms = r->timer_ticks * 1000 / 72;
+    r->elapsed = 0;
+}
+
+static int32_t signed_timer(uint32_t value) {
+    int64_t signed_value = value;
+    if (value > INT32_MAX) signed_value -= INT64_C(4294967296);
+    return (int32_t)signed_value;
+}
+
+static int32_t timer_difference(int32_t now, int32_t origin) {
+    return signed_timer((uint32_t)now - (uint32_t)origin);
+}
+
+double ign_race_elapsed_ms(int32_t now, int32_t origin) {
+    return timer_difference(now, origin) * 0.001;
+}
+
+double ign_race_clock_sample(double previous, int32_t now, int32_t origin) {
+    if (previous <= -1.0) return previous;
+    double clock = timer_difference(now, origin) * 0.036;
+    return clock >= 200.0 ? -1.0 : clock;
+}
+
+void ign_race_car_clock(IgnCar *car, int mode, double elapsed) {
+    if (car->out || (mode != IGN_MODE_ELIMINATION && car->lap >= IGN_RACE_LAPS)) return;
+    car->race_elapsed = elapsed;
+    car->lap_elapsed = elapsed - car->lap_origin;
+}
+
+void ign_race_reset_car_clock(IgnCar *car) {
+    car->race_elapsed = 0;
 }
 
 void ign_race_clock(IgnRace *r) {
     double step = IGN_PHYS_DT * 36.0;
     r->total += step;
-    if (r->clock > -1.0) {
-        r->clock += step;
-        if (r->clock >= 200.0) r->clock = -1.0;
-    }
+    int was_started = ign_race_started(r);
+    int64_t now = ++r->timer_ticks * 1000 / 72;
+    int32_t sampled_ms = signed_timer((uint32_t)now);
+    int32_t origin_ms = signed_timer((uint32_t)r->origin_ms);
+    r->elapsed = ign_race_elapsed_ms(sampled_ms, origin_ms);
+    /* Virtual 72 Hz source, not the DOS interrupt timer; sample after the shared physics tick. */
+    r->clock = ign_race_clock_sample(r->clock, sampled_ms, origin_ms);
+    if (!was_started && ign_race_started(r)) r->origin_ms = now;
 }
 
 int ign_race_started(const IgnRace *r) { return r->clock < 0; }

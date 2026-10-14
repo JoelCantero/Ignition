@@ -64,14 +64,32 @@ add_test(NAME pos COMMAND pos_test)
 
 add_executable(body_step_test tests/body_step.c)
 target_link_libraries(body_step_test PRIVATE ignition_core)
+add_executable(car_kernels_test tests/car_kernels.c)
+target_link_libraries(car_kernels_test PRIVATE ignition_core)
 if(NOT MSVC)
   target_compile_options(body_step_test PRIVATE -Wall -Wextra)
+  target_compile_options(car_kernels_test PRIVATE -Wall -Wextra)
 endif()
-option(IGN_VERIFY_ORIGINAL "Compare body_step with original LE bytes (requires Python unicorn)" OFF)
+option(IGN_VERIFY_ORIGINAL "Compare physics and car kernels with original LE bytes (requires Python unicorn)" OFF)
 if(IGN_VERIFY_ORIGINAL)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME physics_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/physics_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:body_step_test>
             --report ${CMAKE_BINARY_DIR}/physics-original-report.json)
+  add_test(NAME car_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/car_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
+            --report ${CMAKE_BINARY_DIR}/car-original-report.json)
+  add_test(NAME car_kernel_contract
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_verification.py
+            --runner $<TARGET_FILE:car_kernels_test> CarKernelTests)
+  add_test(NAME input_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/input_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
+            --report ${CMAKE_BINARY_DIR}/input-original-report.json)
+  add_test(NAME race_time_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/race_time_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
+            --report ${CMAKE_BINARY_DIR}/race-time-original-report.json)
 endif()

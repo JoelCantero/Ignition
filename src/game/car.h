@@ -11,7 +11,7 @@
 
 typedef struct {
     bool accel, brake, left, right, turbo;
-    /* car_input (0x4d5f4) analog form used by the AI: accel 0..100, brake 0..50, steer -100..100 (+ = left). */
+    /* car_input (0x4d5f4) analog form used by the AI: pedals 0..100, steer -100..100 (+ = left). */
     bool analog;
     int a_accel, a_brake, a_steer;
     bool manual_gear;
@@ -31,7 +31,8 @@ typedef struct {
     float corner_x[4], corner_z[4];
     int16_t torque[3][IGN_TORQUE_POINTS];
     int gear;                      /* 0 reverse, 1-2 forward */
-    int forward_gear;              /* retained while braking selects reverse */
+    int forward_gear;              /* port trace/UX: last forward gear, not an original selection input */
+    int gear_ticks, gear_delay;    /* ctrl+0x10/+0x14: calls choosing a different gear, delay */
     double steer_visual;           /* car+0xb0 */
     IgnBody body;
     float x, y, z, heading;        /* render pose; heading 0 = +z */
@@ -44,19 +45,21 @@ typedef struct {
     float wall_x, wall_z;          /* car+0x4834/+0x483c: position of the last wall search */
     /* Vertical state in world units, up positive (car+0x08/+0x20/+0x120/+0x128/+0x270). */
     double height, fall_speed, ground, ground_prev;
+    double grip_avg;               /* car+0x148: last valid four-wheel surface average */
     int airborne;
     int ground_object;             /* track object under the last probe with ground */
     int section, phase, lap;       /* car+0x370 / +0x378 / +0x374 */
+    double race_elapsed, lap_elapsed, lap_origin; /* car+0x3a4/+0x3ac/+0x3d4, seconds */
     double turbo_charge;           /* car+0x534: 0..100, starts full */
     int turbo_mode;                /* car+0x53c: 0 off, 1 button, 2 forced */
-    int turbo_wait;                /* car+0x548: ticks before another refused request */
+    int turbo_wait;                /* car+0x548: decremented only on request 1 */
     int turbo_key;                 /* car+0x530: last tick's turbo request (0, 1 held, 2 start boost) */
     int turbo_started;             /* the turbo started this tick (sub_0004e688 effects), cleared by the caller */
     /* Visual pose, model frame (x forward, y down, z = physics side): radians unless noted. */
     double lean_roll, lean_pitch;  /* car+0xb8/+0xc0: degrees, from acceleration (sub_0002e6f8) */
     double body_roll, body_pitch;  /* car+0x584/+0x58c: smoothed body tilt (sub_00040ec8) */
     int out;                       /* car+0x528: finished or eliminated */
-    int wrecked;                   /* car+0x354: exploded, no longer driven */
+    int wrecked;                   /* aggregate of car+0x354/+0x358/+0x35c wreck flags */
     double blow;                   /* car+0x60c: 0 until eliminated, then 1.0 */
     int finish_tick, place;        /* car+0x3a0 and the [0x1fee60] counter at the finish */
     double step_x, step_z;         /* car+0x18/+0x28: last tick displacement, world units */
@@ -102,10 +105,9 @@ static inline int ign_car_visible(const IgnCar *car) {
 
 /* Difficulty level 0..3 ([0x1fedd8]): scales the rear grip of every car by 1, 1.15, 1.3, 1.3. */
 void ign_set_difficulty(int level);
-/* Race clock [0x1fb4e8] < 0: before it, cars are held and cannot use the turbo. */
+/* Original race clock is nonnegative before the start, then -1 while racing. */
 void ign_set_race_started(int started);
 /* [0x1fb540]: seconds since the start, for the start boost. */
-void ign_set_race_time(double seconds);
 /* [0x1fb4d8]: 1/36 s frames since the level started (catch-up bonus). */
 void ign_set_level_clock(double frames);
 /* sub_00022d08: model of the k-th computer car for the difficulty (0xc5520); a model a human drives is replaced by
@@ -118,6 +120,40 @@ int ign_get_difficulty(void);
 int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, float heading);
 /* Advances one original physics tick (1/72 s). */
 void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in);
+/* Isolated production kernels: steering input -100..100, positive mean surface grip; valid car spec 0..11. */
+void ign_car_steer(IgnCar *car, int input, double grip_avg, int analog);
+/* Retains mean/front/rear grip if any wheel type is outside 0..29; mean starts at 0.4. */
+double ign_car_update_grip(IgnCar *car, const int types[4]);
+/* Drive arithmetic (0x4db90..0x4dfbe), signed throttle -100..100; gear 0..2, spec 0..11.
+ * Returns the final torque index, including wheelspin, for the rev kernel. */
+int ign_car_throttle(IgnCar *car, int input);
+/* Revs (0x4dfbe..0x4e1a7), throttle -100..100, final torque index 0..199, gear 0..2, spec 0..11. */
+void ign_car_update_revs(IgnCar *car, int input, int torque_index);
+/* car_input 0x4d655: route raw pedal values using the current gear, before changing it. */
+int ign_car_input_throttle(const IgnCar *car, int accel, int brake, int automatic);
+/* car_input 0x4d6e2..0x4d8d8: brake and automatic forward/reverse arbitration. */
+void ign_car_input_direction(IgnCar *car, int accel, int brake, int automatic);
+/* car_gearbox 0x502c4: supplied original shared forward torque curves, no audio. */
+void ign_car_gearbox(IgnCar *car, const int16_t curves[3][IGN_TORQUE_POINTS]);
+/* human_input: one-shot shifts, after dispatch, bounded at reverse and second. */
+void ign_car_shift(IgnCar *car, int shift);
+/* Brake arithmetic (0x4e1bc), brake 0..100. Finish/input arbitration is handled by the caller. */
+void ign_car_brake(IgnCar *car, int input);
+/* Turbo arithmetic (0x4e3a7..0x4e656); caller handles requests, sounds and effects. */
+void ign_car_turbo(IgnCar *car);
+/* human_input 0x2c940..0x2c9d4: sampled key result, elapsed car time, before turbo arithmetic.
+ * Caller commits the returned request to turbo_key after dispatch (0x2cc9b..0x2ccb5). */
+int ign_car_turbo_input(const IgnCar *car, int key, double elapsed);
+typedef enum {
+    IGN_TURBO_REQUEST_NONE,
+    IGN_TURBO_REQUEST_START,
+    IGN_TURBO_REQUEST_REFUSED,
+    IGN_TURBO_REQUEST_FORCED
+} IgnTurboRequestEvent;
+/* car_input 0x4d8e1..0x4db89: request 0/1/2, excluding external sound/effect callees. */
+IgnTurboRequestEvent ign_car_turbo_request(IgnCar *car, int request);
+/* Vertical arithmetic only; caller handles landing effects and the car_update airborne threshold. */
+int ign_car_vertical_step(IgnCar *car, double *raw_drop);
 /* Starts a wreck (kind 1 explosion, 2 sinking): the car is hidden and no longer driven. */
 void ign_car_wreck(IgnCar *car, int kind);
 /* Moves a wrecked car (glide of sub_0003a788). */

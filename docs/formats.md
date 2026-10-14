@@ -216,8 +216,9 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 - **Sonido** (`audio.c`, `sound.c`): bancos de `0x2a4ec` (grupo 0 = ROLL, SKID, COLL, BOOST, DIV; 1 = pista;
   2 = coche), índice = prefijo `NN_`. `0x49a8c(grupo, sub, índice, bucles, vol, Hz, x, z)` multiplica el volumen
   por max(0, (1500 − 0,8·d)/1500) respecto al coche visto. Motor (`0x50824`): `i = 2·car+0x288` (1..199);
-  tonos `ENGINE.INF[0|400 + i]·600 + 20000` Hz, volúmenes `[200|600 + i − 1]·650`. Revoluciones (`0x4e000`):
-  `v/tope_marcha·66` (topes `0xc4fe0`) o tienden al acelerador en el aire/antes de la salida. Rodadura (`0x50464`):
+  tonos `ENGINE.INF[0|400 + i]·600 + 20000` Hz, volúmenes `[200|600 + i − 1]·650`. Revoluciones (`0x4dfbe`):
+  `índice_final_par/tope_marcha·66` (topes humanos `0xc4fe0`, IA `0xc5400`), con reglas distintas de aire,
+  salida, derrape y fin descritas en la verificación de revoluciones. Rodadura (`0x50464`):
   clase `tipo mod 10`, solo audible el coche visto. Derrape: clase `tipo mod 9`, `0xc3578`/`0xc35a0`. Emisores de
   ambiente: objetos PLC `0x190 + n` (sonido `n`), volumen 0,75·(1500 − d)/1500.
   `human_input` (`0x2c5b8`) solo mapea dirección, acelerador, freno, marchas, turbo y cámara trasera; no contiene
@@ -226,25 +227,193 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 
 ## Entrada de teclado (`sub_0002c5b8` = `human_input`, decodificada)
 
-- Registro de control por jugador en `[0x1fefd0]` (`0x4c` B): `+8` tipo (0 = humano), `+0xc` cambio manual, `+0x18` auto-acelerar,
+- Registro de control por jugador en `[0x1fefd0]` (`0x4c` B): `+8` tipo (0 = humano), `+0xc` cambio (0 manual, 1 automático), `+0x18` auto-acelerar,
   teclas (consultadas con `sub_00055c28`): `+0x1c` izquierda, `+0x1d` derecha, `+0x1e` acelerar, `+0x1f` frenar, `+0x20/+0x21` marcha
   arriba/abajo, `+0x22` turbo, `+0x23` cámara trasera (`car+0x5a4`).
 - Acelerador y freno digitales = 100; dirección **digital** −100 / +100 / 0 en `car+0x344` (sin rampa; la suavidad la da el
   integrador `steer`). `car+0x9a4` = ±50 y `car+0x9a8` = ángulo del tramo + constante (`g_sections+4`, o `+0x10` si tramo < 0).
 - `+0x18 == 1` y sin freno → acelerador 100. Si `car+0x558 > 0` (solape con otro coche) la dirección se invierte.
 - Turbo: tecla y `+0x354 == +0x35c == +0x358 == 0` → petición `car+0x52c = 1`; pasa a 2 si `car+0x3a4 <` constante y `+0x530 == +0x53c == 0`.
-- Cambio manual (`+0xc == 1`): flancos de `+0x20/+0x21` suben/bajan `car+0x27c` (0–2) y llaman a `car_gearbox` `0x502c4`.
-- Termina en `car_input` (`0x4d5f4`) con (acelerador, freno, dirección, turbo). El port ya cubre este camino con `IgnInput`.
+- `car_input` (`0x4d5f4`) recibe (acelerador, freno, dirección, turbo) antes de seleccionar la marcha siguiente.
+  Cambio manual (`+0xc == 0`): después, flancos de `+0x20/+0x21` suben/bajan `car+0x27c` (0–2, incluye atrás).
+  En automático (`+0xc == 1`) el caller llama a `car_gearbox` `0x502c4` si marcha != 0; existe una excepción
+  `car+0x604 == 1`. El port conserva flancos como solicitudes `IgnInput.gear_shift`, no emula el sondeo de teclado.
 - `sub_00031858` (llamada al solapar, `0x2d4d9`/`0x312fe`) solo cambia la malla del coche (`[0x1fecb4]`, 'Error while changing car mesh')
   y reproduce un sonido; `sub_0002ea44` (impacto > 15) es solo efecto visual y sonoro.
 
 ## Caja de cambios y dificultad
 
-- `sub_000502c4(coche)` (cambio manual): `idx = min(|v_long·3.6|, 199)`; con las curvas de par `0x1fb6d8` (marcha 1) y `0x1fb868`
-  (marcha 2) como `int16`: si `par1[idx] > par2[idx]` → marcha 1; si no, marcha 2 salvo que `car+0x90 ¿?` (ángulo) esté en
-  (−π/2, π/2) o > 3π/2 (entonces 1). Un contador (`ctrl+0x10`) debe superar el retardo `ctrl+0x14` antes de cambiar; suena un
-  efecto si `ctrl+4 != 1`.
+- `sub_000502c4(coche)` (automático): `idx = min(abs(trunc_x87(v_long·3.6)), 199)`, producto con el
+  `double` original 3.6. Usa curvas **compartidas del modelo 0** en `0x1fb6d8` (marcha 1) y `0x1fb868`
+  (marcha 2), comparación `int16` con signo, sin dividir el índice por dificultad.
+  Si `par1[idx] > par2[idx]`, objetivo 1; en caso contrario objetivo 2 dentro del intervalo estricto
+  `(-1.5707963267949, 1.5707963267949)` o por encima de `4.7123889803847`; fuera, objetivo 1.
+  El ángulo es `car+0x90` (velocidad relativa al rumbo). El empate de par favorece 2 solo en esos intervalos.
+- `ctrl+0x10` cuenta llamadas cuyo objetivo difiere de la marcha actual; se borra si coinciden.
+  El cambio ocurre **cuando contador > retardo**, no al igualarlo. No se borra al cambiar:
+  la siguiente llamada con objetivo coincidente lo borra. El bucle de inicialización `0x22b94..0x22cb5`
+  escribe retardo `ctrl+0x14 = 30` para todos los controles. El port inicia contador 0 de forma determinista;
+  el origen del valor inicial del contador y su ciclo completo de reset original no están verificados.
+  El sonido de cambio se ejecuta solo si `ctrl+4 != 1` y queda fuera del oracle.
 - Dificultad `[0x1fedd8]` ∈ 0..3 → `[0xc5470]` = {1.0, 1.15, 1.3, 1.3}, factor del agarre trasero (`car_update` `0x30811`).
+
+### Dispatcher de pedales y selección de marchas: verificación ejecutable
+
+`tests/input_original.py` ejecuta bytes LE sin parchear ni sustituir callees en Unicorn/x87 y compara
+salidas enteras **exactamente**, tolerancia cero, contra `tests/car_kernels.c` y las APIs de producción:
+
+| Modo | Frontera original | Salida | Casos / pasos |
+|---|---|---|---|
+| D | `0x4d5f4..0x4d6a9`, antes del acelerador | acelerador dirigido | 180 / 180 |
+| A | `0x4d6e2..0x4d8d8`, ejecuta el freno real | marcha, derrape, skid | 27 648 / 27 648 |
+| K | `0x502c4` completo, con `__CHP` real | marcha y contador por llamada | 5 526 / 72 738 |
+| H | `0x2cb29..0x2cb4b` y `0x2cbb2..0x2cbd2` | subida/bajada manual acotada | 6 / 6 |
+
+Resultado: **33 360 casos / 100 572 pasos**, cero diferencias. El informe
+`build/regression-clean/input-original-report.json` conserva SHA-256 del original, runner, fuentes y fixtures,
+entorno, fronteras, exclusiones y ramas obligatorias ejecutadas. La allowlist rechaza instrucciones/escrituras
+fuera de ámbito y verifica retorno/stack/estado x87. `ctrl+4 = 1` evita sonido por la rama original, no mediante stubs.
+Se prueban ambas modalidades, tres marchas, pedales simultáneos, vecinos de umbrales de pedales/velocidad/ángulo,
+índices 0..200 con signos y vecinos binary64, extremos `int16`, empates y secuencias de velocidad/ángulo/contador.
+
+- D conserva la marcha **previa** para la fuerza: en marchas > 0 usa acelerar; en marcha 0 manual usa
+  `-acelerar`, en marcha 0 automática usa `-frenar`.
+- A manual aplica freno sin elegir marcha atrás. Automático limpia primero el freno; en los mismos intervalos
+  angulares y con velocidad longitudinal **> 2.0**, frena. Si no, freno **> 5** selecciona 0.
+  Después acelerar **> 50** con marcha 0 selecciona 1; por ello ambos pedales pueden acabar en 1.
+- El tick del port aplica acelerador/revoluciones/turbo con la marcha previa, luego dirección/freno y volante,
+  y finalmente cambio manual o automático. `tests/gearbox.c` comprueba el orden y que la caja no use las curvas
+  locales ni la dificultad. `forward_gear` es estado de UX/traza del port, no entrada original de selección.
+  La traza v3 añade contador y retardo (101 campos); el replay rechaza v2.
+
+**Alcance limitado, no dispatcher completo**: no verifica sondeo de teclado/joystick, generación y latch de
+flancos, sentinel de entradas cacheadas `0x1f02`, grabación/replay original, audio, callee especial del modelo 8,
+generación de las curvas compartidas, inicialización de configuración, efectos de turbo y generación de solicitudes,
+bandera de inactividad, frecuencia completa de llamadas/callers ni carrera DOS. Las curvas de K son
+entradas idénticas suministradas; la generación que usa el port tiene evidencia estática, no una prueba nueva
+contra los bytes de `torque_spline`. El reset de controles durante reaparición sigue sin prueba ejecutable.
+
+### Solicitudes de turbo: verificación por fragmentos originales
+
+El modo J de `tests/input_original.py` compara `ign_car_turbo_request` de producción:
+**10 728 casos / 82 440 pasos**, eventos/modo/espera enteros exactos, sin tolerancia.
+Con D/A/K/H el informe suma **44 088 casos / 183 012 pasos**. Se suministran peticiones 0/1/2,
+modos 0/1/2, humano/IA, fin 0/1, carga vecina binary64 de 20 y 100, reloj negativo/cero/positivo
+(incluidos vecinos de cero), espera negativa/cero/1/2/29/30/31 y secuencias de 65 llamadas
+retenidas, alternadas con liberaciones y alternadas 0/1/2. La carga no se consume en J:
+el kernel aritmético U se verifica por separado.
+
+- Petición 1 (`0x4d8e1`): inicia modo 1 solo si carga **>= 100**, modo 0,
+  reloj `[0x1fb4e8] < 0` y `car+0x528 == 0`; limpia espera `+0x548`.
+- Si no inicia: modo 0, espera **<= 0**, carga **> 20** y control humano (`ctrl+4 != 1`)
+  alcanzan el aviso de negativa. Tras sonido, `0x4da8f` escribe espera 30.
+- Solo petición 1 ejecuta `0x4daa1..0x4dac4`: espera positiva decrece en uno,
+  incluso con modo activo. Por ello una negativa termina con **29**, no 30.
+  Una liberación (petición 0) conserva la espera; espera negativa no decrece.
+- Petición 2 (`0x4dad1..0x4daf2`): fuerza modo 2 y espera 0, sin gates de carga,
+  modo previo, fin ni reloj. La generación de esta petición por el caller queda fuera de J.
+
+**No es una ejecución continua del dispatcher.** La decisión se ejecuta desde `0x4d8e1`
+hasta las fronteras `0x4d949` (llamada a efectos), `0x4da41` (preparación de audio de negativa),
+`0x4daf2` (efectos forzados), `0x4daa1` o `0x4db89` (sin evento).
+La negativa compone independientemente la instrucción original `0x4da8f..0x4da9a`,
+con dirección de coche suministrada, y petición 1 compone el contador desde `0x4daa1`
+hasta `0x4daca`/`0x4db89`. No se parchean bytes, no se instalan stubs ni se ejecutan
+los callees de sonido/efectos. El informe registra las fronteras y cantidad de ejecuciones de cada fragmento,
+hashes y ramas obligatorias; cada fragmento comprueba EIP/ESP/x87 y allowlist de escrituras.
+La composición supone que los callees excluidos no alteran los campos de decisión: sus posibles
+efectos secundarios, handles de sonido y ejecución completa siguen **sin verificar**.
+
+El tick del port mantiene aritmética de carga **antes** de arbitrar la petición.
+`tests/gearbox.c` comprueba activación/consumo en ticks sucesivos, agotamiento, liberación,
+negativa antes de salida y exclusión de IA. `turbo_started` es un evento del port consumido por
+el caller de efectos; J verifica la frontera que lo origina, no la implementación de esos efectos.
+La generación humana y su latch se verifican por separado en P; quedan pendientes
+sondeo, reloj original, frecuencia de callers y carrera DOS.
+
+### Generación humana de turbo y latch: verificación por fragmentos
+
+El modo P de `tests/input_original.py` compara `ign_car_turbo_input` de producción y
+el commit de `turbo_key`: **5 184 casos / 31 104 pasos**, petición/latch enteros exactos.
+El informe D/A/K/H/J/P suma **49 272 casos / 214 116 pasos**.
+
+- Se entra en `0x2c93a`, después de `key_poll` (`0x55c28`), con su resultado suministrado
+  en EAX y el índice activo 0 en `[0x1feff0]`. **Solo EAX == 1** representa tecla pulsada.
+- `0x2c953..0x2c96e` escribe petición `car+0x52c = 1` si los tres flags de wreck
+  `+0x354` (explosión), `+0x35c` (deslizamiento) y `+0x358` (hundimiento) son cero.
+  Cualquier bloqueo o tecla liberada escribe 0 (`0x2c985`).
+- `0x2c99e..0x2c9ca`: con `car+0x3a4 < [0xa8cf6]` (**0,25**, double),
+  petición 1, latch anterior `+0x530 == 0` y modo `+0x53c == 0`, cambia petición a 2.
+  No consulta el reloj global de salida, carga ni flag de fin. Tiempo negativo también
+  cumple el umbral; exactamente 0,25 no lo cumple.
+- Se detiene en `0x2c9d4`, antes de otros controles/cámara. Independientemente se ejecuta
+  `0x2cc9b..0x2ccb5`: copia petición `+0x52c` a latch `+0x530`, conservando **0/1/2**,
+  no un booleano. Cada uno de los dos fragmentos se ejecutó 31 104 veces.
+
+Los fixtures combinan muestras 0/1/2, latch y modo 0/1/2, las ocho combinaciones de los
+tres flags, tiempo -1, vecinos binary64 de cero y 0,25 y tiempo 1. Cada caso ejecuta
+seis pasos con tecla constante, liberación/pulsación alternada o muestras cíclicas 0/1/2.
+Se exige cobertura de todas las decisiones, fronteras EIP/ESP/x87, allowlist de escrituras,
+salida exacta y hashes de código/runner/fixtures. Las pruebas de contrato rechazan muestras,
+estados, tiempos no finitos, patrones y cantidades fuera del dominio declarado.
+
+**Composición, no ejecución continua de `human_input`.** No se parchean instrucciones ni
+se sustituye `key_poll`; tampoco se ejecutan cámara, dispatcher, caja o audio entre generación
+y latch. Se suministra al segundo fragmento la petición del primero. Las referencias directas
+localizadas a `+0x52c` no muestran escrituras dentro del dispatcher, pero efectos indirectos
+de callees excluidos no quedan demostrados por esta prueba.
+
+En el port, `wrecked` agrega los tres estados originales; P compara cada combinación original
+con ese agregado, no sus transiciones físicas. El tick genera la petición humana **antes**
+de aritmética de carga y arbitraje y escribe el latch **después** de selección de marchas.
+Esto evita convertir una nueva pulsación en petición 2 porque el turbo se agotó durante el tick.
+`tests/gearbox.c` comprueba ese caso, pulsación previa a salida, tecla mantenida, liberación,
+nueva pulsación, umbral exacto, ausencia de gate de fin y separación de solicitudes de IA.
+
+El tiempo de esta API es explícito y finito. Producción usa ahora `car.race_elapsed`;
+su conversión y actualización se verifican en el bloque siguiente. También quedan fuera
+el sondeo real y su frecuencia, otros dispositivos/IA, reset original de latches, callees
+intermedios y ticks que retornan anticipadamente por wreck. No se añade estado persistente:
+`+0x52c` se representa por una variable local. El trace actual es v4/104 campos.
+
+## Reloj por coche y transición normal de salida: verificación ejecutable
+
+`tests/race_time_original.py` ejecuta instrucciones LE sin parchear en Unicorn/x87 y
+compara ocho campos exactamente con producción: **18 450 casos / 74 178 pasos**.
+El informe `build/regression-clean/race-time-original-report.json` conserva hashes,
+cobertura de instrucciones y fronteras, y límites explícitos. Modo C del runner:
+conversión, countdown, reset normal, reloj por coche, generación humana y latch.
+
+- `frame_time 0x2b7d6..0x2b7f9`: resta `g_timer_ms (0xab5dc)` menos
+  `g_clock_origin_ms (0x1fef04)` en 32 bits con wrap, interpreta el resultado con signo
+  y multiplica por **0,001**, guardando segundos binary64 en `0x1fb540`.
+- Decisión de `race_clock 0x2b857..0x2b8b0`: si el contador previo es <= -1,
+  lo conserva; si no, la misma diferencia por **0,036** alcanza salida al ser >= 200.
+  Con origen cero, 5555 ms sigue en countdown; 5556 ms alcanza salida normal.
+- En la frontera normal `0x2b8cd`, el oracle compone el sample ya calculado,
+  la función completa `reset_race_times 0x2a410` y el commit `0x2b8d9..0x2b906`.
+  El reset mueve el origen a los milisegundos actuales, pero **no recalcula** los
+  segundos globales: la actualización de ese frame copia todavía el sample previo.
+  Borra `car+0x3a4`, no `+0x3ac` ni `+0x3d4`; los coches congelados conservan estos últimos.
+- `update_car_clocks 0x4c738` completo, con un coche: no escribe si `out (+0x528) != 0`
+  o si `lap (+0x374) >= 3` fuera de modo 3 (eliminación). Wreck no congela el reloj.
+  Escribe `race_elapsed (+0x3a4) = sample` y
+  `lap_elapsed (+0x3ac) = sample - lap_origin (+0x3d4)`.
+
+Los fixtures cubren vecinos de 250 ms/salida, modos 0/3, laps 0/2/3/4, out/wreck,
+teclas/latches 0/1/2, turbo 0/1/2 y wrap signed/unsigned32 en secuencias.
+La prueba es **composicional**, no una ejecución continua del frame completo.
+Excluye salida forzada anticipada, pausa, interrupciones DOS, asignación/bucles
+multicoche, otras estadísticas del reset, respawn y frecuencia/interleaving de callers.
+
+**Desviación temporal explícita**: el port genera milisegundos virtuales deterministas
+`floor(ticks * 1000 / 72)` y toma el sample al final del tick compartido; no emula
+el timer DOS ni la separación original entre frames gráficos y lotes físicos.
+Salida virtual: tick 400 = 5555 ms (no salida), tick 401 = 5569 ms (salida con sample
+5,569 s); el siguiente tick toma 14 ms desde el nuevo origen.
+Turbo humano, HUD total/vuelta y tiempo final del fantasma usan los relojes del coche.
+El cruce de vuelta asigna su tiempo muestreado a `lap_origin` siguiendo la copia
+observada en `0x2f3f9`; el orden completo de progreso y esa copia **no está verificado**.
 
 ## IA original `0x1aea0`: álgebra exacta (portada en `ai.c`)
 
@@ -292,10 +461,22 @@ esa aproximación se descartó hasta reconstruir la selección de registros/carr
 - `sub_0001e090`: modelo bicicleta. Guiñada hacia `tan(dir)·v/(a+b)` limitada por `3·Ff/I·dt`; fuerza motriz ≤ `g·agarre_f·m`;
   fricción lateral trasera ≤ `g·agarre_r·dt`; gravedad por pendiente (pitch/roll); derrape con `0.2·v·sin(Δ)`.
 - Init (`sub_00026458`): masa `0xc4e20`, inercia 8000, ejes = |rueda.x|/21.76 × 1.5 (del.) / × 2 (tras.).
-- Agarre (`car_update`): media de `0xc33f0[superficie]` de las 4 ruedas × `0xc4dc0[coche]` (tras. × dificultad `0xc5470`).
+- Agarre (`car_update`, `0x3070a..0x30874`): si alguna de las 4 superficies queda fuera de 0..29, conserva
+  **toda** la media anterior (`car+0x148`, inicial 0,4) y ambos agarres del cuerpo; no sustituye ruedas por asfalto.
+  Con todas válidas, media de `0xc33f0[superficie]`. Humanos: delante ×`0xc4dc0[coche]`, detrás además
+  ×`0xc5470[dificultad]`. Rivales: delante ×`0xc4e18` (perfil 11, 1,3), detrás además
+  ×`0xc5670[dificultad][0xc57d0[coche]]`; **no** usan el multiplicador humano.
+  El índice por modelo es `{8,3,10,5,4,6,2,7,9,1,0,0}` y las filas de `0xc5670` son:
+  `{1.4,1.37,1.4,1.4,1.33,1.37,1.33,1.29,1.29,1.24,1.24}`,
+  `{1.55,1.5,1.55,1.55,1.45,1.5,1.45,1.4,1.4,1.3,1.3}`,
+  `{1.7,1.65,1.7,1.7,1.6,1.65,1.6,1.55,1.55,1.45,1.45}` (última fila repetida para dificultad 3).
 - Par (`sub_00053e70`): spline de Hermite por marcha (`0xc4fd0`, 4 puntos), 200 valores por km/h; marcha 0 = atrás.
 - Acelerador (`sub_0004db90`): `par[km/h] × 1000 × %acel`, suavizado 0.2; sin acelerar `−v·500`.
-- Dirección (`sub_000500f0`): entrada ±100; `5/agarre × entrada% × (0.3 + (vmax−v)/div)`, suavizado por coche (`0xc4e80/0xc4ee0/0xc4f40`).
+- Dirección (`sub_000500f0`): entrada −100..100; objetivo `5/agarre × entrada% × límite`.
+  Límite 0,3; solo si `|km/h| < vmax`, añade `(vmax−km/h)/div`, usando velocidad **con signo**.
+  Suavizado por coche (`0xc4e80/0xc4ee0/0xc4f40`), tasa reducida a la mitad al soltar dirección.
+  Analógico y rivales fijan directamente el ángulo; rivales usan límites del perfil 11.
+  Dirección visual `visual += (10·0.01·entrada·4−visual)·0.1`.
 
 ### Verificación ejecutable de `body_step`
 
@@ -339,6 +520,140 @@ No se necesitó alterar la fórmula del port. Esta evidencia solo cubre los esta
 masas/inercia/distancia de ejes positivas y la ruta x87 seleccionada; no demuestra equivalencia para
 cualquier entrada ni verifica CPU DOS real, otras palabras de control, el runtime FPU software,
 el integrador vertical, configuración por coche/superficie, colisiones o el bucle completo de carrera.
+
+### Verificación ejecutable de dirección, agarre y altura
+
+`tests/car_original.py` reutiliza la carga LE y la identidad del oracle anterior. Ejecuta los bytes originales
+sin parchearlos y compara con los kernels **de producción** de `src/game/car.c` mediante `tests/car_kernels.c`.
+No sustituye llamadas de sonido ni efectos por resultados inventados: la ruta de aterrizaje se detiene en
+`0x2e397`, antes de esas llamadas. En las demás rutas verticales y en dirección se exige retorno; el bloque
+de agarre termina en `0x30874`.
+
+| Límite | Casos | Pasos | Mayor error absoluto observado |
+|---|---:|---:|---:|
+| `car_steer`, `0x500f0` | 732 | 5 856 | `7.11e-15` |
+| Agarre, `0x3070a..0x30874` | 672 | 1 536 | `1.78e-15` |
+| Aritmética vertical, `0x2e234` | 252 | 1 008 | `1.43e-14` |
+
+Total: **1 656 casos / 8 400 pasos**, con tolerancia `2e-11 + 2e-12·|original|` e indicadores exactos.
+Incluye los 12 modelos, ambos controladores, cuatro dificultades, velocidades con signo, límites de velocidad,
+rebote y caída, entradas aleatorias con semilla fija, y secuencias válido→inválido→válido en cada rueda.
+El oracle exige ramas concretas, límites de ejecución, pila/control x87 conservados y escrituras solo en
+campos permitidos/pila. Guarda hashes de entradas, original, fuentes y runner en `car-original-report.json`.
+Los controles negativos comprueban salidas perturbadas/malformadas, indicadores, informe persistente de fallo,
+fixtures nativos inválidos y rechazo real de un ejecutable con otro digest.
+
+La ejecución anterior a las correcciones pasó dirección y vertical, pero detectó 1 116 diferencias de campos
+de agarre: conservación ante tipos inválidos y tablas específicas de rivales. Se corrigieron esas dos reglas,
+sin alterar el integrador corporal ni regenerar la instantánea de regresión. La regresión histórica mantiene
+1/23 éxitos: ahora 10 casos difieren en estado y 22 en imagen, ninguno falla al ejecutar.
+
+Estos tres bloques **no** verifican todo `car_update`, consultas geométricas, acelerador/turbo, daños de aterrizaje, efectos,
+colisiones ni una carrera DOS. Excluye la desviación declarada de subidas con `level_change` (comprobada
+separadamente como contrato del port). El umbral `suelo+30 < altura` pertenece al caller `car_update`, no al
+kernel vertical. Son estados finitos muestreados bajo x87 emulado `0x037f`, no equivalencia para cualquier entrada.
+
+### Verificación ejecutable de aceleración, freno y turbo
+
+El mismo oracle y runner añaden tres kernels de producción: `ign_car_throttle`, `ign_car_brake` e
+`ign_car_turbo`. En estos tres modos no se ejecutan revoluciones ni se sustituyen llamadas de sonido/efectos por resultados
+inventados. La aceleración termina en `0x4dfbe`, antes de revoluciones; el freno exige retorno de la rutina
+`0x4e1bc` para coche no terminado; el turbo entra en `0x4e3a7` y termina en `0x4e656`, excluyendo efectos.
+Se ejecuta la conversión `__CHP` original y se comprueban frontera, ESP, control/pila x87 y escrituras permitidas.
+
+| Límite | Casos | Pasos | Mayor error absoluto observado |
+|---|---:|---:|---:|
+| Aceleración, `0x4db90..0x4dfbe` | 6 829 | 30 174 | `1.82e-12` |
+| Freno, `0x4e1bc` | 72 | 288 | `0` |
+| Aritmética de turbo, `0x4e3a7..0x4e656` | 2 016 | 96 768 | `9.32e-10` |
+
+Nuevos bloques: **8 917 casos / 127 230 pasos**. Suite de seis kernels: **10 573 / 135 630**.
+La tolerancia sigue siendo `2e-11 + 2e-12·|original|`; indicadores y contadores son exactos, con controles
+negativos para cada modo. El informe conserva hashes del original, fuentes, runner y entradas, además de
+cobertura por bloque. Incluye modelos, controladores, dificultades, marchas, límites `nextafter` de índices
+de par, patinaje, catch-up y freno, y secuencias de carga/agotamiento/recarga del turbo.
+
+Correcciones verificadas:
+
+- El índice de par trunca primero `v_fwd*3.6` en precisión extendida x87, toma el valor absoluto, divide por
+  `[1, 1.15, 1.3, 1.3]`, trunca y limita a 199. Redondear antes el producto a binary64 puede cambiar el índice
+  (por ejemplo, `10/3.6`). El port usa el residuo FMA y el umbral de redondeo extendido, también en la división,
+  sin depender de que `long double` tenga precisión x87. Se prueban ambos signos y vecinos de índices 0..210.
+- Patinaje: límites estrictos originales `1.5707963267949` y `4.7123889803847`, no `PI/2` y `3*PI/2`;
+  con velocidad en km/h > 2 y acelerador positivo se usa índice cero y derrape 10. Saturación 1 en suelo
+  fija derrape 30. El suavizado de fuerza del 20 % ocurre tras la salida: reloj original negativo (−1 en
+  carrera), no negativo antes de ella.
+- Freno: entrada positiva > 50 bloquea deslizamiento; antes de salida también se bloquea. Con entrada
+  > 80 y velocidad longitudinal > 2 se fija derrape 10. El caller del port suministra la entrada de freno
+  independiente, incluida la analógica, en vez de deducirla del acelerador combinado.
+- Turbo: tras restar 2.5, carga <= 0 limpia carga, modo y frames y retorna **sin** impulso residual.
+  El suplemento de baja velocidad es `max(0, float((20-v_fwd)*10000))`, almacenado en binary32.
+  Modo 1 usa fuerza por modelo humano o perfil IA 11; modo 2 usa `20000*carga` y añade velocidad en el rumbo
+  suministrado al kernel. Inactivo, carga < 100 suma recarga; un exceso se limita en el tick siguiente.
+
+Las tablas de par sintéticas `torque[gear][i] = i-5+gear` son entradas idénticas a ambos lados:
+**no** verifican `torque_spline` ni la generación de curvas. Se excluyen hardware mode 2, coche terminado,
+catch-up desactivado/race-mode 2, revoluciones y el flag original `car+0x5a8` sin representación en el port.
+El turbo evita la rama de sonido de recarga humana usando índice de coche 2; U no verifica solicitudes
+(arbitraje cubierto por J en la sección anterior),
+sonido/efectos ni que el caller produzca el mismo rumbo original `car+0xf8`. Tampoco verifica todo el
+dispatcher de entradas, el coche completo o una carrera DOS.
+
+La regresión histórica permanece en **1/23**, con 10 diferencias de estado, 22 de imagen y cero fallos de
+ejecución; no se regeneró el baseline. En esta etapa, el replay entre builds Release independientes pasó
+21 escenarios / 56 448 ticks con 99 campos (v2) y framebuffer/estado final idénticos. El bloque de entradas
+documentado arriba repite la prueba con 101 campos (v3). El smoke de 200 s y siete
+rivales pasa en las siete pistas con ocho resúmenes finitos por pista, pero persisten atascos; ninguno de
+estos dos checks demuestra equivalencia de carreras con DOS.
+
+### Verificación ejecutable de revoluciones
+
+`ign_car_update_revs` reproduce el bloque original `0x4dfbe..0x4e1a7`, dentro de `car_throttle`.
+El modo R del oracle entra directamente con EBX = índice de coche, ECX = base de coches, índice final
+de par en `[esp+0x1c]` y entrada de acelerador en `[esp+0x20]`. El modo Q entra en `0x4db90`,
+ejecuta el acelerador y continúa hasta la misma frontera de revoluciones. No parchea código ni omite
+llamadas dentro de estas fronteras; exige escrituras permitidas, ESP y pila/control x87 como los otros modos.
+Q compara los seis campos del acelerador, revoluciones y el índice final, este último exactamente.
+
+| Límite | Casos | Pasos | Mayor error absoluto observado |
+|---|---:|---:|---:|
+| Revoluciones R, `0x4dfbe..0x4e1a7` | 25 016 | 134 208 | `1.43e-14` |
+| Acelerador + revoluciones Q, `0x4db90..0x4e1a7` | 6 941 | 32 734 | `3.64e-12` |
+
+Total adicional: **31 957 / 166 942**; suite completa: **42 530 casos / 302 572 pasos**.
+Q repite deliberadamente los casos de acelerador para comprobar la conexión, no es otro kernel independiente.
+Incluye todos los índices 0..199, 12 modelos, ambos controladores y tres marchas; umbrales de entrada
+80/81, relación 1.5 y velocidad 60; combinaciones de salida, aire, derrape y fin; valores aleatorios
+con semilla fija y secuencias de entrada/velocidad/salida/aire/saturación. Hay controles negativos
+de revoluciones e índice, salidas malformadas y fixtures nativos inválidos.
+
+Fórmula y orden originales:
+
+1. `r = índice_final_par / tope_marcha`. Usa el índice después de truncación x87, dificultad, límite y
+   patinaje del acelerador, **no** un segundo cálculo desde velocidad. Tope humano:
+   `0xc4fe0 + modelo*96 + marcha*32`; IA: `0xc5400 + marcha*32` (perfil 11).
+2. Solo si `r <= 1.5`, humano en aire o reloj de salida distinto de −1:
+   `revs += (abs(entrada) - revs)/6`; humano en suelo y reloj −1: `revs = r*66`.
+3. Solo si `r <= 1.5`, IA en aire **y entrada > 80**: `revs += (entrada - revs)/6`;
+   en cualquier otro caso IA: `revs = r*66`, incluso antes de salida.
+4. Independientemente de `r`, con derrape 1 y km/h < 60: `revs += (100 - revs)/6`.
+5. Después, solo humano terminado (`out = 1`): `revs += -revs/6`. IA no tiene esta reducción.
+
+Constantes: `0xaa2bd` = 1.5, `0xaa2e5` = 66, `0xaa2ed` = 1/6, `0xaa2f5` = 60,
+`0xaa2fd` = 100 y `0xaa305` = −1. Estado: `car+0x288` double, derrape `+0x298`,
+aire `+0x270`, marcha `+0x27c`, fin `+0x528`, km/h original double `+0x118`.
+La primera comparación con las reglas humanas aplicadas a IA falló; la versión corregida pasa.
+`ign_car_throttle` devuelve el índice final y el tick lo entrega a revoluciones sin añadir estado persistente.
+
+Alcance: estados finitos muestreados, indicadores 0/1 y reloj de salida −1/0. Se suministran velocidades
+representables en binary32 a ambos lados porque `car.kmh` del port es float: los vecinos usados en
+60 son `59.999996185302734` y `60.000003814697266`. **No** se verifica la producción original de
+velocidad binary64 ni su estrechamiento; un vecino binary64 de 60 puede redondearse a 60 en el port.
+R admite coches terminados para probar la reducción aislada; Q mantiene coche no terminado y hardware mode 0:
+no verifica el override de entrada por fin/hardware mode 2 ni el dispatcher, selección de marcha,
+generación de curvas de par, sonido de motor o una carrera DOS. El replay de 21 escenarios / 56 448 ticks
+entre builds Release independientes y el smoke finito de siete pistas se repitieron tras esta corrección.
+La regresión histórica sigue en 1/23 (10 estados, 22 imágenes, cero fallos de ejecución), sin actualizarla.
 
 ### Auditoría de la decompilación Ghidra
 
@@ -399,8 +714,8 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
 - `sub_00020814` elige la cara con sonda a altura del coche + 50: coste = distancia si está debajo, distancia² si encima
   (altura media de los 3 vértices); las caras 0x28–0x4f solo ganan si no hay otra. La altura final es el plano exacto.
 - `sub_0002e234` (unidades del mundo, arriba positivo): `v += 0.2; h -= v`; si `h < suelo+5` se apoya: en tierra `v = caída del suelo`
-  (0 si |km/h| < 50 y |caída| > 4, o si la caída > 0.05·km/h → salto); al aterrizar `v > 8 ? −0.2v : 0.5v`, mínimo −15.
-  En el aire si `suelo + 30 < h` (`car+0x270`); entonces el integrador no aplica tracción.
+  (0 si |km/h| < 50 y |caída| > 4, o si la caída > `|0.05·km/h|` → salto); al aterrizar `v > 8 ? −0.2v : 0.5v`, mínimo −15.
+  En el aire si `suelo + 30 < h` (`car_update` `0x311aa`, `car+0x270`); entonces el integrador no aplica tracción.
 - Tramos: `sub_00028f08` construye la secuencia desde el objeto de meta (tipo 0x12c) y guarda el número de tramo
   en el objeto del motor (`+0x1e`), que la consulta de suelo devuelve (`+0x38` del resultado) → `car+0x370`. Portado (`src/game/track.c`).
 
@@ -440,7 +755,9 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   200 atrás y centrado. En AUSTRIA la carretera gira detrás de la salida y los huecos 2–7 caen sobre la ladera (tipo
   0x5a), donde la regla de 6 ticks fuera de pista los hace explotar al arrancar: pendiente comprobar si `g_sections[0]`
   es realmente el objeto de tipo 0.
-- Vueltas completas comprobadas con `--sim 200 auto --rivals 3` en las 7 pistas (CANADA incluida: la IA sigue `gate_b` en la rama B).
+- Comprobación histórica de vueltas con `--sim 200 auto --rivals 3` en las 7 pistas (CANADA: `gate_b` en la rama B).
+  Tras corregir el agarre contra bytes originales, la prueba de 200 s con siete rivales termina sin fallos de
+  proceso y con resúmenes finitos, pero varios coches siguen atascados; no se mantiene una garantía de completar carreras.
 - **Choques entre coches** (portado): `cars_update_all` (0x2d2f8) prueba cada par con |dx|,|dz| < 200 y |dy| < 70 unidades y llama
   a `sub_0001ebb4`: círculo de radio 4 m (`+0x130`), cruce de los 4×4 lados de las cajas (máx. 8 puntos; más = sin choque),
   contacto = media, línea = par de puntos más alejado. `sub_0001e638`: impulso mutuo con `e = 0.6·0.6` (`+0x10`),
@@ -456,18 +773,30 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   par\u00e1metro de IA `+0x28` del modelo `= 0,19\u00b7dificultad + 0,4`. Usan el perfil 11 para el l\u00edmite de direcci\u00f3n (40 km/h,
   /90) y la fijan sin suavizar (como la entrada anal\u00f3gica), la fuerza del turbo (145) y las velocidades punta de las
   revoluciones.
-- **Acelerador** (`car_throttle` 0x4db90): \u00edndice = `|trunc(v\u00b73,6)| / 0xc5450[dificultad]` (\u2264 199); con patinaje
+- **Acelerador** (`car_throttle` 0x4db90): índice = `min(199, trunc(|trunc_x87(v*3.6)| / 0xc5450[dificultad]))`; con patinaje
   contra el movimiento \u00edndice 0. Si la curva da \u2264 3, `car+0x520` cuenta y cada `8\u00b7car+0x51c + 15` ticks sube
   `car+0x51c`; si no, se divide entre 2. El humano recibe cada 182 fotogramas `car+0x594 = (posici\u00f3n \u2212 1)\u00b71,5`
   (`[0xc0b50] = 1`). Objetivo = `(par + 0x51c + 0x594 + 0x524)\u00b71000\u00b7acelerador/100`, o \u221225000 con la marcha atr\u00e1s
   puesta avanzando (freno); se acerca un 20 % por tick tras la salida; soltado, `\u2212v\u00b7500`.
-- **Turbo** (portado, `sub_0004e2d8`, llamado por `car_input` tras el acelerador): carga `car+0x534` (0–100, empieza llena),
+- **Revoluciones** (`car_throttle`, bloque `0x4dfbe`): usa su índice final de par, no recalcula desde velocidad.
+  Relación con el tope de marcha <= 1.5 da régimen `relación*66` o suavizado 1/6 hacia la entrada;
+  humano en aire/antes de salida usa valor absoluto, IA solo en aire y entrada > 80. Después, derrape
+  bajo 60 km/h tiende a 100 y solo humano terminado tiende a cero (véase la verificación anterior).
+- **Freno** (`sub_0004e1bc`, coche no terminado): entrada positiva > 50 bloquea `body.sliding`, igual que
+  reloj de salida no negativo; entrada > 80 y velocidad longitudinal > 2 fija derrape 10.
+- **Turbo** (aritmética verificada, `sub_0004e2d8`, llamado por `car_input` tras el acelerador): carga `car+0x534` (0–100, empieza llena),
   modo `+0x53c` (1 = botón, 2 = forzado). Inactivo: recarga `0xc4f70[coche]` por tick (0,4–0,6) hasta 100. Activo: −2,5 por tick
-  (40 ticks); fuerza motriz `+= 0xc4e50[coche]·carga + max(0, (20 − v)·10000)`; el modo 2 usa `20000·carga` y suma
-  `0.01·carga` a la velocidad. Activación (`car_input` 0x4d8eb, 4.º argumento = 1): solo con carga ≥ 100 y sin haber
-  terminado; si no, pitido y espera de 30 ticks (con carga > 20). Recarga: `< 100` suma, `> 100` se fija a 100.
-  Arranque turbo (`human_input` 0x2c99e): una pulsación nueva (`car+0x530`) antes de 0,25 s de carrera (`car+0x3a4`)
-  con el modo a 0 pide 2 y fuerza el modo 2 sea cual sea la carga. Al empezar un turbo, `sub_0004e688` suelta 10
+  (40 ticks); al agotarse limpia carga/modo/frames y retorna sin fuerza. Fuerza motriz
+  `+= 0xc4e50[humano o perfil IA 11]·carga + max(0, float((20 − v)·10000))`; el modo 2 usa `20000·carga` y suma
+  `0.01·carga` a la velocidad. Activación (`car_input` 0x4d8eb, 4.º argumento = 1):
+  carga ≥ 100, modo 0, reloj negativo y sin haber terminado. Negativa solo para humano, modo 0,
+  espera <= 0 y carga > 20: escribe 30 y decrementa inmediatamente a 29.
+  La espera decrece solo en petición 1; soltar conserva el contador. Véase el oracle por fragmentos anterior.
+  Recarga: `< 100` suma, `> 100` se fija a 100.
+  Arranque turbo (`human_input` 0x2c99e, generación/latch verificados con tiempo suministrado):
+  sondeo igual a 1, sin wreck, latch anterior 0 y tiempo `car+0x3a4 < 0,25`,
+  con el modo previo a 0, piden 2 y fuerzan el modo 2 sea cual sea la carga, sin gate de salida.
+  El latch se escribe tras despacho/marchas. Al empezar un turbo, `sub_0004e688` suelta 10
   bocanadas de SMOKE (`0xc41a0`, tamaño `0x32000`). La IA lo pide con la carga exactamente a 100 (`0x1ca15`).
 - **Colocación tras la reaparición** (`sub_00041430`, el fotograma siguiente a `car+0x350 = 1`): mismo punto que el
   deslizamiento (con la búsqueda hacia delante de los huecos −2 de la rama B); una consulta de suelo en el punto y,

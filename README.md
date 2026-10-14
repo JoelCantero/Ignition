@@ -100,7 +100,7 @@ Pistas: `USA`, `CANADA`, `AUSTRIA`, `BRAZIL`, `CARIB`, `ICELAND`, `JAPAN`. La ru
 | `--ghost F.GST` | dibuja el fantasma (sin choques) en ventana y sin ventana; con `--sim` mide la desviación en x/z |
 
 Variables de entorno de depuración: `IGN_TRACE=1` (traza por tick y estadísticas de tramos y puertas),
-`IGN_TRACE=full` (estado inicial y cada tick, esquema de 98 campos con controles y precisión de 17 cifras),
+`IGN_TRACE=full` (estado inicial y cada tick, esquema v3 de 101 campos con controles y precisión de 17 cifras),
 `IGN_TRACK_DUMP=archivo` (vuelca los tramos), `IGN_LIFT=u` (eleva el coche en el visor para ver la sombra) e
 `IGN_BANARNE=1` (carrocería alta en el visor).
 
@@ -115,7 +115,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r tests/requirements-original.txt
 cmake -S . -B build -DIGN_VERIFY_ORIGINAL=ON -DPython3_EXECUTABLE="$PWD/.venv/bin/python"
 cmake --build build
-ctest --test-dir build -R '^physics_original$' --output-on-failure
+ctest --test-dir build -R '^(physics_original|car_original|car_kernel_contract)$' --output-on-failure
 ```
 
 El informe `build/physics-original-report.json` conserva hashes del original, del ejecutable de prueba, de las
@@ -128,9 +128,93 @@ cambiar `ign_body_step`.
 Esto verifica **la rutina aislada, con x87 emulado y palabra de control `0x037f`**, no el juego completo,
 `car_update`, colisiones, IA ni una carrera DOS. Véanse los límites y la
 [revisión de los avisos de Ghidra](docs/formats.md#auditoría-de-la-decompilación-ghidra).
-En la comprobación del estado actual, `physics_original`, `gearbox` y `pos` pasan, pero la regresión general
-preexistente solo pasa **1/23** casos (divergencias de imágenes y de estado de carrera). No se han cambiado
-la física ni los resultados esperados para convertir esas diferencias en un éxito.
+La regresión general preexistente sigue pasando solo **1/23** casos (divergencias de imágenes y de estado
+de carrera). No se han cambiado los resultados esperados para convertir esas diferencias en un éxito.
+
+### Kernels del coche verificados contra el original
+
+El oracle `tests/car_original.py` pasa **42 530 casos / 302 572 pasos** contra los bytes LE:
+dirección completa `0x500f0` (732 casos), bloque de agarre `0x3070a..0x30874` (672) y aritmética vertical
+`0x2e234`, hasta la frontera de efectos de aterrizaje o retorno (252), más aceleración (6 829),
+freno (72), aritmética de turbo (2 016), revoluciones (25 016) e integración acelerador→revoluciones (6 941).
+Usa los kernels reales de `car.c`, sin reemplazar sonido/efectos por respuestas inventadas.
+Las mayores diferencias numéricas son `7.11e-15`, `1.78e-15` y `1.43e-14`, respectivamente, dentro
+de la tolerancia del oracle; los indicadores son exactos. Los informes conservan procedencia y cobertura.
+
+Esta prueba confirmó y permitió corregir dos errores de agarre: si una rueda tiene un tipo fuera de 0..29,
+se conserva la media anterior (inicial 0,4) y ambos agarres; los rivales usan perfil 11 y su propia tabla
+trasera por modelo/dificultad, no la fórmula humana. Dirección, altura y `body_step` no necesitaron
+cambiar sus fórmulas. Hay fixtures de límites numéricos, aleatorios y secuencias válido→inválido→válido.
+
+Los tres bloques nuevos pasan **8 917 casos / 127 230 pasos**. Se corrigieron la truncación x87 del índice
+de par, los límites originales de patinaje, el bloqueo por freno y el turbo agotado: limpia modo/frames
+y no añade fuerza. Las diferencias máximas son `1.82e-12` (aceleración), cero (freno) y `9.32e-10` (turbo),
+dentro de la misma tolerancia; los indicadores son exactos. Las curvas de par son entradas suministradas
+a ambos kernels, no una verificación de su generación.
+
+Revoluciones añade **31 957 casos / 166 942 pasos**, contando la integración (que repite deliberadamente
+el acelerador). El tick reutiliza su índice final de par, incluido patinaje, en vez de recalcularlo.
+Se corrigieron las reglas de IA: en el aire solo tiende al acelerador si entrada > 80; antes de salida
+usa la relación de marcha y no reduce revoluciones por coche terminado. Humanos y rivales usan
+sus respectivas tablas; el derrape bajo 60 km/h se aplica después y solo el humano terminado reduce
+a cero. Errores máximos: `1.43e-14` aislado y `3.64e-12` integrado. Se prueban índices 0..199,
+las tres marchas, umbrales, estados de salida/aire/derrape/fin, aleatorios y secuencias de transición.
+
+El oracle de entradas `tests/input_original.py` añade **33 360 casos / 100 572 pasos**, sin tolerancia:
+pedales dirigidos (180), arbitraje freno/marcha atrás (27 648), caja automática (5 526) y cambios manuales (6).
+Ejecuta bytes LE sin parchear, incluido el freno y `__CHP` reales; evita audio mediante la rama original.
+La fuerza se calcula con la marcha previa; la selección ocurre después. Manual permite 0–2 y el freno
+no selecciona atrás. Automático respeta los umbrales estrictos, curvas compartidas del modelo 0,
+comparación `int16` con signo y contador **> 30**, que se borra al coincidir el objetivo en la siguiente llamada.
+Los fixtures incluyen vecinos de umbrales, pedales simultáneos, empates, extremos `int16` y transiciones.
+`tests/gearbox.c` comprueba además el orden dentro del tick y la independencia de curvas locales/dificultad.
+El informe `build/regression-clean/input-original-report.json` conserva hashes, cobertura y exclusiones.
+Véase [el alcance por bloque](docs/formats.md#dispatcher-de-pedales-y-selección-de-marchas-verificación-ejecutable).
+
+El arbitraje de solicitudes de turbo añade **10 728 casos / 82 440 pasos** exactos (modo J):
+el informe de entradas suma **44 088 / 183 012**. Corrige el gate de salida para petición 1,
+la exclusión de IA del aviso de negativa y el contador que solo avanza mientras se pide 1
+(una negativa deja 29; soltar conserva la espera). Petición 2 fuerza modo 2 sin gates.
+Se prueban vecinos de carga 20/100 y reloj cero, estados de fin/modo/espera y secuencias de 65 llamadas.
+**Prueba composicional**, no dispatcher continuo: ejecuta decisiones hasta audio/efectos y compone
+independientemente la escritura de espera y el contador originales, sin parchear ni sustituir callees.
+No verifica efectos secundarios de esos callees; generación/latch se verifican en el bloque siguiente.
+Véanse [fronteras y supuestos](docs/formats.md#solicitudes-de-turbo-verificación-por-fragmentos-originales).
+
+Generación humana y latch añaden **5 184 casos / 31 104 pasos** exactos (modo P):
+el informe de entradas suma **49 272 / 214 116**. Solo sondeo igual a 1 cuenta como pulsación;
+cualquiera de los tres estados de wreck la bloquea. Tiempo suministrado **< 0,25**,
+latch anterior 0 y modo previo 0 convierten petición 1 en 2, sin gate de salida, carga o fin.
+Se corrigió el orden: la generación toma el modo **antes** de consumir turbo; el latch 0/1/2
+se escribe **después** de despacho y selección de marcha. La IA conserva su petición directa.
+Los fixtures cubren combinaciones de wreck, vecinos binary64 del umbral, tecla mantenida,
+liberación y nueva pulsación. `tests/gearbox.c` prueba también agotamiento en el mismo tick.
+La prueba compone generación y commit originales separados; no ejecuta los callees intermedios.
+El port suministra ahora el reloj por coche descrito a continuación.
+Véanse [contrato y límites](docs/formats.md#generación-humana-de-turbo-y-latch-verificación-por-fragmentos).
+
+Reloj por coche y salida normal: **18 450 casos / 74 178 pasos** exactos en
+`tests/race_time_original.py`. Se verifican conversión signed32 con wrap a segundos,
+countdown, función completa de reset y actualización de un coche, compuestos con turbo/latch.
+Se conserva el sample previo durante la transición y se congelan coches fuera/finalizados,
+no wrecks. El reset conserva tiempo de vuelta y origen de vuelta.
+Turbo humano, HUD y tiempo final del fantasma consumen esos relojes.
+**Desviación**: milisegundos virtuales `floor(ticks*1000/72)` muestreados al final del tick;
+no timer DOS, pausa ni salida forzada anticipada. Véase
+[alcance y secuencia](docs/formats.md#reloj-por-coche-y-transición-normal-de-salida-verificación-ejecutable).
+
+**No equivale a verificar todo `car_update` ni una carrera DOS**: faltan sondeo de controles, caché/latches,
+frecuencia completa de callers e inicialización/reset original de controles, geometría,
+producción original de km/h en binary64 (se suministra la misma velocidad binary32 a ambos kernels),
+generación de solicitudes de IA/joystick, timer/pausa/salida forzada y efectos de turbo,
+colisiones, daños y efectos de aterrizaje. La desviación de subidas con cambio de nivel permanece
+explícita y fuera de la comparación original. Véanse [las fórmulas y límites](docs/formats.md#verificación-ejecutable-de-dirección-agarre-y-altura).
+El replay entre dos builds Release independientes también pasa los 21 escenarios / 56 448 ticks
+con 104 campos (v4, añade relojes por coche), estado final y framebuffer idénticos;
+demuestra reproducibilidad del port, no fidelidad DOS.
+Tras las correcciones, la regresión histórica difiere en **10 estados y 22 imágenes**, sin fallos de ejecución.
+También se ejecutaron 200 s con siete rivales en cada pista: los siete procesos terminaron correctamente
+y sus resúmenes fueron finitos, pero persisten atascos de conducción; esto no demuestra carreras completas.
 
 ### Diagnóstico de regresiones y conducción reproducible
 
@@ -150,7 +234,8 @@ ocultar los fallos.**
 
 El nuevo replay sin rivales pasa **21/21** escenarios: siete pistas con auto (2 880 ticks), recta
 (576 ticks) y turbo (576 ticks), coche 9 y dificultad 0. Compara dos procesos nuevos sin tolerancia en los
-98 campos muestreados, estado final e imagen: **56 448 ticks ejecutados**, más 42 estados iniciales.
+104 campos muestreados (esquema v4, incluye relojes por coche), estado final e imagen:
+**56 448 ticks ejecutados**, más 42 estados iniciales.
 La comparación contra una segunda compilación Release hecha desde cero también pasa los **21/21** escenarios.
 El informe conserva argumentos, plataforma, hashes de ejecutables/fuentes/datos y capturas completas; rechaza
 esquemas incompletos, tiempos desalineados, valores no finitos, fallos de proceso y cambios de datos durante la prueba.
@@ -168,14 +253,15 @@ IGN_TRACE=full ./build/ignition USA --sim-ticks 576 turbo --rivals 0 --car 9 --s
 El replay usa `--sim-ticks` para no confundir ese redondeo con una divergencia física.
 Los tests sintéticos `verification_tools` comprueban también controles negativos del comparador y del informe.
 `headless_trace_contract` verifica los conteos exactos, rechaza argumentos inválidos y comprueba que activar
-las trazas no modifica el estado final ni la imagen. Pasan 14 controles sintéticos y 3 pruebas de contrato CLI;
-con el oracle original habilitado, CTest pasa 6/7 objetivos y solo falla la regresión histórica.
+las trazas no modifica el estado final ni la imagen. Pasan 18 controles sintéticos, 3 pruebas de contrato CLI
+y 3 controles del runner del coche; con los oracles originales habilitados, CTest pasa 8/9 objetivos
+y solo falla la regresión histórica.
 Los informes y capturas se guardan en el directorio de compilación; no contienen una carrera DOS de referencia.
 
 **Esto establece determinismo del port en esos escenarios, no equivalencia con el juego DOS ni ausencia de
 atascos o errores de conducción.** La regresión histórica sigue fallando de forma visible.
-El siguiente límite verificable es `car_update`: controles, agarre y altura contra los bytes originales,
-antes de ampliar a colisiones y carreras reales en DOSBox-X.
+Dirección, agarre y aritmética vertical ya tienen un límite verificable aislado. El siguiente paso es
+ampliar a controles completos y colisiones, antes de comparar carreras reales en DOSBox-X.
 
 Ejemplos:
 
@@ -217,6 +303,8 @@ tests/regress.py        regresión determinista sin ventana (23 casos; `ctest --
 tests/gearbox.c         prueba unitaria de cambios manuales y marcha atrás (`ctest --test-dir build -R gearbox`)
 tests/body_step.c       ejecuta la física C para el verificador diferencial
 tests/physics_original.py replay aislado del integrador LE contra el port, con Unicorn opcional
+tests/car_original.py     replay LE de dirección/agarre/altura/aceleración/freno/turbo contra kernels C
+tests/car_kernels.c       runner nativo de los seis kernels, sin duplicar sus fórmulas
 tests/solo_replay.py    replay sin rivales, exacto por tick, con informe de procedencia (solo port)
 tests/test_verification.py controles positivos y negativos de las herramientas de verificación
 tools/ignassets.py      PIC/COL/TEX/DAT/nivel → PNG
@@ -295,20 +383,22 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Bucle fijo de física a 72 Hz | `frame_time` `0x2b734` | `main.c` | fiel |
 | Cuerpo rígido (modelo bicicleta) | `body_step` `0x1e090` | `physics.c` | verificación diferencial de la rutina aislada; 190 casos |
 | Curvas de par (Hermite) | `torque_spline` `0x53e70` | `physics.c` | fiel |
-| Acelerador, freno y marcha atrás | `car_throttle` `0x4db90`, `car_gearbox` `0x502c4` | `car.c` | acelerador fiel (bonos de par, freno −25000); caja de cambios simplificada |
+| Acelerador, freno y marcha atrás | `car_throttle` `0x4db90`, `car_brake` `0x4e1bc`, bloques de `car_input` `0x4d5f4` | `car.c` | aceleración/freno: 6 829/72 casos; acelerador→revoluciones: 6 941; pedales/arbitraje: 27 828 |
+| Selección de marchas | `car_gearbox` `0x502c4`, cambios de `human_input` | `car.c` | caja automática sin audio: 5 526 casos / 72 738 pasos; manual: 6; orden del tick probado en el port, no caller completo original |
+| Revoluciones | bloque de `car_throttle` `0x4dfbe..0x4e1a7` | `car.c` | verificado: 25 016 casos / 134 208 pasos; reutiliza índice final de par y distingue humano/IA |
 | Coches de la IA: modelos, bono de par, perfil 11 | `sub_00022d08`, `car_steer`, `car_turbo`, `car_throttle` | `car.c`, `main.c` | fiel |
-| Dirección | `car_steer` `0x500f0` | `car.c` | fiel |
-| Agarre por superficie y coche | tablas `0xc33f0`, `0xc4dc0` | `car.c` | fiel (dificultad `0xc5470` = 1) |
+| Dirección | `car_steer` `0x500f0` | `car.c` | verificada: 732 casos / 5 856 pasos contra bytes LE |
+| Agarre por superficie y coche | bloque `0x3070a`, tablas `0xc33f0`, `0xc4dc0`, `0xc5670` | `car.c` | verificado: 672 casos / 1 536 pasos; media persistente y reglas de rivales |
 | Consulta de suelo | `ground_query` `0x20814` | `assets.c` | fiel (altura acotada a los vértices de la cara) |
 | Suelo bajo 4 ruedas, ruedas anómalas | `car_update` `0x2eea4`–`0x30d98` | `car.c` | fiel: esquinas de la caja ×1,1 escaladas por `1 + km/h / 220`, cabeceo `asin` limitado a 0,1 rad/tick |
-| Vertical: gravedad, saltos, aterrizaje | `car_vertical` `0x2e234` | `car.c` | fiel + desviación (subidas en cambio de nivel) |
+| Vertical: gravedad, saltos, aterrizaje | `car_vertical` `0x2e234` | `car.c` | aritmética verificada hasta efectos: 252 casos; desviación explícita de subidas |
 | Muros (aristas no compartidas, activación por superficie, modo salto, caché de 150) | `collect_walls` `0x33ee8`, `car_update` `0x2f856`, `cars_update_all` `0x2d77a` | `assets.c`, `car.c` | fiel |
 | Choque con muros | `box_vs_walls` `0x1f708`, `wall_impulse` `0x1f3fc` | `physics.c` | fiel |
 | Choque entre coches | pase en `0x2d2f8`, `0x1ebb4`, `0x1e638` | `physics.c`, `car.c` | fiel (falta el caso de solape) |
 | Tramos, bifurcaciones y saltos | `split_plc_types` `0x247b0`, `build_sections` `0x28f08` | `track.c` | fiel |
 | Vueltas y fases | `car_update` | `car.c` | fiel |
 | Parrilla de salida | `cars_init` `0x26458` | `main.c` | fiel |
-| Turbo | `car_turbo` `0x4e2d8`, `car_input` `0x4d8eb`, `human_input` `0x2c99e` | `car.c` | fiel (con el arranque turbo de 0,25 s) |
+| Turbo | `car_turbo` `0x4e2d8`, `car_input` `0x4d8eb`, `human_input` `0x2c99e` | `car.c` | aritmética: 2 016 casos / 96 768 pasos; arbitraje por fragmentos: 10 728 / 82 440 exactos; generación humana/latch: 5 184 / 31 104 exactos; sondeo, reloj original, IA/joystick, sonido/efectos y coherencia del rumbo del caller no verificados |
 | Destrucción y reaparición | `sub_0003a788`, `sub_00041430` | `race.c`, `car.c` | fiel + desviación (huecos de la consulta de suelo) |
 | Humo de la pista y polvo al aterrizar | `sub_0003636c`, `sub_00036ce0`, `sub_0003f37c` | `fx.c` | fiel (opciones de detalle activadas) |
 | Montaje del coche | `cars_init` `0x265f6` | `car.c` | fiel |
@@ -427,6 +517,7 @@ pulsada `0x55c28` · palabra tecleada `0x55cd0` · `atan2` `0x647ef` · `pow` `0
 | `+0x344` | entrada de dirección ±100 |
 | `+0x364`, `+0x370`, `+0x374`, `+0x378` | tramo (IA), tramo bajo el coche, vuelta y fase |
 | `+0x534/+0x53c/+0x548` | carga, modo y espera del turbo |
+| `+0x52c/+0x530` | petición de turbo actual y latch anterior (0/1/2), generación humana verificada con tiempo suministrado `+0x3a4` |
 | `+0x544` | canal de sonido |
 | `+0x554` | contador de vuelco *¿?* |
 | `+0x558/+0x55c/+0x560` | solape con otro coche |
@@ -526,7 +617,25 @@ implementado.
       (incluye el atasco de CANADA en la sección 22). `3213fd5e` pasa 1/23 con imagen y 16/23 sin ella;
       el informe separa ejecución, estado e imagen y no oculta esos fallos.
 - [x] **P2** Conducción sin rivales reproducible: `tests/solo_replay.py`, 21 escenarios / 56 448 ticks
-      entre dos ejecuciones, 98 campos por fila y controles negativos. Prueba del port, no fidelidad DOS.
+      entre dos ejecuciones, 101 campos por fila y controles negativos. Prueba del port, no fidelidad DOS.
+- [x] **P2** Verificación de dirección, agarre y aritmética vertical contra bytes LE: `tests/car_original.py`,
+      1 656 casos / 8 400 pasos. Corregidos agarre persistente y tablas de rivales; no verifica todo `car_update`.
+- [x] **P2** Aislar aceleración, freno y turbo contra bytes LE: 8 917 casos / 127 230 pasos adicionales;
+      total 10 573 / 135 630. Corregidos índice x87, patinaje, bloqueo del freno y agotamiento del turbo.
+      Pendiente dispatcher completo; solicitudes de turbo se verifican en los bloques siguientes.
+- [x] **P2** Revoluciones contra bytes LE, aisladas y con acelerador: 31 957 casos / 166 942 pasos adicionales;
+      total 42 530 / 302 572. Reutilizado índice final de par; corregidas reglas de aire/salida/fin de la IA.
+      Velocidad binary32 suministrada, no verificación de su producción original binary64.
+- [x] **P2** Pedales/arbitraje y selección de marchas contra bytes LE: `tests/input_original.py`,
+      33 360 casos / 100 572 pasos exactos. Marcha previa para la fuerza, manual 0–2, umbrales estrictos,
+      curvas compartidas y retardo original. Alcance D/A/K/H; el arbitraje de turbo se verifica en el bloque siguiente.
+- [x] **P2** Arbitraje de solicitudes de turbo por fragmentos LE: modo J, 10 728 casos / 82 440 pasos exactos;
+      total entradas 44 088 / 183 012. Corregidos gates, negativa humana y contador solo en petición 1.
+      Audio/efectos excluidos; composición condicionada a sus efectos secundarios, no dispatcher continuo.
+- [x] **P2** Generación humana de solicitudes, pulsación inicial y latch por fragmentos LE: modo P,
+      5 184 casos / 31 104 pasos exactos; total entradas 49 272 / 214 116.
+      Snapshot antes de consumir carga y commit después de marchas; sin gate de salida inventado.
+      Pendientes sondeo, reloj original por coche, IA/joystick y callees intermedios.
 - [~] **P3** Trazas de ejecución del original en DOSBox-X: hecho `tools/trace_compare.py`; DOSBox-X 2026.10.01 está
       instalado; se confirmó la entrada MZ de `MAINDOS.EXE` y que DOS lo mantiene cargado, pero tras reanudar solo se
       observó el bucle de espera de BIOS. Aún falta llegar a carrera, validar el mapeo LE, el muestreo por tick y la
@@ -551,9 +660,12 @@ implementado.
       coche quieto, en el aire 250 unidades sobre la media de las caras de carretera, en primera, y le asigna el tramo
       del punto de reaparición (si vuelve a explotar, reaparece dos tramos más allá). Falta el disparador por objetos
       `0x12c`.
-- [~] **P1** Entrada original: teclado `0x2c5b8` decodificado (dirección digital, sin rampas; ver `docs/formats.md`); cambio manual básico disponible (M, Q/E); faltan joystick `0x4c9b4` y `car_input` completo
-      (`0x4f874`, `0x50464`, `0x50824`, `0x4e1bc` sin identificar).
-- [~] **P2** Caja de cambios `0x502c4` decodificada (ver `docs/formats.md`); cambio manual de 2 marchas en el port (M, Q/E); falta la histéresis y el retardo original de cambio.
+- [~] **P1** Entrada original: teclado `0x2c5b8` decodificado (dirección digital, sin rampas; ver `docs/formats.md`);
+      pedales/arbitraje y selección de marchas verificados, manual 0–2 (M, Q/E); faltan sondeo/flancos/caché,
+      joystick `0x4c9b4` y `car_input` completo
+      (`0x4f874`, `0x50464`, `0x50824` sin identificar; freno `0x4e1bc` identificado y verificado para coche no terminado).
+- [x] **P2** Caja automática `0x502c4` sin audio verificada (curvas compartidas, ángulo, empate y contador/retardo);
+      cambios manuales 0–2 verificados. Inicialización/reset y secuencia completa de callers aún fuera de prueba.
 - [x] **P2** Dificultad `0xc5470` (agarre trasero ×1/1,15/1,3/1,3, `--difficulty N`) y tipo de control
       `0x1fefd0[coche]+4` = 1 (IA: perfil 11, bono de par, modelos de `0xc5520`). Pendiente: tipos 2 y 7.
 - [ ] **P2** Superficies especiales `0x12c–0x131` (meta, rampas…) y `0x6e–0x83`.

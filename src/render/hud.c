@@ -151,8 +151,8 @@ static void draw_text(const IgnHud *hud, IgnFrame *frame, const char *text, cons
     }
 }
 
-static void format_time(char out[16], double frames) {
-    int centiseconds = (int)(frames * (100.0 / 36.0));
+static void format_time(char out[16], double seconds_elapsed) {
+    int centiseconds = (int)(seconds_elapsed * 100.0);
     if (centiseconds < 0) centiseconds = 0;
     int minutes = centiseconds / 6000;
     int seconds = centiseconds / 100 % 60;
@@ -195,8 +195,8 @@ void ign_hud_draw(IgnHud *hud, IgnFrame *frame, const IgnCar *car, const IgnRace
     }
 
     char total_time[16], lap_time[16], place[16], speed[8];
-    format_time(total_time, race->total);
-    format_time(lap_time, hud->race_started ? race->total - hud->lap_start : 0);
+    format_time(total_time, car->race_elapsed);
+    format_time(lap_time, car->lap_elapsed);
     int place_number = car->position > 0 ? car->position : 1;
     if (car_count < 1) car_count = 1;
     snprintf(place, sizeof place, "%d/%d", place_number, car_count);

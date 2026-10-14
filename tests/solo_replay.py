@@ -23,9 +23,10 @@ from trace_compare import compare_rows, load_text
 
 FIELDS = set("""trace_schema tick t
 in_accel in_brake in_left in_right in_turbo in_analog in_a_accel in_a_brake in_a_steer in_manual_gear in_gear_shift
-id spec x y z heading kmh height ground ground_prev fall_speed airborne ground_object surface_type special_ground
-level_change jump_mode wall_hit wall_impact nwalls gear forward_gear steer_visual revs
+id spec x y z heading kmh height ground ground_prev fall_speed grip_avg airborne ground_object surface_type special_ground
+level_change jump_mode wall_hit wall_impact nwalls gear forward_gear gear_ticks gear_delay steer_visual revs
 turbo_charge turbo_mode turbo_wait turbo_key creep creep_ticks catchup catchup_clock section phase lap position
+race_elapsed lap_elapsed lap_origin
 out wrecked wrecks wreck_kind wreck_frame landed offroad step_x step_z
 b_mass b_inertia b_restitution b_a b_b b_heading b_yaw_rate b_px b_pz b_vx b_vz b_v_fwd b_v_lat b_saturated
 b_steer b_pitch b_roll b_grip_f b_grip_r b_sliding b_drive b_fmax_f b_fmax_r b_radius b_impact b_contact_x b_contact_z
@@ -37,7 +38,7 @@ def validate_trace(text, ticks):
     if len(rows) != ticks + 1:
         raise ValueError("expected initial state and %d ticks, got %d rows" % (ticks, len(rows)))
     for i, row in enumerate(rows):
-        if row.keys() != FIELDS or row["trace_schema"] != 1:
+        if row.keys() != FIELDS or row["trace_schema"] != 4:
             raise ValueError("row %d: incomplete or unsupported full trace schema" % i)
         if row["tick"] != i or row["t"] != i * (1.0 / 72.0):
             raise ValueError("row %d: incorrect tick/time alignment" % i)
