@@ -21,7 +21,7 @@
 00023368  load_tex             LEVELS\..TEX + CARS.TEX
 0001ce30  load_tri             reads TRI (500 B/object), computes edge angles
 0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car
-00026458  cars_init            allocs cars/bodies, torque splines, start grid (slots 0xc33d0)
+00026458  cars_init            allocs cars/bodies, torque splines, start grid (slots 0xc33d0); bounded turbo initialization 0x27451..0x27497 verified, full init excluded
 00048a14  car_place_objects    per frame: body/wheels/shadow/name engine objects, front wheel steer
 00040ec8  cars_body_sway       body tilt car+0x584/+0x58c = ground tilt + lean, smoothed 0.25
 0002e6f8  car_body_lean        lean car+0xb8/+0xc0 from per-tick acceleration
@@ -78,6 +78,11 @@
 00020bbc  face_avg_height
 000569ec  engine_alloc_objects 42-byte object pool -> [0x24c058]
 0002ed00  car_update           ~2300 insns, calls ground_query; grip block 0x3070a..0x30874 verified by tests/car_original.py, not whole routine
+0002f2be  lap_crossing         phase 3, probe 0, abs(previous +370)=count-1, +604=0; finish snapshots +39c position to +3a0; bounded lap oracle 3024 cases/4112 steps  status=ported
+0002f3a9  lap_time_commit      last lap +3b4, slots +3bc/+3c4/+3cc, origin +3d4 from global sample; strict shared best; messages/track record/persistence excluded  status=ported
+0002f617  lap_probe_retain     preserves car+370 on sentinel 10000; geometry supplied, not verified  status=ported
+0002fc1c  lap_phase_update     abs(car+364), quarter intervals [q,2q),[2q,3q),[3q,4q); one transition per call, final upper bound verified  status=ported
+001fb390  g_best_lap           shared strict minimum; original seed from saved track table 1ff367+track*78; port DBL_MAX session-only deviation  status=identified
 0002d008  cars_update_all      calls car_update
 0001e090  body_step            rigid-body bicycle model, dt 1/72; isolated x87 replay vs physics.c, 190 fixtures (tests/physics_original.py), not whole-game equivalence  status=verified
 00053e70  torque_spline        Hermite curve -> 200 int16  status=ported
@@ -106,15 +111,15 @@
 0003731c  skid_effects         skid marks (700 ring [0x1feeb8], SHD row per surface 0xc34e0) and dust (effect 1)  status=ported
 00039d1c  fx_sprite            effect type 1: SMOKE.TEX sprite, damped drift, grows, 8-frame anim 0xc4110  status=ported
 0005dea0  emit_sprite          primitive 7: scale 4/z*size*([0x1feee8],[0x1feeec]), blend LUT [0x24bfa8] = SHD
-0003a788  wreck_explode        explosion effect: hide car, 80 frames, glide 40 to section+2, respawn  status=ported
-0003c208  wreck_sink           sinking effect (car+0x358), 12 splash quads, same respawn  status=ported
+0003a788  wreck_explode        explosion effect: hide car, 80 frames, glide 40 to section+2, respawn; repeated turbo reset 0x3a7f5..0x3a812 verified, full FX excluded  status=ported
+0003c208  wreck_sink           sinking effect (car+0x358), 12 splash quads, same respawn; turbo reset 0x3c26e..0x3c28b verified  status=ported
 00039fe8  fx_blast             effect type 4: sprite with float damping (BOOM)  status=ported
 0003b744  fx_piece             effect type 5: tumbling debris that trails smoke  status=ported
 0003d808  fx_splash            effect type 9: animated quad, SHD-blended texture  status=ported
 0003e6ec  fx_sparkle           effect type 11: DIVSPR sprite orbiting a car (respawn)  status=ported
 0003fee8  fx_add               copy template to a free slot; types 1/2/8 within 3500; priority 0xc47f0  status=ported
 0004e97c  turbo_effects        turbo flames and smoke  status=ported
-0003db4c  wreck_effect3        effect 0xa (car+0x35c): avalanche slide 30 frames, same respawn  status=ported
+0003db4c  wreck_effect3        effect 0xa (car+0x35c): avalanche slide 30 frames, same respawn; turbo reset 0x3dbb4..0x3dbce verified  status=ported
 0003ea00  wall_sparks          sparks (effect 2) while scraping type 0x5a, car+0x33c timer  status=ported
 0003ee70  wheel_sparks         effect 8 sparks on wheel surfaces 6/0x10/0x1a  status=ported
 0003a2b4  fx_plot              effect type 2: one point (TAB or SHD)  status=ported
@@ -134,7 +139,7 @@
 00036ce0  special_emitters     smoke 0x12e (+ embers 1 in 10) / geysers 0x131 every 41 frames (list 0x1fef58)  status=ported
 0003636c  smoke_emitters       PLC 0x15e-0x167 and 0x130 smoke, mist and columns (list 0x1fefac, class = type - 0x15e)  status=ported
 0003f37c  landing_dust         4 SMOKE puffs at the wheels on landing (car+0x278 == 1) over dusty types 0xc3558  status=ported
-00041430  respawn_place        after the glide: probe at the point (or 20 to -x), still, airborne, gear 1, section = object's  status=ported
+00041430  respawn_place        after glide: probe point (or 20 to -x), still, airborne; bounded controls reset verified: gear 1/counter 0, preserves delay/turbo/clocks; geometry/full FX excluded (respawn oracle 7422 cases/31344 steps)  status=ported
 0004e688  turbo_start_fx       10 nitro puffs (0xc41a0) when a turbo starts  status=ported
 000413fc  ease_curve           table 0xc0678[f*200]*0.005 (ease in-out)
 00028f08  build_sections       track section order from the start object (ported: track.c)  status=ported
@@ -144,5 +149,5 @@
 000350f0  car_ground_contact   moving-object collisions; calls ground_query
 0002de30  race_elimination     mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), "%s IS OUT"; [0x1fed78]-- ; at 1 left, all finish
 0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> next valid gate record; skips flag!=0 placeholders
-000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}
+000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty

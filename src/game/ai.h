@@ -2,6 +2,7 @@
 #define IGN_AI_H
 
 #include "car.h"
+#include "fx.h"
 #include "track.h"
 
 /* Driver parameters: state offsets +0x00..+0x48 of the 0x7c-byte AI state, copied by load_tri from the
@@ -20,6 +21,9 @@ typedef struct {
     int age;       /* ticks since the start; the stuck counter waits for the standing start */
     int accel;     /* +0x54 */
     int section;   /* +0x68 */
+    int route_choice;   /* +0x64: selected route */
+    int route_selector; /* +0x66: use route_choice instead of side ratio */
+    double route_random; /* +0x6c: last rand() value, scaled by 1/32768 */
 } IgnAi;
 
 void ign_ai_init(IgnAi *ai, int index);
@@ -27,7 +31,9 @@ void ign_ai_init(IgnAi *ai, int index);
 void ign_ai_set_track(const char *level);
 /* Cars seen by the nearest-rival search of the AI. */
 void ign_ai_set_cars(IgnCar *const *cars, int n);
+/* sub_0001aea0 / t_ai_lanes 0xbf9a0: update route state for a matching section. */
+void ign_ai_update_route_choice(IgnAi *ai, int section, IgnFx *fx);
 /* sub_0001aea0: steering, throttle/brake and turbo as a car_input call. */
-void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnInput *in);
+void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, IgnInput *in);
 
 #endif

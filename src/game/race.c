@@ -1,4 +1,5 @@
 #include "race.h"
+#include <float.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -95,6 +96,7 @@ void ign_race_wrecks(IgnCar *const *cars, int n, const IgnLevel *lv, const IgnTr
     for (int i = 0; i < n; i++) {
         IgnCar *c = cars[i];
         if (!c->wrecked) continue;
+        ign_car_wreck_turbo(c);
         double to[4];
         int obj = respawn_point(lv, t, c->section, to);
         if (obj < 0) continue;
@@ -134,6 +136,7 @@ void ign_race_init(IgnRace *r, int mode, int ncars) {
     r->total = 0;
     r->timer_ticks = r->origin_ms = 0;
     r->elapsed = 0;
+    r->best_lap = DBL_MAX;
 }
 
 void ign_race_skip_countdown(IgnRace *r) {
@@ -171,6 +174,8 @@ void ign_race_car_clock(IgnCar *car, int mode, double elapsed) {
 
 void ign_race_reset_car_clock(IgnCar *car) {
     car->race_elapsed = 0;
+    car->last_lap = 0;
+    for (int i = 0; i < IGN_RACE_LAPS; i++) car->lap_times[i] = 0;
 }
 
 void ign_race_clock(IgnRace *r) {
@@ -198,15 +203,47 @@ int ign_race_countdown(const IgnRace *r) {
 
 static void finish(IgnRace *r, IgnCar *c) {
     c->out = 1;
+    c->finish_position = c->position;
     c->finish_tick = r->tick;
     c->place = ++r->finished;
 }
 
+int ign_race_progress_sample(IgnRace *r, IgnCar *car, int count, int lap_probe, int section_sample) {
+    int event = 0;
+    /* 0x2f2be..0x2f436: the crossing uses the previous lap probe, before updating either section. */
+    if (car->phase == 3 && lap_probe == 0 && abs(car->lap_section) == count - 1 &&
+        car->progress_lock == 0) {
+        car->lap++;
+        car->phase = 0;
+        event = 1;
+        if (car->lap >= IGN_RACE_LAPS && r->mode != IGN_MODE_ELIMINATION) {
+            finish(r, car);
+            event |= 2;
+        }
+        car->last_lap = car->lap_elapsed;
+        if (car->lap < 4) car->lap_times[car->lap - 1] = car->lap_elapsed;
+        car->lap_origin = r->elapsed;
+        if (car->last_lap < r->best_lap) {
+            r->best_lap = car->last_lap;
+            event |= 4;
+        }
+    }
+    if (lap_probe != IGN_NO_SECTION) car->lap_section = lap_probe;
+    if (section_sample != IGN_NO_SECTION) car->section = section_sample;
+    ign_car_progress_phase(car, count);
+    return event;
+}
+
+void ign_race_progress(IgnRace *r, IgnCar *car, const IgnTrack *t) {
+    if (car->out || car->wrecked || t->count <= 0) return;
+    int sample = IGN_NO_SECTION;
+    if (car->ground_object >= 0 && car->ground_object < t->nobj)
+        sample = t->section[car->ground_object];
+    ign_race_progress_sample(r, car, t->count, sample, sample);
+}
+
 int ign_race_step(IgnRace *r, IgnCar *const *cars, int n) {
     r->tick++;
-    for (int i = 0; i < n; i++)
-        if (!cars[i]->out && r->mode != IGN_MODE_ELIMINATION && cars[i]->lap >= IGN_RACE_LAPS)
-            finish(r, cars[i]);
 
     if (r->mode == IGN_MODE_ELIMINATION) {
         /* sub_0002de30: with exactly one racing car a lap behind the leader, it is out. */

@@ -19,14 +19,10 @@ typedef struct {
     IgnHudFont yellow;
     IgnHudFont speed;
     IgnHudFont pos;
-    double lap_start;
-    double last_lap;
-    int observed_lap;
-    int race_started;
 } IgnHud;
 
 int ign_hud_init(IgnHud *hud, const char *data_dir, const IgnPalette *palette);
 void ign_hud_destroy(IgnHud *hud);
-void ign_hud_draw(IgnHud *hud, IgnFrame *frame, const IgnCar *car, const IgnRace *race, int car_count);
+void ign_hud_draw(IgnHud *hud, IgnFrame *frame, const IgnCar *car, int car_count);
 
 #endif

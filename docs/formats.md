@@ -113,7 +113,10 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   Cada bloque: hasta 2 registros empaquetados de 22 B `{u8 flags, u16 vértice_msh, i32 x, i32 y, i32 z, 8 B}` (bordes izquierdo/derecho),
   seguidos de `double`s (pendientes/ángulos precalculados). X/Z = vértice MSH + posición PLC + 25600 en el 72–90 % de registros.
   `load_tri` toma los vértices de `+1` y `+0x17` como **bordes izquierdo/derecho** del tramo (puerta) y el byte `+0x6d`
-  divide la puerta en 2 carriles (1 = mitad izquierda, 2 = mitad derecha). Ancho medio verificado: 295–405 unidades en las 7 pistas.
+  divide la puerta en 2 registros (1 = mitad central→derecha y luego izquierda→central; 2 = izquierda→central y luego central→derecha).
+  Las coordenadas X/Z de estos registros son vértice + posición PLC + `0x6400`; Y es vértice + posición PLC sin ese origen
+  (`0x1d30b..0x1d392`). `track.c` extrae estas coordenadas y subdivisiones, pero la asociación de registros con rutas depende
+  todavía de la topología heurística de `ign_build_track`; no equivale a las listas de sección del original.
 - **GST** (fantasma, `GHOSTS\<nombre>.GST`; lector `0x2adf8`, grabador `0x51204`, escritor `0x2ccc8`; portado en `ghost.c`):
   exactamente `0x49d4c` = 302 412 B (`read_file_into` exige el tamaño). Cabecera: `i16 modelo, i16 pista, i16 tiempo` (carrera
   completa de 3 vueltas en centésimas, `car+0x3a4 × 100` truncado) y `char[4]` nombre (3 letras + NUL). Después 21 600 muestras
@@ -134,11 +137,27 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   maintain, aggr, sight, curveinflu, slopeinflu). `TEST.AIS` no se lee en el juego.
 - **Desviación**: `src/game/ai.c` es una aproximación propia (sigue las puertas TRI, frena según la curvatura en los
   próximos 5+ tramos, marcha atrás si no avanza 150 u en 1,5 s). La ley de control original sigue pendiente.
+- **Carril (`t_ai_lanes`, `0xbf9a0`)**: portadas las cuatro filas por configuración y la permutación de pistas
+  `{1,2,3,6,4,0,5}`. En cada fila coincidente se escribe `selector` en `+0x66`, se consume un `rand()` y se guarda
+  `r = (rand() & 0x7fff) / 32768` en `+0x6c`; la elección `+0x64` es 0 si `chance=0`, 1 si `chance=100`, o
+  `(s20 * 0.7 + 0.3) * r * chance * 0.01 > 0.125`. Las filas repetidas (incluidas las de sección 2) se
+  procesan y consumen RNG por separado. En el port, `ign_fx_rand15` usa el LCG `seed = seed * 1103515245 + 12345`
+  (`rand`, `0x64774`), compartido con el estado de `IgnFx`.
+- `load_tri` se integra al arrancar: registros geométricos extraídos por objeto engine→PLC, incluidas subdivisiones TRI
+  de tipo 1/2. **La topología no es aún equivalente al original**: `build_sections`/`ai_find_section` (`0x1decc`),
+  su wrap/fallback, la excepción de CANADA y la correspondencia de registros divididos con el carril elegido siguen
+  aproximados. Los registros TRI informan las puertas que consulta la IA en el grafo reconstruido, no demuestran por sí
+  solos la ruta/carril que habría escogido el original.
+- Al construir puertas, el índice de objeto del motor se traduce a índice PLC mediante
+  `surface.engine_to_plc` antes de leer el bloque TRI (`4 + plc_index * 500`). No se presupone que ambos índices
+  coincidan; los índices ausentes o bloques fuera de rango usan el centro del objeto como fallback. La prueba
+  `track_gates` usa un mapeo no idéntico para verificar esta correspondencia.
 
 ## Fin de carrera y eliminación (portado a `src/game/race.c`)
 
-- `car_update` (`0x2f2f1`): vuelta + 1 si `|tramo| == count−1`, fase 3 y `car+0x604 == 0`. Si la vuelta ≥ 3 y el modo `[0x1feefc]` ≠ 3,
-  el coche termina: `+0x528 = 1`, `+0x3a0 = +0x39c` (tiempo) y `[0x1fee60]++` (contador de llegada).
+- `car_update` (`0x2f2be`): vuelta + 1 si la sonda actual es cero, `|sonda anterior +0x370| == count−1`,
+  fase 3 y `car+0x604 == 0`. Si la vuelta ≥ 3 y el modo `[0x1feefc]` ≠ 3,
+  el coche termina: `+0x528 = 1`, `+0x3a0 = +0x39c` (**posición**) y `[0x1fee60]++` (contador de llegada).
 - `[0x1fed78]` = nº de coches (init `0x2aaee`), `[0x1fee60]` = 0 al empezar (`0x2a995`).
 - `sub_0002de30` (solo modo 3, desde `cars_update_all` `0x2d2bb`): vuelta máxima entre coches con `+0x528 == 0`; si **un solo**
   coche va por detrás y `+0x60c == 0.0` queda eliminado (explosión `0x3fee8`, sonido `0x49a8c`, `+0x354 = 1`, `+0x60c = 1.0`).
@@ -253,7 +272,8 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   El cambio ocurre **cuando contador > retardo**, no al igualarlo. No se borra al cambiar:
   la siguiente llamada con objetivo coincidente lo borra. El bucle de inicialización `0x22b94..0x22cb5`
   escribe retardo `ctrl+0x14 = 30` para todos los controles. El port inicia contador 0 de forma determinista;
-  el origen del valor inicial del contador y su ciclo completo de reset original no están verificados.
+  el origen del valor inicial del contador no está verificado. La colocación al reaparecer
+  borra el contador en `0x41e21`, conservando el retardo; este reset sí tiene oracle ejecutable.
   El sonido de cambio se ejecuta solo si `ctrl+4 != 1` y queda fuera del oracle.
 - Dificultad `[0x1fedd8]` ∈ 0..3 → `[0xc5470]` = {1.0, 1.15, 1.3, 1.3}, factor del agarre trasero (`car_update` `0x30811`).
 
@@ -284,14 +304,14 @@ Se prueban ambas modalidades, tres marchas, pedales simultáneos, vecinos de umb
 - El tick del port aplica acelerador/revoluciones/turbo con la marcha previa, luego dirección/freno y volante,
   y finalmente cambio manual o automático. `tests/gearbox.c` comprueba el orden y que la caja no use las curvas
   locales ni la dificultad. `forward_gear` es estado de UX/traza del port, no entrada original de selección.
-  La traza v3 añade contador y retardo (101 campos); el replay rechaza v2.
+  La traza actual v5 incluye contador, retardo, relojes y registro de vueltas (112 campos); el replay rechaza versiones anteriores.
 
 **Alcance limitado, no dispatcher completo**: no verifica sondeo de teclado/joystick, generación y latch de
 flancos, sentinel de entradas cacheadas `0x1f02`, grabación/replay original, audio, callee especial del modelo 8,
 generación de las curvas compartidas, inicialización de configuración, efectos de turbo y generación de solicitudes,
 bandera de inactividad, frecuencia completa de llamadas/callers ni carrera DOS. Las curvas de K son
 entradas idénticas suministradas; la generación que usa el port tiene evidencia estática, no una prueba nueva
-contra los bytes de `torque_spline`. El reset de controles durante reaparición sigue sin prueba ejecutable.
+contra los bytes de `torque_spline`. El reset de controles durante reaparición se verifica por separado abajo.
 
 ### Solicitudes de turbo: verificación por fragmentos originales
 
@@ -374,7 +394,7 @@ El tiempo de esta API es explícito y finito. Producción usa ahora `car.race_el
 su conversión y actualización se verifican en el bloque siguiente. También quedan fuera
 el sondeo real y su frecuencia, otros dispositivos/IA, reset original de latches, callees
 intermedios y ticks que retornan anticipadamente por wreck. No se añade estado persistente:
-`+0x52c` se representa por una variable local. El trace actual es v4/104 campos.
+`+0x52c` se representa por una variable local. El trace actual es v5/112 campos.
 
 ## Reloj por coche y transición normal de salida: verificación ejecutable
 
@@ -412,8 +432,93 @@ el timer DOS ni la separación original entre frames gráficos y lotes físicos.
 Salida virtual: tick 400 = 5555 ms (no salida), tick 401 = 5569 ms (salida con sample
 5,569 s); el siguiente tick toma 14 ms desde el nuevo origen.
 Turbo humano, HUD total/vuelta y tiempo final del fantasma usan los relojes del coche.
-El cruce de vuelta asigna su tiempo muestreado a `lap_origin` siguiendo la copia
-observada en `0x2f3f9`; el orden completo de progreso y esa copia **no está verificado**.
+
+## Inicialización y reaparición: reset de controles verificado
+
+`tests/respawn_original.py`, modo X del runner, compara **21 campos exactamente** con
+instrucciones LE sin parchear ni reemplazar callees: **7 422 casos / 31 344 pasos**.
+El informe `build/regression-clean/respawn-original-report.json` conserva hashes de original,
+runner, fuentes y fixtures, ramas ejecutadas, fronteras y exclusiones. Las escrituras están
+acotadas; los bytes restantes de coche y control se comparan antes/después de cada reset.
+
+- Inicialización `0x27451..0x27497`: carga `+0x534 = 100`, modo `+0x53c = 0`,
+  espera `+0x548 = 0` y contador de efectos `+0x54c = 0`. El fragmento conserva latch
+  `+0x530`; no se afirma que la asignación/inicialización completa lo conserve.
+- Explosión `0x3a7f5..0x3a812`, hundimiento `0x3c26e..0x3c28b` y deslizamiento
+  `0x3dbb4..0x3dbce`: carga 100 y modo 0 en cada llamada, conservando espera/latch/efectos.
+  `ign_race_wrecks` aplica ese refresco antes incluso de una búsqueda de punto fallida.
+- Colocación: `0x41de5..0x41e8d`, `0x41e93..0x41e9d`, `0x41ee5..0x41f0d`.
+  Marcha `+0x27c = 1`, contador `ctrl+0x10 = 0`, revoluciones `+0x288 = 0`,
+  salto `+0x274 = 0`, aterrizaje `+0x278 = 0`, skid `+0x2f8 = 0`,
+  chispas `+0x33c = 0` y slip `+0x90 = 0`. Conserva retardo `ctrl+0x14`,
+  turbo y los tres relojes. La escritura de suelo previo en `0x41ddf` queda fuera.
+  `forward_gear` es estado de UX del port, no salida original.
+- Secuencias posteriores: generación P, arbitraje J, manual H o automática K y latch,
+  cinco o 33 actualizaciones sobre estado post-placement suministrado. K ejecuta desde
+  `0x502cc` hasta antes del audio/commit/epílogo; cuando hace falta, se compone el commit
+  `0x50449..0x5045b` conservando los registros de la decisión. Audio no se ejecuta ni sustituye.
+
+Los fixtures incluyen carga 0, vecinos binary64 de 20/100, espera -1/0/1/30,
+contador de marcha 0/30/31, modos/latches 0/1/2, humano/IA, out, tecla mantenida,
+liberación y pulsación nueva. El retardo 30 no permite cambiar hasta la llamada 31.
+`tests/gearbox.c` comprueba la conexión de producción, preservación byte a byte de estado
+ajeno al kernel, refresco repetido, colocación sobre un triángulo SRF sintético y fallo
+de suelo sin mutación. Estas últimas pruebas son del port, no equivalencia geométrica DOS.
+
+**Exclusiones**: inicialización/asignación completa y configuración inicial del control,
+geometría, selección/elegibilidad de wreck (incluido gate de coche terminado y excepción
+`car+0x604 == 1`), flags/refill de finalización y FX completos, throttle/consumo de turbo,
+origen de solicitudes de IA, audio y frecuencia/interleaving del tick completo.
+No se afirma verificar `respawn_place 0x41430` entero ni el ciclo completo de destrucción.
+El bloque siguiente verifica la copia del sample global a `lap_origin`, no el interleaving
+completo de progreso, geometría y timer del juego.
+
+## Vueltas y registro de tiempos: verificación por fragmentos
+
+`tests/lap_original.py` ejecuta bytes LE sin parchear en Unicorn/x87 y compara
+**18 campos, 3 024 casos / 4 112 pasos, tolerancia cero**, con el kernel de producción
+`ign_race_progress_sample` (modo L del runner). El informe
+`build/regression-clean/lap-original-report.json` conserva hashes del original, runner,
+fixtures y fuentes, fronteras ejecutadas, cobertura obligatoria y exclusiones.
+La allowlist controla instrucciones/escrituras, ESP y estado x87; además comprueba
+preservación del resto del coche, cuerpo y controles.
+
+- `0x2f2be..0x2f378/0x2f3a9/0x2f617`: requiere fase 3, sonda actual cero,
+  `abs(car+0x370) == count-1` y `car+0x604 == 0`. Incrementa vuelta y borra fase.
+  Con vuelta >= 3 fuera de modo 3, escribe out, copia posición `+0x39c` a `+0x3a0`
+  e incrementa el contador de finalizados. El snapshot de posición es distinto del orden
+  de llegada propio del port.
+- `0x2f3a9..0x2f436/0x2f4f9`: copia `lap_elapsed (+0x3ac)` a última vuelta `+0x3b4`;
+  si la vuelta incrementada es < 4, escribe su slot `+0x3bc/+0x3c4/+0x3cc`.
+  Copia `g_elapsed_seconds (0x1fb540)` a `lap_origin (+0x3d4)`, **no** el reloj del coche.
+  No borra `lap_elapsed`: el siguiente update de reloj calcula `sample-origin`, o queda
+  congelado si el coche terminó. Mejora `g_best_lap (0x1fb390)` solo con `<`, para humano o IA.
+- `0x2f617..0x2f645`: actualiza la sonda anterior `+0x370` salvo sentinel 10000.
+  `0x2fb84..0x2fbdf` acepta, independientemente, el tramo de navegación `+0x364`,
+  conservándolo ante sentinel. Los offsets auxiliares `+0x368/+0x36c` no tienen
+  contraparte portada en este bloque.
+- `0x2fc1c..0x2fd63`: una transición por llamada usando `abs(+0x364)` y
+  `q = floor(count/4)`: fase 0 en `[q,2q)` pasa a 1, fase 1 en `[2q,3q)` a 2 y
+  fase 2 en `[3q,4q)` a 3. Los tramos de resto fuera de `4q` no activan fase 3.
+
+Fixtures con count 1..23, signos, límites, sentinel, gates, modos 0..3, vueltas 0..4,
+vecinos binary64 del mejor tiempo, empates y secuencias de hasta 30 pasos.
+Los controles negativos rechazan campos alterados, no finitos, ancho incorrecto,
+enteros fraccionarios y fixtures inválidos; un fallo sobrescribe informes antiguos.
+`tests/gearbox.c` verifica además el adapter de suelo, fin único, dos coches compartiendo
+mejor vuelta, actualización/congelación del reloj y reset de los tiempos registrados.
+
+**Desviaciones y límites**: el adapter del port usa `ground_object` para ambas sondas;
+el oracle las suministra independientemente, sin probar su geometría. El productor de
+`+0x604`, elegibilidad out/wreck del caller, cámara de llegada, avisos localizados,
+comparación de récord de carrera `0x2f4f9`, persistencia e interleaving completo están excluidos.
+El original inicia el mejor tiempo desde `[0x1ff367 + pista*0x78]`; el port usa `DBL_MAX`
+como récord de **sesión**. No es un récord guardado ni prueba de una carrera DOS completa.
+La traza v5 añade última vuelta, sonda/gate, posición final, tres slots y mejor vuelta
+compartida: 112 campos. Replay independiente 21/21 y smoke de 200 s con siete rivales
+7/7, sin demostrar que todas las carreras terminen. La regresión histórica permanece
+1/23 (estado 10, imagen 22, ejecución 0); solo `CANADA 3 rivals 40s` cambia respecto
+al bloque de reset. La referencia histórica se conserva intacta.
 
 ## IA original `0x1aea0`: álgebra exacta (portada en `ai.c`)
 
@@ -602,7 +707,7 @@ dispatcher de entradas, el coche completo o una carrera DOS.
 La regresión histórica permanece en **1/23**, con 10 diferencias de estado, 22 de imagen y cero fallos de
 ejecución; no se regeneró el baseline. En esta etapa, el replay entre builds Release independientes pasó
 21 escenarios / 56 448 ticks con 99 campos (v2) y framebuffer/estado final idénticos. El bloque de entradas
-documentado arriba repite la prueba con 101 campos (v3). El smoke de 200 s y siete
+documentado arriba repitió la prueba con 104 campos (v4); el de vueltas pasa con 112 (v5). El smoke de 200 s y siete
 rivales pasa en las siete pistas con ocho resúmenes finitos por pista, pero persisten atascos; ninguno de
 estos dos checks demuestra equivalencia de carreras con DOS.
 
@@ -728,7 +833,8 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
 - Recorrido: salida (tramo 0) → objeto más cercano no visitado de clase 2/3/7/9 (la altura cuenta doble). En clase 3,
   rama A por clases 4/6 (tramos +) y rama B por 5/6 (tramos −) hasta la clase 6. Tramos: USA 139, JAPAN 238, CANADA 175,
   AUSTRIA 200, BRAZIL 204, CARIB 207, ICELAND 172. Recorrido de USA comprobado visualmente (circuito cerrado).
-- Vueltas (`car_update`): fase 0→1→2→3 al pasar ¼, ½, ¾ de los tramos; vuelta + 1 en fase 3 al pisar el último tramo.
+- Vueltas (`car_update`): fases 0→1→2→3 en los intervalos de cuartos descritos arriba;
+  vuelta + 1 en fase 3 al cruzar de la última sonda de tramo a una sonda cero, con gate libre.
 - La cabecera de TRI **no** es el número de tramos.
 
 ## Objetos del motor vs PLC
@@ -802,7 +908,8 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   deslizamiento (con la búsqueda hacia delante de los huecos −2 de la rama B); una consulta de suelo en el punto y,
   si no hay, otra 20 unidades hacia −x (que también mueve el coche). Copia ese registro a las 4 ruedas, suelo actual y
   anterior = altura del plano, coche quieto (`+0x18..+0x44`, cuerpo `+0x30`, `+0x78..+0x9c`, `+0xac`, `+0xd4`), sin
-  inclinación, en el aire, primera marcha, revoluciones, km/h, modo salto, derrape y chispas a 0, y
+  inclinación, en el aire, primera marcha y contador de cambio 0 (retardo conservado),
+  revoluciones, km/h, modo salto, derrape y chispas a 0, y
   `car+0x364 = car+0x368 =` tramo del objeto (`[0x1fefd8]`).
 - **Humo de la pista** (`collisions_pass` 0x3fe4e, portado en `fx.c`): lista `0x1fefac` (tipos PLC 0x15e–0x167 y 0x130,
   clase = tipo − 0x15e) en `sub_0003636c` y lista `0x1fef58` (0x12c–0x15d) en `sub_00036ce0`. Cada uno cuenta fotogramas y

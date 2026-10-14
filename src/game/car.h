@@ -48,8 +48,11 @@ typedef struct {
     double grip_avg;               /* car+0x148: last valid four-wheel surface average */
     int airborne;
     int ground_object;             /* track object under the last probe with ground */
-    int section, phase, lap;       /* car+0x370 / +0x378 / +0x374 */
+    int section, phase, lap;       /* car+0x364 / +0x378 / +0x374 */
+    int lap_section;               /* car+0x370: last non-sentinel lap probe */
+    int progress_lock;             /* car+0x604: crossing gate; producer not reconstructed */
     double race_elapsed, lap_elapsed, lap_origin; /* car+0x3a4/+0x3ac/+0x3d4, seconds */
+    double last_lap, lap_times[3]; /* car+0x3b4, +0x3bc/+0x3c4/+0x3cc */
     double turbo_charge;           /* car+0x534: 0..100, starts full */
     int turbo_mode;                /* car+0x53c: 0 off, 1 button, 2 forced */
     int turbo_wait;                /* car+0x548: decremented only on request 1 */
@@ -61,7 +64,8 @@ typedef struct {
     int out;                       /* car+0x528: finished or eliminated */
     int wrecked;                   /* aggregate of car+0x354/+0x358/+0x35c wreck flags */
     double blow;                   /* car+0x60c: 0 until eliminated, then 1.0 */
-    int finish_tick, place;        /* car+0x3a0 and the [0x1fee60] counter at the finish */
+    int finish_position;           /* car+0x3a0: snapshot of position (+0x39c) */
+    int finish_tick, place;        /* port tick statistic and arrival counter */
     double step_x, step_z;         /* car+0x18/+0x28: last tick displacement, world units */
     /* Wrecks (car_vertical 0x2e3a7, car_update 0x2fd63) and the respawn of sub_0003a788. */
     int wreck_kind;                /* 1 exploded (car+0x354), 2 sunk (car+0x358), 3 slid off (car+0x35c) */
@@ -156,6 +160,12 @@ IgnTurboRequestEvent ign_car_turbo_request(IgnCar *car, int request);
 int ign_car_vertical_step(IgnCar *car, double *raw_drop);
 /* Starts a wreck (kind 1 explosion, 2 sinking): the car is hidden and no longer driven. */
 void ign_car_wreck(IgnCar *car, int kind);
+/* cars_init turbo fields; preserves the request latch. */
+void ign_car_init_turbo(IgnCar *car);
+/* Wreck-effect updates refill turbo and disable its mode, preserving wait/latch/effect counter. */
+void ign_car_wreck_turbo(IgnCar *car);
+/* respawn_place control reset, without geometry, wreck flags, turbo or clocks. */
+void ign_car_respawn_controls(IgnCar *car);
 /* Moves a wrecked car (glide of sub_0003a788). */
 void ign_car_set_pose(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height);
 /* sub_00041430: puts a wrecked car back at a respawn point, still and airborne. Returns -1 (car untouched) if the
@@ -173,6 +183,7 @@ int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, 
 
 struct IgnTrack;
 /* Lap progress from the section under the car (car_update 0x2f2cc / 0x2fc1c). */
-void ign_car_progress(IgnCar *car, const struct IgnTrack *t);
+/* 0x2fc1c: phase-only decision on car.section, not a lap crossing. */
+void ign_car_progress_phase(IgnCar *car, int count);
 
 #endif

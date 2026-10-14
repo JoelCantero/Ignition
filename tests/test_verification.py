@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import io
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -17,6 +18,8 @@ import solo_replay
 import car_original
 import input_original
 import race_time_original
+import respawn_original
+import lap_original
 from trace_compare import compare_rows, load_text
 
 
@@ -24,7 +27,7 @@ def trace(ticks):
     lines = []
     for tick in range(ticks + 1):
         row = dict.fromkeys(sorted(solo_replay.FIELDS), 0)
-        row.update(t=tick / 72.0, tick=tick, trace_schema=4)
+        row.update(t=tick / 72.0, tick=tick, trace_schema=5)
         lines.append("t=%.17g " % row.pop("t") + " ".join("%s=%.17g" % kv for kv in row.items()))
     return "\n".join(lines)
 
@@ -75,10 +78,10 @@ class TraceTests(unittest.TestCase):
 
     def test_full_schema_and_tick_count(self):
         text = trace(2)
-        self.assertEqual(len(solo_replay.FIELDS), 104)
+        self.assertEqual(len(solo_replay.FIELDS), 112)
         self.assertEqual(len(solo_replay.validate_trace(text, 2)), 3)
         for invalid in ("\n".join(text.splitlines()[1:]), "\n".join(text.splitlines()[::2]),
-                        text.replace("trace_schema=4", "trace_schema=3"),
+                        text.replace("trace_schema=5", "trace_schema=4"),
                         text.replace("b_corner_z3=0 ", ""), text.replace("tick=1", "tick=9"),
                         text.replace("b_mass=0", "b_mass=nan"),
                         text.replace("t=0.013888888888888888", "t=0.014")):
@@ -87,6 +90,31 @@ class TraceTests(unittest.TestCase):
 
 
 class CarVerifierTests(unittest.TestCase):
+    def test_respawn_outputs_are_exact_and_finite(self):
+        expected = [1, 0, 30, 0, 0, 0, 0, 0, 0, 37.25, 2, 29, 2, 17, 0, 1,
+                    10.25, 4.25, 9.5, -1, -1]
+        row = " ".join(map(str, expected))
+        self.assertEqual(respawn_original.compare(row, expected), [])
+        for index, (_, _, fmt) in enumerate((*respawn_original.FIELDS,
+                                            ("request", None, "i"), ("event", None, "i"))):
+            changed = list(expected)
+            changed[index] += 1 if fmt == "i" else 1e-12
+            with self.subTest(index=index):
+                self.assertTrue(respawn_original.compare(row, changed))
+                if fmt == "i":
+                    changed[index] = 0.5
+                    with self.assertRaises(ValueError):
+                        respawn_original.compare(row, changed)
+                    with self.assertRaises(ValueError):
+                        respawn_original.compare(" ".join(map(str, changed)), expected)
+        for invalid in (row + " 0", "", row.replace("37.25", "nan"),
+                        row.replace("37.25", "inf"), row.replace("37.25", "garbage")):
+            with self.assertRaises(ValueError):
+                respawn_original.compare(invalid, expected)
+        for invalid in (expected[:-1], expected + [0], [math.nan] + expected[1:]):
+            with self.assertRaises(ValueError):
+                respawn_original.compare(row, invalid)
+
     def test_clock_outputs_are_exact_and_finite(self):
         expected = [0.249, -1, 0.249, 0.149, 0.1, 0, 2, 2]
         row = " ".join(map(str, expected))
@@ -99,6 +127,23 @@ class CarVerifierTests(unittest.TestCase):
                         row.replace("0.249", "inf"), "0 0 0 0 0 0 0.5 0"):
             with self.assertRaises(ValueError):
                 race_time_original.compare(invalid, expected)
+        for invalid in (expected[:-1], expected + [0], [math.nan] + expected[1:],
+                        expected[:-1] + [0.5]):
+            with self.assertRaises(ValueError):
+                race_time_original.compare(row, invalid)
+
+    def test_lap_outputs_are_exact_and_finite(self):
+        expected = [0] * 9 + [20.25] * 9
+        row = " ".join(map(str, expected))
+        self.assertEqual(lap_original.compare(row, expected), [])
+        for i in range(len(expected)):
+            changed = list(expected)
+            changed[i] += 1 if i < 9 else 1e-12
+            self.assertTrue(lap_original.compare(" ".join(map(str, changed)), expected))
+        for invalid in ("", row + " 0", row.replace("20.25", "nan"), row.replace("20.25", "inf"),
+                        "0.5 " + " ".join(map(str, expected[1:]))):
+            with self.assertRaises(ValueError):
+                lap_original.compare(invalid, expected)
 
     def test_input_integer_outputs_and_negative_controls(self):
         for mode, expected in (("D", [-100]), ("A", [1, 0, 7]), ("K", [2, 31]), ("H", [0]),
@@ -152,7 +197,7 @@ class CarVerifierTests(unittest.TestCase):
             report = Path(tmp) / "report.json"
             argv = ["car_original", "--original", "original", "--runner", "runner", "--report", str(report)]
             for error in errors:
-                for verifier in (car_original, input_original):
+                for verifier in (car_original, input_original, respawn_original, lap_original):
                     report.write_text('{"status":"pass"}')
                     with self.subTest(error=error, verifier=verifier.__name__), patch.object(sys, "argv", argv), \
                             patch.object(verifier, "verify", side_effect=error), \
@@ -167,6 +212,43 @@ class CarKernelTests(unittest.TestCase):
     def setUp(self):
         if self.runner is None:
             self.skipTest("Car kernel checks require --runner")
+
+    def test_invalid_lap_fixtures_fail(self):
+        valid = "1 20 19 19 3 0 0 0 0 2 4 0 0 99.5 20.25 3.5 100.5 20.25 0".split()
+        fixtures = ["L " + " ".join(valid[:-1]), "L " + " ".join(valid + ["extra"])]
+        for index, value in ((0, 0), (1, 0), (2, -2147483648), (3, 10001), (4, 4), (5, -1),
+                             (6, 3), (7, 2), (8, 4), (9, -1), (10, 9), (11, -10001),
+                             (12, 10001), (13, "nan"), (14, "inf"), (15, "nan"),
+                             (16, "inf"), (17, "nan"), (18, 3)):
+            row = list(valid)
+            row[index] = str(value)
+            fixtures.append("L " + " ".join(row))
+        for fixture in fixtures:
+            with self.subTest(fixture=fixture):
+                result = subprocess.run([str(self.runner)], input=fixture, capture_output=True,
+                                        text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(result.stderr.strip())
+
+    def test_invalid_respawn_fixtures_fail(self):
+        valid = "2 2 1 2 31 30 37.25 2 29 2 17 0 0 10.25 1 1 1 0".split()
+        bad_values = {0: (-1, 4), 1: (0, 10001), 2: (0, 4), 3: (-1, 3),
+                      4: (-1, 10001), 5: (-1, 10001), 6: (-1, 1001, "nan", "inf"),
+                      7: (-1, 3), 8: (-10001, 10001), 9: (-1, 3), 10: (-1, 10001),
+                      11: (-1, 2), 12: (-1, 2), 13: ("nan", "inf"), 14: (-1, 3),
+                      15: (-1, 2), 16: (-2, 2), 17: (-1, 3)}
+        fixtures = ["X " + " ".join(valid[:-1]), "X " + " ".join(valid + ["extra"])]
+        for index, values in bad_values.items():
+            for value in values:
+                changed = list(valid)
+                changed[index] = str(value)
+                fixtures.append("X " + " ".join(changed))
+        for fixture in fixtures:
+            with self.subTest(fixture=fixture):
+                result = subprocess.run([str(self.runner)], input=fixture, capture_output=True,
+                                        text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(result.stderr.strip())
 
     def test_invalid_fixtures_fail(self):
         for fixture in ("S 1 12 0 0 0 0 1 0 0", "S 1 0 0 0 0 nan 1 0 0",
@@ -378,6 +460,15 @@ class HeadlessTests(unittest.TestCase):
         self.assertEqual(captures[0]["trace"].strip(), "")
         self.assertEqual(len(load_text(captures[1]["trace"])), 72)
         self.assertEqual(len(load_text(captures[2]["trace"])), 73)
+
+    def test_production_trace_uses_virtual_car_seconds(self):
+        result = self.capture(18, "full")
+        rows = solo_replay.validate_trace(result["trace"], 18)
+        for tick, row in enumerate(rows):
+            seconds = (tick * 1000 // 72) * 0.001
+            self.assertEqual(row["race_elapsed"], seconds)
+            self.assertEqual(row["lap_elapsed"], seconds)
+            self.assertEqual(row["lap_origin"], 0)
 
     def test_invalid_tick_arguments_fail(self):
         for args in (["--sim-ticks"], ["--sim-ticks", "1"],

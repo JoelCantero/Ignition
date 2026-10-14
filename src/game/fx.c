@@ -70,9 +70,17 @@ void ign_fx_init(IgnFx *fx) {
     for (int i = 0; i < 16; i++) fx->wreck_frame_done[i] = -1;
 }
 
-double ign_fx_rand(IgnFx *fx) {
+static unsigned fx_rand_next(IgnFx *fx) {
     fx->seed = fx->seed * 1103515245u + 12345u;
-    return (double)((fx->seed >> 16) & 0x3fff) * (1.0 / 16384.0);
+    return fx->seed >> 16;
+}
+
+double ign_fx_rand(IgnFx *fx) {
+    return (double)(fx_rand_next(fx) & 0x3fff) * (1.0 / 16384.0);
+}
+
+unsigned ign_fx_rand15(IgnFx *fx) {
+    return fx_rand_next(fx) & 0x7fff;
 }
 
 int ign_fx_add(IgnFx *fx, const int32_t tpl[IGN_FX_WORDS], float focus_x, float focus_z) {

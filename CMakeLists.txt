@@ -58,6 +58,18 @@ add_test(NAME solo_replay COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/solo_replay.
 add_executable(gearbox_test tests/gearbox.c)
 target_link_libraries(gearbox_test PRIVATE ignition_core)
 add_test(NAME gearbox COMMAND gearbox_test)
+add_executable(track_gates_test tests/track_gates.c)
+target_link_libraries(track_gates_test PRIVATE ignition_core)
+add_test(NAME track_gates COMMAND track_gates_test)
+add_executable(track_ai_records_test tests/track_ai_records.c)
+target_link_libraries(track_ai_records_test PRIVATE ignition_core)
+add_test(NAME track_ai_records COMMAND track_ai_records_test)
+add_executable(ai_route_choice_test tests/ai_route_choice.c)
+target_link_libraries(ai_route_choice_test PRIVATE ignition_core)
+add_test(NAME ai_route_choice COMMAND ai_route_choice_test)
+add_executable(track_route_selection_test tests/track_route_selection.c)
+target_link_libraries(track_route_selection_test PRIVATE ignition_core)
+add_test(NAME track_route_selection COMMAND track_route_selection_test)
 add_executable(pos_test tests/pos.c)
 target_link_libraries(pos_test PRIVATE ignition_core)
 add_test(NAME pos COMMAND pos_test)
@@ -69,6 +81,10 @@ target_link_libraries(car_kernels_test PRIVATE ignition_core)
 if(NOT MSVC)
   target_compile_options(body_step_test PRIVATE -Wall -Wextra)
   target_compile_options(car_kernels_test PRIVATE -Wall -Wextra)
+  target_compile_options(track_gates_test PRIVATE -Wall -Wextra)
+  target_compile_options(track_ai_records_test PRIVATE -Wall -Wextra)
+  target_compile_options(track_route_selection_test PRIVATE -Wall -Wextra)
+  target_compile_options(ai_route_choice_test PRIVATE -Wall -Wextra)
 endif()
 option(IGN_VERIFY_ORIGINAL "Compare physics and car kernels with original LE bytes (requires Python unicorn)" OFF)
 if(IGN_VERIFY_ORIGINAL)
@@ -92,4 +108,12 @@ if(IGN_VERIFY_ORIGINAL)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/race_time_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
             --report ${CMAKE_BINARY_DIR}/race-time-original-report.json)
+  add_test(NAME respawn_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/respawn_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
+            --report ${CMAKE_BINARY_DIR}/respawn-original-report.json)
+  add_test(NAME lap_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/lap_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
+            --report ${CMAKE_BINARY_DIR}/lap-original-report.json)
 endif()

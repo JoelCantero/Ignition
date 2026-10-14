@@ -139,6 +139,8 @@ void ign_free_track(IgnTrack *t) {
     free(t->gate);
     free(t->gate_b);
     free(t->has_b);
+    free(t->ai_records);
+    free(t->ai_record_count);
     memset(t, 0, sizeof *t);
 }
 
@@ -146,8 +148,12 @@ static void object_gate(const IgnTrack *t, const IgnLevel *lv, int o, float g[4]
     const IgnObject *obj = &lv->track.objs[o];
     const float *c = t->center[o];
     int va = -1, vb = -1;
-    size_t at = 4 + (size_t)o * 500;
-    if (lv->tri && at + 0x19 <= lv->tri_size) {
+    int plc = o < lv->surface.nengine && lv->surface.engine_to_plc
+                  ? lv->surface.engine_to_plc[o]
+                  : -1;
+    if (lv->tri && plc >= 0 && plc < lv->track.nobj && lv->tri_size >= 4 + 0x19 &&
+        (size_t)plc <= (lv->tri_size - 4 - 0x19) / 500) {
+        size_t at = 4 + (size_t)plc * 500;
         va = lv->tri[at + 1] | lv->tri[at + 2] << 8;
         vb = lv->tri[at + 0x17] | lv->tri[at + 0x18] << 8;
     }
@@ -184,12 +190,174 @@ void ign_track_gates(IgnTrack *t, const IgnLevel *lv) {
         if (t->section_obj[s] < 0) memcpy(t->gate[s], t->gate[s - 1], sizeof t->gate[s]);
 }
 
+static int route_record_for_object(const IgnLevel *lv, int object, IgnAiRouteRecord *record) {
+    if (object < 0 || object >= lv->track.nobj || !lv->tri || !lv->surface.engine_to_plc ||
+        object >= lv->surface.nengine)
+        return 0;
+    int plc = lv->surface.engine_to_plc[object];
+    if (plc < 0 || plc >= lv->track.nobj || lv->tri_size < 4 + 0x6e ||
+        (size_t)plc > (lv->tri_size - 4 - 0x6e) / 500)
+        return 0;
+
+    const IgnObject *obj = &lv->track.objs[object];
+    const uint8_t *tri = lv->tri + 4 + (size_t)plc * 500;
+    int left = tri[1] | (int)tri[2] << 8;
+    int right = tri[0x17] | (int)tri[0x18] << 8;
+    if (!obj->verts || left >= obj->nv || right >= obj->nv || left == right)
+        return 0;
+
+    record->point[0] = obj->verts[left * 3] + obj->pos[0] + IGN_SRF_ORIGIN;
+    record->point[1] = obj->verts[left * 3 + 1] + obj->pos[1];
+    record->point[2] = obj->verts[left * 3 + 2] + obj->pos[2] + IGN_SRF_ORIGIN;
+    record->point[3] = obj->verts[right * 3] + obj->pos[0] + IGN_SRF_ORIGIN;
+    record->point[4] = obj->verts[right * 3 + 1] + obj->pos[1];
+    record->point[5] = obj->verts[right * 3 + 2] + obj->pos[2] + IGN_SRF_ORIGIN;
+    record->object = object;
+    record->plc = plc;
+    record->plc_type = (uint8_t)obj->type;
+    record->tri_type = tri[0x6d];
+    record->valid = 1;
+    return 1;
+}
+
+static int32_t midpoint(int32_t a, int32_t b) {
+    return (int32_t)((int64_t)a + ((int64_t)b - a) / 2);
+}
+
+static void split_route_record(IgnAiRouteRecord *first, IgnAiRouteRecord *second) {
+    *second = *first;
+    int32_t original[6];
+    memcpy(original, first->point, sizeof original);
+    for (int axis = 0; axis < 3; axis++) {
+        int a = axis, b = axis + 3;
+        int32_t middle = midpoint(original[a], original[b]);
+        if (first->tri_type == 1) {
+            first->point[a] = middle;
+            second->point[a] = original[a];
+            second->point[b] = middle;
+        } else {
+            first->point[b] = middle;
+            second->point[a] = middle;
+            second->point[b] = original[b];
+        }
+    }
+}
+
+int ign_track_ai_records(IgnTrack *t, const IgnLevel *lv) {
+    if (!t || !lv) return -1;
+    free(t->ai_records);
+    free(t->ai_record_count);
+    t->ai_records = NULL;
+    t->ai_record_count = NULL;
+    if (t->count <= 0 || !t->section || !t->section_obj || !lv->tri ||
+        !lv->surface.engine_to_plc || !lv->track.objs)
+        return -1;
+    t->ai_records = calloc((size_t)t->count, sizeof *t->ai_records);
+    t->ai_record_count = calloc((size_t)t->count, sizeof *t->ai_record_count);
+    if (!t->ai_records || !t->ai_record_count) {
+        free(t->ai_records);
+        free(t->ai_record_count);
+        t->ai_records = NULL;
+        t->ai_record_count = NULL;
+        return -1;
+    }
+
+    for (int s = 0; s < t->count; s++) {
+        int objects[2] = {t->section_obj ? t->section_obj[s] : -1, -1};
+        for (int i = 0; i < t->nobj; i++)
+            if (t->section[i] == -s && s != 0) {
+                objects[1] = i;
+                break;
+            }
+        for (int path = 0; path < 2; path++) {
+            IgnAiRouteRecord record = {0};
+            if (!route_record_for_object(lv, objects[path], &record)) continue;
+            if (t->ai_record_count[s][path] >= IGN_AI_ROUTE_RECORDS) goto fail;
+            t->ai_records[s][path][t->ai_record_count[s][path]++] = record;
+            if (record.tri_type == 1 || record.tri_type == 2) {
+                if (t->ai_record_count[s][path] >= IGN_AI_ROUTE_RECORDS) goto fail;
+                IgnAiRouteRecord split = record;
+                split_route_record(&t->ai_records[s][path][t->ai_record_count[s][path] - 1], &split);
+                t->ai_records[s][path][t->ai_record_count[s][path]++] = split;
+            }
+        }
+    }
+    return 0;
+fail:
+    free(t->ai_records);
+    free(t->ai_record_count);
+    t->ai_records = NULL;
+    t->ai_record_count = NULL;
+    return -1;
+}
+
 int ign_track_section_object(const IgnTrack *t, int s) {
     if (t->count <= 0) return -1;
     if (s >= 0) return t->section_obj ? t->section_obj[s % t->count] : -1;
     for (int i = 0; i < t->nobj; i++)
         if (t->section[i] == s) return i;
     return -1;
+}
+
+static int route_object(const IgnTrack *t, int section, int branch) {
+    if (branch) {
+        if (!t->has_b || !t->has_b[section]) return -1;
+        return ign_track_section_object(t, -section);
+    }
+    return t->section_obj ? t->section_obj[section] : -1;
+}
+
+static int route_record_valid(const IgnTrack *t, int section, int branch) {
+    return t->ai_records && t->ai_record_count &&
+           t->ai_record_count[section][branch] > 0 &&
+           t->ai_records[section][branch][0].valid;
+}
+
+int ign_track_find_section(const IgnTrack *t, int section, int branch, int step, int track_id,
+                           int *out_section, int *out_branch, int *out_object) {
+    if (!t || t->count <= 0 || !t->section_obj || (branch != 0 && branch != 1) || step == 0)
+        return 0;
+
+    int candidate = (int16_t)section;
+    int count = (int16_t)t->count;
+    if (candidate >= count) candidate -= count;
+    if (candidate < 0) candidate += count;
+    if (candidate < 0 || candidate >= count) return 0;
+
+    for (int searched = 0; searched < count; searched++) {
+        int object = route_object(t, candidate, branch);
+        if (object < 0) {
+            branch = !branch;
+            object = route_object(t, candidate, branch);
+        }
+        if (object < 0) return 0;
+
+        if (route_record_valid(t, candidate, branch)) {
+            if (out_section) *out_section = candidate;
+            if (out_branch) *out_branch = branch;
+            if (out_object) *out_object = object;
+            return 1;
+        }
+
+        int previous = candidate > 0 ? candidate - 1 : 0;
+        int current_has_branch = t->has_b && t->has_b[candidate];
+        int previous_has_branch = t->has_b && t->has_b[previous];
+        int may_accept_invalid = current_has_branch || !previous_has_branch;
+        if (track_id == 0 && candidate >= 0xab && candidate <= 0xad)
+            may_accept_invalid = 0;
+        if (may_accept_invalid) {
+            if (out_section) *out_section = candidate;
+            if (out_branch) *out_branch = branch;
+            if (out_object) *out_object = object;
+            return 1;
+        }
+
+        candidate += step;
+        if (candidate >= count) candidate -= count;
+        if (candidate < 0) candidate += count;
+        if (candidate < 0 || candidate >= count) return 0;
+    }
+    return 0;
 }
 
 int ign_track_section_angle(const IgnTrack *t, const IgnLevel *lv, int s, double *out) {

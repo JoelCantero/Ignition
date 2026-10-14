@@ -160,7 +160,7 @@ static void format_time(char out[16], double seconds_elapsed) {
     snprintf(out, 16, "%02d:%02d:%02d", minutes, seconds, centiseconds);
 }
 
-void ign_hud_draw(IgnHud *hud, IgnFrame *frame, const IgnCar *car, const IgnRace *race, int car_count) {
+void ign_hud_draw(IgnHud *hud, IgnFrame *frame, const IgnCar *car, int car_count) {
     /* sub_0004a320 lays the race HUD over the completed scene; sprite pixel 0 is the panel key color. */
     float scale_x = frame->w / 640.0f;
     float scale_y = frame->h / 480.0f;
@@ -181,18 +181,6 @@ void ign_hud_draw(IgnHud *hud, IgnFrame *frame, const IgnCar *car, const IgnRace
                 scale_x, scale_y);
     draw_sprite(hud, frame, 160, 91, 44, 132, origin_x + (int)lroundf(160 * scale_x),
                 origin_y + (int)lroundf(91 * scale_y), scale_x, scale_y);
-
-    if (ign_race_started(race)) {
-        if (!hud->race_started) {
-            hud->lap_start = race->total;
-            hud->observed_lap = car->lap;
-            hud->race_started = 1;
-        } else if (car->lap != hud->observed_lap) {
-            hud->last_lap = race->total - hud->lap_start;
-            hud->lap_start = race->total;
-            hud->observed_lap = car->lap;
-        }
-    }
 
     char total_time[16], lap_time[16], place[16], speed[8];
     format_time(total_time, car->race_elapsed);

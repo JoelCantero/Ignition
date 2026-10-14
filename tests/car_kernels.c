@@ -3,13 +3,106 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 int main(void) {
     char mode;
     int count;
     while ((count = scanf(" %c", &mode)) != EOF) {
         IgnCar car = {0};
-        if (mode == 'C') {
+        if (mode == 'L') {
+            IgnRace race = {0};
+            int ticks, sections, probe, section, pattern;
+            if (scanf("%d %d %d %d %d %d %d %d %d %d %d %d %d %lf %lf %lf %lf %lf %d",
+                      &ticks, &sections, &car.section, &car.lap_section, &car.phase, &car.lap,
+                      &car.progress_lock, &car.out, &race.mode, &race.finished, &car.position,
+                      &probe, &section, &car.race_elapsed, &car.lap_elapsed, &car.lap_origin,
+                      &race.elapsed, &race.best_lap, &pattern) != 19 ||
+                ticks < 1 || ticks > 10000 || sections < 1 || sections > 10000 ||
+                car.section < -10000 || car.section > 10000 ||
+                car.lap_section < -10000 || car.lap_section > 10000 ||
+                car.phase < 0 || car.phase > 3 || car.lap < 0 || car.lap > 4 ||
+                car.progress_lock < 0 || car.progress_lock > 2 || car.out < 0 || car.out > 1 ||
+                race.mode < 0 || race.mode > 3 || race.finished < 0 || race.finished > 10000 ||
+                car.position < 0 || car.position > 8 || probe < -10000 || probe > 10000 ||
+                section < -10000 || section > 10000 ||
+                !isfinite(car.race_elapsed) || !isfinite(car.lap_elapsed) || !isfinite(car.lap_origin) ||
+                !isfinite(race.elapsed) || !isfinite(race.best_lap) || pattern < 0 || pattern > 2) {
+                fprintf(stderr, "Invalid lap progression fixture\n");
+                return 1;
+            }
+            car.last_lap = 11.25;
+            car.lap_times[0] = 12.25; car.lap_times[1] = 13.25; car.lap_times[2] = 14.25;
+            car.finish_position = 7;
+            for (int i = 0; i < ticks; i++) {
+                int p = probe, s = section;
+                if (pattern == 1) {
+                    const int path[6] = {sections / 4, 2 * (sections / 4), 3 * (sections / 4), sections - 1, 0, 0};
+                    p = s = path[i % 6];
+                } else if (pattern == 2) {
+                    p = s = i % 2 ? IGN_NO_SECTION : -probe;
+                }
+                int event = ign_race_progress_sample(&race, &car, sections, p, s);
+                printf("%d %d %d %d %d %d %d %d %d %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g\n",
+                       event, car.section, car.lap_section, car.phase, car.lap, car.out, race.finished,
+                       car.finish_position, car.progress_lock, car.last_lap, car.lap_times[0],
+                       car.lap_times[1], car.lap_times[2], car.lap_origin, race.best_lap,
+                       car.race_elapsed, car.lap_elapsed, race.elapsed);
+            }
+        } else if (mode == 'X') {
+            int stage, ticks, kind, key, manual, shift, pattern;
+            if (scanf("%d %d %d %d %d %d %lf %d %d %d %d %d %d %lf %d %d %d %d",
+                      &stage, &ticks, &kind, &car.gear, &car.gear_ticks, &car.gear_delay,
+                      &car.turbo_charge, &car.turbo_mode, &car.turbo_wait, &car.turbo_key,
+                      &car.turbo_frames, &car.ai, &car.out, &car.race_elapsed,
+                      &key, &manual, &shift, &pattern) != 18 ||
+                stage < 0 || stage > 3 || ticks < 1 || ticks > 10000 || kind < 1 || kind > 3 ||
+                car.gear < 0 || car.gear > 2 || car.gear_ticks < 0 || car.gear_ticks > 10000 ||
+                car.gear_delay < 0 || car.gear_delay > 10000 || !isfinite(car.turbo_charge) ||
+                car.turbo_charge < 0 || car.turbo_charge > 1000 ||
+                car.turbo_mode < 0 || car.turbo_mode > 2 || car.turbo_wait < -10000 ||
+                car.turbo_wait > 10000 || car.turbo_key < 0 || car.turbo_key > 2 ||
+                car.turbo_frames < 0 || car.turbo_frames > 10000 ||
+                (car.ai != 0 && car.ai != 1) || (car.out != 0 && car.out != 1) ||
+                !isfinite(car.race_elapsed) || key < 0 || key > 2 ||
+                (manual != 0 && manual != 1) || shift < -1 || shift > 1 ||
+                pattern < 0 || pattern > 2) {
+                fprintf(stderr, "Invalid respawn controls fixture\n");
+                return 1;
+            }
+            car.revs = 31.5;
+            car.slip = 2.5;
+            car.jump_mode = car.landed = 1;
+            car.skid_timer = 7;
+            car.spark_timer = 13;
+            car.lap_elapsed = 4.25;
+            car.lap_origin = 9.5;
+            int16_t curves[3][IGN_TORQUE_POINTS] = {{0}};
+            for (int i = 0; i < IGN_TORQUE_POINTS; i++) curves[2][i] = 1;
+            ign_set_race_started(1);
+            if (stage == 3) ign_car_respawn_controls(&car);
+            for (int i = 0; i < ticks; i++) {
+                int request = -1, event = -1;
+                if (stage == 0) ign_car_init_turbo(&car);
+                else if (stage == 1) ign_car_wreck_turbo(&car);
+                else if (stage == 2) ign_car_respawn_controls(&car);
+                else {
+                    int sampled = pattern == 1 ? (i % 2 ? key : 0) :
+                                  pattern == 2 ? (i == 1 ? 0 : key) : key;
+                    request = car.ai ? sampled == 1 : ign_car_turbo_input(&car, sampled, car.race_elapsed);
+                    car.turbo_started = 0;
+                    event = ign_car_turbo_request(&car, request);
+                    if (manual) ign_car_shift(&car, shift);
+                    else ign_car_gearbox(&car, curves);
+                    car.turbo_key = request;
+                }
+                printf("%d %d %d %.17g %d %d %d %d %.17g %.17g %d %d %d %d %d %d %.17g %.17g %.17g %d %d\n",
+                       car.gear, car.gear_ticks, car.gear_delay, car.revs, car.jump_mode, car.landed,
+                       car.skid_timer, car.spark_timer, car.slip, car.turbo_charge, car.turbo_mode,
+                       car.turbo_wait, car.turbo_key, car.turbo_frames, car.ai, car.out,
+                       car.race_elapsed, car.lap_elapsed, car.lap_origin, request, event);
+            }
+        } else if (mode == 'C') {
             int ticks, now, origin, delta, race_mode, key;
             double clock;
             if (scanf("%d %d %d %d %lf %d %d %d %d %lf %lf %lf %d %d %d",

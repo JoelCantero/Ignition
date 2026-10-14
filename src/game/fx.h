@@ -54,6 +54,8 @@ void ign_fx_sound(IgnFx *fx, int group, int sub, int idx, int vol, int freq, flo
 void ign_fx_init(IgnFx *fx);
 /* sub_00051714: rand() & 0x3fff scaled to [0, 1). */
 double ign_fx_rand(IgnFx *fx);
+/* sub_00064774: rand() & 0x7fff; shares the game's random state. */
+unsigned ign_fx_rand15(IgnFx *fx);
 /* sub_0003fee8: copies the template into the first free slot; types 1, 2 and 8 only within 3500 of (fx_x, fx_z).
  * When full, replaces the lowest-priority slot (0xc47f0) if it is below the new type. Returns the slot or -1. */
 int ign_fx_add(IgnFx *fx, const int32_t tpl[IGN_FX_WORDS], float focus_x, float focus_z);

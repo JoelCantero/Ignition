@@ -125,15 +125,17 @@ static int spectate(IgnCar *const *all, int n) {
 static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player) {
     ghost_tick++;
     int started = ign_race_started(&race);
+    int was_out = player->out;
+    ign_race_progress(&race, player, t);
     IgnCar *all[MAX_RIVALS + 1] = {player};
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_ai_set_cars(all, nrivals + 1);
     for (int i = 0; i < nrivals; i++) {
         IgnInput in = {0};
         if (!rivals[i].wrecked) {
-            if (started || race.clock > IGN_RACE_AI_WAKE) ign_ai_drive(&rival_ai[i], &rivals[i], t, &in);
+            if (started || race.clock > IGN_RACE_AI_WAKE) ign_ai_drive(&rival_ai[i], &rivals[i], t, &fx, &in);
             ign_car_tick(&rivals[i], lv, &in);
-            ign_car_progress(&rivals[i], t);
+            ign_race_progress(&race, &rivals[i], t);
         }
         all[i + 1] = &rivals[i];
     }
@@ -185,7 +187,6 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player) {
         ign_sound_frame(all, nrivals + 1, spectated, &race, player->out ? finish_clock : -1.0, &weather, &fx);
     }
     ign_skids_step(&skids);
-    int was_out = player->out;
     if (started) ign_race_step(&race, all, nrivals + 1);
     /* car_update 0x2f37f: the player's finish restarts [0x1fb4d0] and selects the car-following camera. */
     if (player->out && !was_out) finish_clock = 0, tv_index = 3, spectate_wait = 100;
@@ -241,11 +242,11 @@ static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_render_fx(&frame, lv, &fx, all, nrivals + 1, cam);
     ign_render_weather(&frame, lv, &weather, cam);
-    ign_hud_draw(&hud, &frame, car, &race, nrivals + 1);
+    ign_hud_draw(&hud, &frame, car, nrivals + 1);
 }
 
 static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
-    fprintf(stderr, "t=%.17g tick=%d trace_schema=4", tick * IGN_PHYS_DT, tick);
+    fprintf(stderr, "t=%.17g tick=%d trace_schema=5", tick * IGN_PHYS_DT, tick);
 #define CAR_FIELD(field) fprintf(stderr, " " #field "=%.17g", (double)car->field)
 #define BODY_FIELD(field) fprintf(stderr, " b_" #field "=%.17g", (double)car->body.field)
 #define INPUT_FIELD(field) fprintf(stderr, " in_" #field "=%d", (int)in->field)
@@ -261,6 +262,10 @@ static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
     CAR_FIELD(gear_ticks); CAR_FIELD(gear_delay);
     CAR_FIELD(turbo_charge); CAR_FIELD(turbo_mode); CAR_FIELD(turbo_wait); CAR_FIELD(turbo_key);
     CAR_FIELD(race_elapsed); CAR_FIELD(lap_elapsed); CAR_FIELD(lap_origin);
+    CAR_FIELD(last_lap); CAR_FIELD(lap_section); CAR_FIELD(progress_lock); CAR_FIELD(finish_position);
+    fprintf(stderr, " race_best_lap=%.17g", race.best_lap);
+    for (int i = 0; i < IGN_RACE_LAPS; i++)
+        fprintf(stderr, " lap_time%d=%.17g", i, car->lap_times[i]);
     CAR_FIELD(creep); CAR_FIELD(creep_ticks); CAR_FIELD(catchup); CAR_FIELD(catchup_clock);
     CAR_FIELD(section); CAR_FIELD(phase); CAR_FIELD(lap); CAR_FIELD(position);
     CAR_FIELD(out); CAR_FIELD(wrecked); CAR_FIELD(wrecks); CAR_FIELD(wreck_kind); CAR_FIELD(wreck_frame);
@@ -413,6 +418,8 @@ int main(int argc, char **argv) {
         return 1;
     }
     ign_track_gates(&track, &lv);
+    if (ign_track_ai_records(&track, &lv))
+        fprintf(stderr, "warning: cannot build TRI AI records; using track-gate fallback\n");
     ign_ai_set_track(level);
     IgnCar car;
     int want = want_rivals >= 0 ? want_rivals : (shot ? 0 : 3);
@@ -507,12 +514,12 @@ int main(int argc, char **argv) {
         float t = 0;
         for (int step = 0; sim_ticks >= 0 ? step < sim_ticks : t < sim_seconds; step++, t += SIM_DT) {
             if (autopilot) {
-                if (ign_race_started(&race) || race.clock > IGN_RACE_AI_WAKE) ign_ai_drive(&player_ai, &car, &track, &in);
+                if (ign_race_started(&race) || race.clock > IGN_RACE_AI_WAKE)
+                    ign_ai_drive(&player_ai, &car, &track, &fx, &in);
                 else in = (IgnInput){0};
             }
             if (!car.wrecked) {
                 ign_car_tick(&car, &lv, &in);
-                ign_car_progress(&car, &track);
             }
             car_hits += tick_rivals(&lv, &track, &car);
             if (++pos_ticks == 2) {
@@ -669,7 +676,6 @@ int main(int argc, char **argv) {
                 pending_gear_shift = 0;
                 if (!car.wrecked) {
                     ign_car_tick(&car, &lv, &tick_input);
-                    ign_car_progress(&car, &track);
                 }
                 tick_rivals(&lv, &track, &car);
                 if (++pos_ticks == 2) {

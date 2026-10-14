@@ -128,12 +128,12 @@ def encode(ticks, values):
 
 def compare(row, expected):
     tokens = row.split()
-    if len(tokens) != len(FIELDS):
+    if len(tokens) != len(FIELDS) or len(expected) != len(FIELDS):
         raise ValueError("Malformed race clock output width")
     actual = list(map(float, tokens))
-    if not all(math.isfinite(value) for value in actual):
+    if not all(math.isfinite(value) for value in actual + list(expected)):
         raise ValueError("Nonfinite race clock output")
-    if any(value != int(value) for value in actual[5:]):
+    if any(value != int(value) for value in actual[5:] + list(expected[5:])):
         raise ValueError("Noninteger clock control output")
     return [dict(field=field, port=a, original=b)
             for field, a, b in zip(FIELDS, actual, expected) if a != b]

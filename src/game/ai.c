@@ -8,11 +8,10 @@
 
 #define PI 3.14159265358979323846
 
-/* Port of sub_0001aea0 (see docs/formats.md, "IA original"). Deviations: the per-section records of
- * load_tri are rebuilt on the fly from the gate edges (angles +0x2e), the lane/branch choice tables
- * at 0xbf9a0 are not used (the port's progress code already picks the branch from the car position),
- * the slope term (record Y, x90), the collision-overlap spin (car+0x558), the control-type 5/8
- * steering gain and the avoidance sign flip from the rival's own side ratio are omitted. */
+/* Port of sub_0001aea0 (see docs/formats.md, "IA original"). The lane table and split TRI records are
+ * applied to the reconstructed section graph; exact build_sections/ai_find_section topology remains
+ * approximate. The slope term, collision-overlap spin, control-type 5/8 gain and avoidance sign flip
+ * from the rival's own side ratio are also omitted. */
 
 static int track_id = 1;
 static IgnCar *all_cars[16];
@@ -52,6 +51,36 @@ static const Limit limits[7][8] = {
 static const int track_idx[7] = {1, 2, 3, 6, 4, 0, 5};
 static const int look_off[6] = {1, 2, 3, 4, 6, 8};
 
+typedef struct {
+    short section, chance, selector;
+} LaneChoice;
+
+static const LaneChoice lane_choices[7][4] = {
+    {{50, 50, 0}, {90, 50, 0}, {2, 50, 0}, {2, 50, 0}},
+    {{10, 60, 0}, {130, 40, 0}, {2, 50, 0}, {2, 50, 0}},
+    {{5, 50, 0}, {90, 50, 0}, {2, 50, 0}, {2, 50, 0}},
+    {{50, 40, 0}, {2, 50, 0}, {2, 50, 0}, {2, 50, 0}},
+    {{5, 100, 0}, {33, 50, 0}, {110, 50, 0}, {2, 50, 0}},
+    {{10, 60, 0}, {190, 0, 1}, {2, 50, 0}, {2, 50, 0}},
+    {{15, 35, 0}, {55, 45, 0}, {2, 50, 0}, {2, 50, 0}},
+};
+
+void ign_ai_update_route_choice(IgnAi *ai, int section, IgnFx *fx) {
+    const LaneChoice *choices = lane_choices[track_idx[track_id]];
+    for (int i = 0; i < 4; i++) {
+        if (choices[i].section != section) continue;
+        ai->route_selector = choices[i].selector;
+        ai->route_random = (double)ign_fx_rand15(fx) * (1.0 / 32768.0);
+        if (choices[i].chance == 0)
+            ai->route_choice = 0;
+        else if (choices[i].chance == 100)
+            ai->route_choice = 1;
+        else
+            ai->route_choice =
+                (ai->p.s20 * 0.7 + 0.3) * ai->route_random * choices[i].chance * 0.01 > 0.125;
+    }
+}
+
 static double wrap(double a) {
     while (a > PI) a -= 2 * PI;
     while (a < -PI) a += 2 * PI;
@@ -64,11 +93,43 @@ typedef struct {
     double lx, lz, rx, rz;
 } Edge;
 
-static Edge edge_at(const IgnTrack *t, int s, int bb) {
+static int section_index(const IgnTrack *t, int s) {
     s %= t->count;
     if (s < 0) s += t->count;
-    const float *g = bb && t->has_b[s] ? t->gate_b[s] : t->gate[s];
+    return s;
+}
+
+static Edge edge_at(const IgnTrack *t, int s, int path, int lane) {
+    int resolved_section = s, record_path = path, object = -1;
+    if (!ign_track_find_section(t, s, path, 1, track_id,
+                                &resolved_section, &record_path, &object))
+        resolved_section = section_index(t, s), record_path = 0;
+    (void)object;
+    if (t->ai_records && t->ai_record_count) {
+        int count = t->ai_record_count[resolved_section][record_path];
+        int record_index = count > 1 && lane ? 1 : 0;
+        if (count > record_index) {
+            const IgnAiRouteRecord *record =
+                &t->ai_records[resolved_section][record_path][record_index];
+            if (record->valid)
+                return (Edge){record->point[0] - IGN_SRF_ORIGIN, record->point[2] - IGN_SRF_ORIGIN,
+                              record->point[3] - IGN_SRF_ORIGIN, record->point[5] - IGN_SRF_ORIGIN};
+        }
+    }
+    const float *g = record_path ? t->gate_b[resolved_section] : t->gate[resolved_section];
     return (Edge){g[0], g[1], g[2], g[3]};
+}
+
+static int selected_path(const IgnTrack *t, const IgnAi *ai, int s, int active_branch) {
+    s = section_index(t, s);
+    if (!t->has_b || !t->has_b[s]) return 0;
+    if (active_branch) return 1;
+    return ai->route_selector ? ai->route_choice : ai->side < 0;
+}
+
+static Edge selected_edge(const IgnTrack *t, const IgnAi *ai, int s, int active_branch) {
+    int path = selected_path(t, ai, s, active_branch);
+    return edge_at(t, s, path, ai->route_choice);
 }
 
 static void mid_of(Edge e, double *x, double *z) {
@@ -77,14 +138,14 @@ static void mid_of(Edge e, double *x, double *z) {
 }
 
 /* Record angle +0x2e: direction of the road centre line from section s to the next one. */
-static double road_angle(const IgnTrack *t, int s, int bb) {
+static double road_angle(const IgnTrack *t, const IgnAi *ai, int s, int bb) {
     double ax, az, bx, bz;
-    mid_of(edge_at(t, s, bb), &ax, &az);
-    mid_of(edge_at(t, s + 1, bb), &bx, &bz);
+    mid_of(selected_edge(t, ai, s, bb), &ax, &az);
+    mid_of(selected_edge(t, ai, s + 1, bb), &bx, &bz);
     return atan2(bz - az, bx - ax);
 }
 
-void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnInput *in) {
+void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, IgnInput *in) {
     *in = (IgnInput){0};
     in->analog = true;
     if (!t->gate || t->count < 4 || car->section == IGN_NO_SECTION) return;
@@ -98,31 +159,32 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnInput *in)
     double cx = car->x, cz = car->z;
 
     /* +0x58: distance to the left edges over distance to the right edges, folded to |ratio| >= 1. */
-    Edge e0 = edge_at(t, s, bb), e1 = edge_at(t, s + 1, bb);
+    Edge e0 = edge_at(t, s, bb, ai->route_choice), e1 = edge_at(t, s + 1, bb, ai->route_choice);
     double dl = hypot(cx - e0.lx, cz - e0.lz) + hypot(cx - e1.lx, cz - e1.lz);
     double dr = hypot(cx - e0.rx, cz - e0.rz) + hypot(cx - e1.rx, cz - e1.rz);
     double ratio = dr > 0 ? dl / dr : 1;
     ai->side = ratio < 1 && ratio > 0 ? -1 / ratio : ratio;
+    ign_ai_update_route_choice(ai, s, fx);
 
     /* Lookahead records: sections s + {1,2,3,4,6,8}, stopping where the turn direction flips. */
-    double cur_ang = road_angle(t, s, bb);
+    double cur_ang = road_angle(t, ai, s, bb);
     double sum = 0, first = 0;
     int used = 0, sign = 0;
     double lx = 0, lz = 0;
     for (int k = 0; k < 6; k++) {
         int sk = s + look_off[k];
-        double d = wrap(road_angle(t, sk, bb) - cur_ang);
+        double d = wrap(road_angle(t, ai, sk, bb) - cur_ang);
         int sg = d > 0.02 ? 1 : d < -0.02 ? -1 : 0;
         if (sg && !sign) sign = sg;
         if (sg && sign && sg != sign) break;
         if (k == 0) first = d;
         sum += fabs(d);
         used++;
-        mid_of(edge_at(t, sk, bb), &lx, &lz);
+        mid_of(selected_edge(t, ai, sk, bb), &lx, &lz);
     }
     if (!used) {
         used = 1;
-        mid_of(edge_at(t, s + 1, bb), &lx, &lz);
+        mid_of(selected_edge(t, ai, s + 1, bb), &lx, &lz);
     }
     int off = look_off[used - 1];
     double grip = fmax(0, (8 - ign_surface_grip[car->surface_type >= 0 && car->surface_type < 30 ? car->surface_type : 0]) * 0.125);

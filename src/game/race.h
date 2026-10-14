@@ -16,6 +16,7 @@ typedef struct {
     double total;  /* [0x1fb4d8]: 1/36 s since the level started */
     int64_t timer_ticks, origin_ms; /* deterministic virtual millisecond source/origin */
     double elapsed; /* [0x1fb540]: sampled seconds since origin */
+    double best_lap; /* [0x1fb390]; port starts a session record, not a saved track record */
 } IgnRace;
 
 #define IGN_RACE_AI_WAKE 170.0 /* cars_update_all 0x2dd3c: ai_drive runs from this clock value */
@@ -30,13 +31,19 @@ double ign_race_elapsed_ms(int32_t now, int32_t origin);
 double ign_race_clock_sample(double previous, int32_t now, int32_t origin);
 /* sub_0004c738: copy sampled time unless out or (outside elimination) lap >= 3. */
 void ign_race_car_clock(IgnCar *car, int mode, double elapsed);
-/* sub_0002a410 clears race_elapsed, not lap_elapsed, lap_origin, input latch or turbo. */
+/* sub_0002a410 clears race_elapsed and recorded laps, not lap_elapsed, lap_origin or controls. */
 void ign_race_reset_car_clock(IgnCar *car);
+/* car_update crossing, time commit and phase decisions; positive count and nonnegative lap.
+ * Samples may independently be IGN_NO_SECTION.
+ * Return bits: 1 lap completed, 2 finished, 4 best lap improved. Caller owns out/wreck eligibility. */
+int ign_race_progress_sample(IgnRace *r, IgnCar *car, int count, int lap_probe, int section_sample);
+/* Port ground-object adapter: the two original probe families are not geometrically verified. */
+void ign_race_progress(IgnRace *r, IgnCar *car, const IgnTrack *t);
 int ign_race_started(const IgnRace *r);
 /* sub_0004a320 0x4b717: 3, 2, 1 for clock 50/100/150..200, 0 (GO) until total 250, else -1. */
 int ign_race_countdown(const IgnRace *r);
-/* Finish test of car_update (0x2f319) and sub_0002de30 (elimination). Call once per physics tick
- * after ign_car_progress. Returns the number of cars still racing. */
+/* sub_0002de30 (elimination). Call once per physics tick after ign_race_progress.
+ * Normal finishes are committed only at a valid crossing. Returns the number still racing. */
 int ign_race_step(IgnRace *r, IgnCar *const *cars, int n);
 /* Race position 1..n: finished cars by arrival, then by lap, phase and section. */
 int ign_race_position(const IgnCar *const *cars, int n, int index);

@@ -11,7 +11,185 @@ static int check(int condition, const char *message) {
     return 1;
 }
 
+static int respawn_tests(void) {
+    int failed = 0;
+#define RESET_CHECK(condition) failed |= check((condition), "respawn: " #condition)
+    IgnCar car = {0}, expected;
+    IgnCar *cars[] = {&car};
+    IgnLevel empty = {0};
+    IgnTrack track = {0};
+    car.gear = car.forward_gear = 2;
+    car.gear_ticks = 31;
+    car.gear_delay = 30;
+    car.revs = 31.5;
+    car.slip = 2.5;
+    car.jump_mode = car.landed = 1;
+    car.skid_timer = 7;
+    car.spark_timer = 13;
+    car.turbo_charge = 37.25;
+    car.turbo_mode = 2;
+    car.turbo_wait = 29;
+    car.turbo_key = 1;
+    car.turbo_frames = 17;
+    car.out = 1;
+    car.race_elapsed = 10.25;
+    car.lap_elapsed = 4.25;
+    car.lap_origin = 9.5;
+    memcpy(&expected, &car, sizeof car);
+    ign_car_init_turbo(&car);
+    expected.turbo_charge = 100;
+    expected.turbo_mode = expected.turbo_wait = expected.turbo_frames = 0;
+    RESET_CHECK(memcmp(&car, &expected, sizeof car) == 0);
+    car.turbo_wait = 29;
+    car.turbo_frames = 17;
+    for (int i = 0; i < 2; i++) {
+        car.turbo_charge = 37.25;
+        car.turbo_mode = 2;
+        memcpy(&expected, &car, sizeof car);
+        expected.turbo_charge = 100;
+        expected.turbo_mode = 0;
+        ign_car_wreck_turbo(&car);
+        RESET_CHECK(memcmp(&car, &expected, sizeof car) == 0);
+    }
+    car.turbo_mode = 2;
+    memcpy(&expected, &car, sizeof car);
+    expected.gear = expected.forward_gear = 1;
+    expected.gear_ticks = 0;
+    expected.revs = expected.slip = 0;
+    expected.jump_mode = expected.landed = expected.skid_timer = expected.spark_timer = 0;
+    ign_car_respawn_controls(&car);
+    RESET_CHECK(memcmp(&car, &expected, sizeof car) == 0);
+    RESET_CHECK(ign_car_turbo_input(&car, 1, 10.25) == 1);
+    RESET_CHECK(ign_car_turbo_input(&car, 0, 10.25) == 0);
+    car.turbo_key = 0;
+    RESET_CHECK(ign_car_turbo_input(&car, 1, 10.25) == 1);
+    car.turbo_mode = 0;
+    RESET_CHECK(ign_car_turbo_input(&car, 1, 0) == 2);
+    car.turbo_key = 1;
+    RESET_CHECK(ign_car_turbo_input(&car, 1, 0) == 1);
+    memcpy(&expected, &car, sizeof car);
+    RESET_CHECK(ign_car_respawn(&car, &empty, 10, 20, 0, 250) == -1);
+    RESET_CHECK(memcmp(&car, &expected, sizeof car) == 0);
+    car.out = 0;
+    car.wrecked = 1;
+    car.section = IGN_NO_SECTION;
+    for (int kind = 1; kind <= 3; kind++)
+        for (int i = 0; i < 2; i++) {
+            car.wreck_kind = kind;
+            car.turbo_charge = 37.25;
+            car.turbo_mode = 2;
+            ign_race_wrecks(cars, 1, &empty, &track);
+            RESET_CHECK(car.turbo_charge == 100 && car.turbo_mode == 0);
+            RESET_CHECK(car.turbo_wait == 29 && car.turbo_key == 1 && car.turbo_frames == 17);
+            RESET_CHECK(car.race_elapsed == 10.25 && car.lap_elapsed == 4.25 && car.lap_origin == 9.5);
+        }
+    car.out = 1;
+    car.turbo_charge = 37.25;
+    car.turbo_mode = 2;
+    memcpy(&expected, &car, sizeof car);
+    expected.turbo_charge = 100;
+    expected.turbo_mode = 0;
+    ign_race_wrecks(cars, 1, &empty, &track);
+    RESET_CHECK(memcmp(&car, &expected, sizeof car) == 0);
+    car.wrecked = 0;
+    car.turbo_mode = 2;
+    car.turbo_charge = 37.25;
+    memcpy(&expected, &car, sizeof car);
+    ign_race_wrecks(cars, 1, &empty, &track);
+    RESET_CHECK(memcmp(&car, &expected, sizeof car) == 0);
+
+    int32_t verts[] = {-1000, 0, -1000, 1000, 0, -1000, 0, 0, 1000};
+    IgnFace face = {.v = {0, 1, 2}};
+    IgnObject object = {.nv = 3, .nf = 1, .verts = verts, .faces = &face};
+    uint8_t cells[12] = {0}, list[4] = {0};
+    /* One descending SRF span references face offset 2 + 3 * nv of the triangle. */
+    uint8_t spans[24] = {0, 100, 0, 0, 232, 103, 0, 0, 0, 0, 1, 0,
+                         0, 0, 255, 255, 48, 248, 11, 0, 0, 0, 0, 0};
+    int engine_to_plc[] = {0};
+    cells[8] = 1;
+    IgnLevel level = {.track = {.nobj = 1, .objs = &object},
+                      .surface = {.data = cells, .cell_w = 65536, .cell_h = 65536, .gx = 1, .gz = 1,
+                                  .nspan = 1, .na = 1, .cells = cells, .spans = spans, .list_a = list,
+                                  .list_b = list + 4, .engine_to_plc = engine_to_plc, .nengine = 1}};
+    car.gear = car.forward_gear = 2;
+    car.gear_ticks = 31;
+    car.turbo_mode = 2;
+    RESET_CHECK(ign_car_respawn(&car, &level, 10, 20, 0, 250) == 0);
+    RESET_CHECK(car.gear == 1 && car.forward_gear == 1 && car.gear_ticks == 0 && car.gear_delay == 30);
+    RESET_CHECK(car.turbo_mode == 2 && car.turbo_wait == 29 && car.turbo_key == 1 && car.turbo_frames == 17);
+    RESET_CHECK(car.out == 1 && car.race_elapsed == 10.25 && car.lap_elapsed == 4.25 && car.lap_origin == 9.5);
+    int16_t curves[3][IGN_TORQUE_POINTS] = {{0}};
+    for (int i = 0; i < IGN_TORQUE_POINTS; i++) curves[2][i] = 1;
+    for (int i = 1; i <= 30; i++) {
+        ign_car_gearbox(&car, curves);
+        RESET_CHECK(car.gear == 1 && car.gear_ticks == i);
+    }
+    ign_car_gearbox(&car, curves);
+    RESET_CHECK(car.gear == 2 && car.gear_ticks == 31);
+    ign_car_respawn_controls(&car);
+    ign_car_shift(&car, 1);
+    RESET_CHECK(car.gear == 2 && car.gear_ticks == 0);
+#undef RESET_CHECK
+    return failed;
+}
+
+static int lap_tests(void) {
+    int failed = 0;
+#define LAP_CHECK(condition) failed |= check((condition), "laps: " #condition)
+    IgnRace race;
+    ign_race_init(&race, 0, 2);
+    race.elapsed = 100.5;
+    IgnCar car = {.lap = 2, .phase = 3, .lap_section = 19, .section = 19,
+                  .lap_elapsed = 20.25, .race_elapsed = 99.5, .position = 4};
+    int sections[] = {19, 0};
+    IgnTrack track = {.count = 20, .nobj = 2, .section = sections};
+    car.ground_object = 0;
+    ign_race_progress(&race, &car, &track);
+    LAP_CHECK(car.lap == 2 && !car.out && race.finished == 0);
+    car.ground_object = 1;
+    ign_race_progress(&race, &car, &track);
+    LAP_CHECK(car.lap == 3 && car.out && car.phase == 0 && race.finished == 1);
+    LAP_CHECK(car.finish_position == 4 && car.place == 1);
+    LAP_CHECK(car.last_lap == 20.25 && car.lap_times[2] == 20.25 && car.lap_origin == 100.5);
+    LAP_CHECK(car.race_elapsed == 99.5 && car.lap_elapsed == 20.25 && race.best_lap == 20.25);
+    IgnCar saved = car;
+    ign_race_progress(&race, &car, &track);
+    LAP_CHECK(!memcmp(&car, &saved, sizeof car) && race.finished == 1);
+    ign_race_car_clock(&car, 0, 101);
+    LAP_CHECK(car.race_elapsed == 99.5 && car.lap_elapsed == 20.25);
+    IgnCar rival = {.phase = 3, .lap_section = -19, .lap_elapsed = 19.5, .ai = 1};
+    LAP_CHECK(ign_race_progress_sample(&race, &rival, 20, 0, 0) == 5);
+    LAP_CHECK(race.best_lap == 19.5 && !rival.out && rival.lap_times[0] == 19.5);
+    rival.phase = 3; rival.lap_section = 19;
+    LAP_CHECK(ign_race_progress_sample(&race, &rival, 20, 0, 0) == 1);
+    LAP_CHECK(rival.lap == 2 && rival.lap_times[1] == 19.5);
+    ign_race_car_clock(&rival, 0, 101);
+    LAP_CHECK(rival.lap_elapsed == 0.5);
+    rival.phase = 3; rival.lap_section = 19; rival.progress_lock = 1;
+    LAP_CHECK(ign_race_progress_sample(&race, &rival, 20, 0, 0) == 0 && rival.lap == 2);
+    rival.progress_lock = 0; rival.phase = 2;
+    LAP_CHECK(ign_race_progress_sample(&race, &rival, 23, 10000, 22) == 0 && rival.phase == 2);
+    LAP_CHECK(ign_race_progress_sample(&race, &rival, 23, 10000, -19) == 0 && rival.phase == 3);
+    LAP_CHECK(rival.lap_section == 0);
+    ign_race_reset_car_clock(&car);
+    LAP_CHECK(car.last_lap == 0 && car.lap_times[2] == 0 && car.lap_origin == 100.5);
+    IgnCar *cars[] = {&rival};
+    rival.lap = 3; rival.out = 0;
+    ign_race_step(&race, cars, 1);
+    LAP_CHECK(!rival.out && race.finished == 1);
+    race.mode = IGN_MODE_ELIMINATION;
+    rival.lap = 2; rival.phase = 3; rival.lap_section = 19;
+    LAP_CHECK(ign_race_progress_sample(&race, &rival, 20, 0, 0) == 5 && !rival.out);
+    rival.wrecked = 1; rival.ground_object = 0;
+    saved = rival;
+    ign_race_progress(&race, &rival, &track);
+    LAP_CHECK(!memcmp(&rival, &saved, sizeof rival));
+#undef LAP_CHECK
+    return failed;
+}
+
 int main(void) {
+    int failed = respawn_tests() | lap_tests();
     IgnCar car;
     IgnLevel level;
     memset(&car, 0, sizeof car);
@@ -33,7 +211,7 @@ int main(void) {
 
     IgnInput input = {.accel = true, .manual_gear = true, .gear_shift = 1};
     ign_car_tick(&car, &level, &input);
-    int failed = check(car.gear == 2 && car.forward_gear == 2, "upshift selects second gear");
+    failed |= check(car.gear == 2 && car.forward_gear == 2, "upshift selects second gear");
     failed |= check(car.body.drive == 2000.0, "throttle uses first gear before upshift, not second");
 
     input = (IgnInput){.manual_gear = true};
@@ -247,6 +425,13 @@ int main(void) {
     failed |= check(car.race_elapsed == 0 && car.lap_elapsed == 3 && car.lap_origin == 2 &&
                     car.turbo_key == 2 && car.turbo_mode == 1,
                     "start reset preserves lap clock, lap origin and turbo state");
+    IgnCar other = car;
+    other.lap = 0;
+    other.lap_origin = 1;
+    ign_race_car_clock(&other, 0, 6);
+    failed |= check(other.race_elapsed == 6 && other.lap_elapsed == 5 &&
+                    car.race_elapsed == 0 && car.lap_elapsed == 3 && car.lap_origin == 2,
+                    "car clock fields are independent");
     ign_race_init(&race, 0, 1);
     ign_race_skip_countdown(&race);
     ign_race_clock(&race);

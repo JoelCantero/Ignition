@@ -66,21 +66,14 @@ int ign_first_car_id(const IgnLevel *lv) {    for (int i = 0; i < lv->cars.nobj;
     return -1;
 }
 
-void ign_car_progress(IgnCar *car, const IgnTrack *t) {
-    if (car->ground_object < 0 || car->ground_object >= t->nobj || t->count < 4) return;
-    int s = t->section[car->ground_object];
-    if (s == IGN_NO_SECTION) return;
-    car->section = s;
-    int a = abs(s), q = t->count / 4;
-    if (car->phase == 3 && a == t->count - 1) {
-        car->lap++;
-        car->lap_origin = car->race_elapsed;
-        car->phase = 0;
-    } else if (car->phase == 0 && a >= q && a < 2 * q) {
+void ign_car_progress_phase(IgnCar *car, int count) {
+    int a = abs(car->section), q = count / 4;
+    /* car_update 0x2fc1c..0x2fd63: one phase transition per sample, including the upper bound. */
+    if (car->phase == 0 && a >= q && a < 2 * q) {
         car->phase = 1;
     } else if (car->phase == 1 && a >= 2 * q && a < 3 * q) {
         car->phase = 2;
-    } else if (car->phase == 2 && a >= 3 * q) {
+    } else if (car->phase == 2 && a >= 3 * q && a < 4 * q) {
         car->phase = 3;
     }
 }
@@ -255,8 +248,7 @@ void ign_car_wreck(IgnCar *car, int kind) {
     }
     car->wreck_at[1] = car->height;
     car->airborne = 1;
-    car->turbo_charge = 100.0;
-    car->turbo_mode = 0;
+    ign_car_wreck_turbo(car);
     car->mark_valid[0] = car->mark_valid[1] = 0;
 }
 
@@ -354,7 +346,7 @@ int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, floa
     IgnBody *b = &car->body;
     b->mass = ign_car_mass[car->spec];
     b->inertia = 8000.0;
-    car->turbo_charge = 100.0;
+    ign_car_init_turbo(car);
     b->restitution = 0.6;
     b->radius = 4.0;
     b->a = fabs(car->front) / IGN_WORLD_PER_METRE * 1.5;
@@ -413,6 +405,26 @@ void ign_car_set_pose(IgnCar *car, const IgnLevel *lv, float x, float z, double 
     place(car);
 }
 
+void ign_car_init_turbo(IgnCar *car) {
+    /* cars_init 0x27451..0x27497; unlike a wreck, initialization clears the wait and effect counter. */
+    car->turbo_charge = 100.0;
+    car->turbo_mode = car->turbo_wait = car->turbo_frames = 0;
+}
+
+void ign_car_wreck_turbo(IgnCar *car) {
+    /* 0x3a7f5..0x3a812, repeated on every explosion-effect update. */
+    car->turbo_charge = 100.0;
+    car->turbo_mode = 0;
+}
+
+void ign_car_respawn_controls(IgnCar *car) {
+    /* respawn_place 0x41de5..0x41e93 / 0x41ee5..0x41f0d: turbo and clocks are preserved. */
+    car->gear = car->forward_gear = 1;
+    car->gear_ticks = 0;
+    car->revs = car->slip = 0;
+    car->jump_mode = car->landed = car->skid_timer = car->spark_timer = 0;
+}
+
 int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height) {
     /* sub_00041430 0x418ec: one probe at the respawn point; without ground, a second one 20 units towards -x, which
      * also moves the car there. */
@@ -436,19 +448,12 @@ int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double he
     for (int w = 0; w < 4; w++) car->wheel_type[w] = hit.surface_type;
     car->body_roll = car->body_pitch = 0;
     car->lean_roll = car->lean_pitch = 0;
-    car->slip = 0;
-    car->gear = car->forward_gear = 1;
+    ign_car_respawn_controls(car);
     car->kmh = 0;
-    car->revs = 0;
-    car->jump_mode = 0;
-    car->landed = 0;
-    car->skid_timer = 0;
-    car->spark_timer = 0;
     /* sub_0003a788 0x3b5e8: the wreck ends with a full turbo. */
     car->wrecked = 0;
     car->wreck_kind = 0;
     car->turbo_charge = 100.0;
-    car->turbo_mode = 0;
     car->offroad = 0;
     car->wall_x = car->wall_z = INFINITY;
     return 0;
