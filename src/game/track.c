@@ -27,23 +27,24 @@ static void object_center(const IgnObject *o, float out[3]) {
     for (int c = 0; c < 3; c++) out[c] = (float)o->pos[c];
 }
 
-static double dist(const IgnTrack *t, int a, int b) {
-    double dx = t->center[a][0] - t->center[b][0];
-    double dy = (t->center[a][1] - t->center[b][1]) * 2.0; /* height differences count double */
-    double dz = t->center[a][2] - t->center[b][2];
+static double dist(const IgnModel *m, int a, int b) {
+    /* build_sections 0x2981d compares PLC origins; vertical differences are weighted by two. */
+    double dx = (double)m->objs[a].pos[0] - m->objs[b].pos[0];
+    double dy = ((double)m->objs[a].pos[1] - m->objs[b].pos[1]) * 2.0;
+    double dz = (double)m->objs[a].pos[2] - m->objs[b].pos[2];
     return sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-static int nearest(const IgnTrack *t, const unsigned char *visited, int from, const int *classes,
-                   int nclasses, int skip_visited) {
+static int nearest(const IgnModel *m, const IgnTrack *t, const unsigned char *visited, int from,
+                   const int *classes, int nclasses, int skip_visited) {
     int best = -1;
-    double best_d = 1e8;
+    double best_d = 99999999.0;
     for (int i = 0; i < t->nobj; i++) {
         if (i == from || (skip_visited && visited[i])) continue;
         int ok = 0;
         for (int k = 0; k < nclasses; k++) ok |= t->klass[i] == classes[k];
         if (!ok) continue;
-        double d = dist(t, from, i);
+        double d = dist(m, from, i);
         if (d < best_d) best_d = d, best = i;
     }
     return best;
@@ -54,15 +55,21 @@ int ign_build_track(const IgnModel *m, IgnTrack *t) {
     t->nobj = m->nobj;
     t->klass = calloc((size_t)m->nobj + 1, sizeof *t->klass);
     t->section = calloc((size_t)m->nobj + 1, sizeof *t->section);
+    t->section_b = calloc((size_t)m->nobj + 1, sizeof *t->section_b);
     t->center = calloc((size_t)m->nobj + 1, sizeof *t->center);
+    t->section_obj = malloc(sizeof *t->section_obj * ((size_t)m->nobj + 1));
+    t->section_obj_b = malloc(sizeof *t->section_obj_b * ((size_t)m->nobj + 1));
     unsigned char *visited = calloc((size_t)m->nobj + 1, 1);
-    if (!t->klass || !t->section || !t->center || !visited) goto fail;
+    if (!t->klass || !t->section || !t->section_b || !t->center || !t->section_obj ||
+        !t->section_obj_b || !visited)
+        goto fail;
 
     int road = 0;
     t->start_obj = t->dir_obj = -1;
     for (int i = 0; i < m->nobj; i++) {
         t->klass[i] = (int)(m->objs[i].type & 0xfff);
         t->section[i] = IGN_NO_SECTION;
+        t->section_b[i] = IGN_NO_SECTION;
         if (t->klass[i] <= 50) object_center(&m->objs[i], t->center[i]);
         else for (int c = 0; c < 3; c++) t->center[i][c] = (float)m->objs[i].pos[c];
         if (t->klass[i] < 50 && t->klass[i] != 8) road++;
@@ -71,56 +78,73 @@ int ign_build_track(const IgnModel *m, IgnTrack *t) {
     }
     if (t->start_obj < 0 || t->dir_obj < 0) goto fail;
 
+    t->section_next_obj = malloc(sizeof *t->section_next_obj * ((size_t)m->nobj + 1));
+    t->section_next_obj_b = malloc(sizeof *t->section_next_obj_b * ((size_t)m->nobj + 1));
+    if (!t->section_next_obj || !t->section_next_obj_b) goto fail;
+    for (int i = 0; i <= m->nobj; i++)
+        t->section_next_obj[i] = t->section_next_obj_b[i] = -1;
+    for (int i = 0; i <= m->nobj; i++) t->section_obj[i] = t->section_obj_b[i] = -1;
+
     static const int main_road[] = {2, 3, 7, 9}, branch_a[] = {4, 6}, branch_b[] = {5, 6};
     static const int jump[] = {7};
     int s = 0, cur = t->dir_obj;
     t->section[t->start_obj] = s++;
+    t->section_obj[0] = t->start_obj;
+    t->section_next_obj[0] = t->dir_obj;
     visited[t->start_obj] = 1;
 
     for (int step = 0; step < road - 3; step++) {
-        int next = nearest(t, visited, cur, main_road, 4, 1);
+        int next = nearest(m, t, visited, cur, main_road, 4, 1);
         visited[cur] = 1;
+        t->section_next_obj[s] = next;
+        t->section_obj[s] = cur;
         t->section[cur] = s++;
         if (next < 0) break;
         cur = next;
 
         if (t->klass[cur] == 3) {
-            /* Fork: branch A keeps positive sections, branch B reuses them negated, both end at class 6. */
-            int fork = cur, s_fork = s, merge = -1;
+            /* The original stores branch B alongside the main route at each logical section. */
+            int fork = cur, s_fork = s;
             while (t->klass[cur] != 6) {
-                int n = nearest(t, visited, cur, branch_a, 2, 1);
+                int n = nearest(m, t, visited, cur, branch_a, 2, 1);
                 visited[cur] = 1;
+                t->section_next_obj[s] = n;
+                t->section_obj[s] = cur;
                 t->section[cur] = s++;
                 if (n < 0) break;
                 cur = n;
-                step++;
+                if (t->klass[cur] != 6) step++;
             }
-            merge = cur;
             int s_end = s;
             s = s_fork;
             cur = fork;
             while (t->klass[cur] != 6) {
-                int n = nearest(t, visited, cur, branch_b, 2, 1);
+                int n = nearest(m, t, visited, cur, branch_b, 2, 1);
                 visited[cur] = 1;
-                t->section[cur] = -s;
+                t->section_next_obj_b[s] = n;
+                t->section_obj_b[s] = cur;
+                t->section_b[cur] = -s;
+                if (t->section[cur] == IGN_NO_SECTION) t->section[cur] = -s;
                 s++;
                 if (n < 0) break;
                 cur = n;
-                step++;
+                if (t->klass[cur] != 6) step++;
             }
             s = s_end;
-            cur = merge;
         }
         if (t->klass[cur] == 7) {
-            int n = nearest(t, visited, cur, jump, 1, 1);
+            int n = nearest(m, t, visited, cur, jump, 1, 1);
             if (n >= 0) {
                 visited[cur] = 1;
+                t->section_next_obj[s] = n;
+                t->section_obj[s] = cur;
                 t->section[cur] = s++;
                 cur = n;
             }
         }
     }
     visited[cur] = 1;
+    t->section_obj[s] = cur;
     t->section[cur] = s++;
     t->count = s;
     free(visited);
@@ -134,8 +158,12 @@ fail:
 void ign_free_track(IgnTrack *t) {
     free(t->klass);
     free(t->section);
+    free(t->section_b);
     free(t->center);
     free(t->section_obj);
+    free(t->section_next_obj);
+    free(t->section_next_obj_b);
+    free(t->section_obj_b);
     free(t->gate);
     free(t->gate_b);
     free(t->has_b);
@@ -169,22 +197,36 @@ static void object_gate(const IgnTrack *t, const IgnLevel *lv, int o, float g[4]
 }
 
 void ign_track_gates(IgnTrack *t, const IgnLevel *lv) {
-    t->section_obj = malloc(sizeof *t->section_obj * (size_t)(t->count + 1));
+    int map_main = !t->section_obj;
+    int map_branch = !t->section_obj_b;
+    if (map_main) t->section_obj = malloc(sizeof *t->section_obj * (size_t)(t->count + 1));
+    if (map_branch) t->section_obj_b = malloc(sizeof *t->section_obj_b * (size_t)(t->count + 1));
     t->gate = calloc((size_t)t->count + 1, sizeof *t->gate);
     t->gate_b = calloc((size_t)t->count + 1, sizeof *t->gate_b);
     t->has_b = calloc((size_t)t->count + 1, 1);
-    if (!t->section_obj || !t->gate || !t->gate_b || !t->has_b) return;
-    for (int s = 0; s < t->count; s++) t->section_obj[s] = -1;
-    for (int i = 0; i < t->nobj; i++) {
-        int s = t->section[i];
-        if (s >= 0 && s < t->count) t->section_obj[s] = i;
-        else if (s < 0 && s != IGN_NO_SECTION && -s < t->count) {
-            object_gate(t, lv, i, t->gate_b[-s]);
-            t->has_b[-s] = 1;
+    if (!t->section_obj || !t->section_obj_b || !t->gate || !t->gate_b || !t->has_b) return;
+    if (map_main)
+        for (int s = 0; s < t->count; s++) t->section_obj[s] = -1;
+    if (map_branch)
+        for (int s = 0; s < t->count; s++) t->section_obj_b[s] = -1;
+    if (map_main || map_branch) {
+        for (int i = 0; i < t->nobj; i++) {
+            int s = t->section[i];
+            if (map_main && s >= 0 && s < t->count) t->section_obj[s] = i;
+            int section_b = t->section_b ? t->section_b[i] : IGN_NO_SECTION;
+            if (section_b == IGN_NO_SECTION && s < 0) section_b = s;
+            if (map_branch && section_b < 0 && section_b != IGN_NO_SECTION &&
+                -section_b < t->count)
+                t->section_obj_b[-section_b] = i;
         }
     }
-    for (int s = 0; s < t->count; s++)
+    for (int s = 0; s < t->count; s++) {
         if (t->section_obj[s] >= 0) object_gate(t, lv, t->section_obj[s], t->gate[s]);
+        if (t->section_obj_b[s] >= 0) {
+            object_gate(t, lv, t->section_obj_b[s], t->gate_b[s]);
+            t->has_b[s] = 1;
+        }
+    }
     /* Sections without an object reuse the previous gate. */
     for (int s = 1; s < t->count; s++)
         if (t->section_obj[s] < 0) memcpy(t->gate[s], t->gate[s - 1], sizeof t->gate[s]);
@@ -264,11 +306,7 @@ int ign_track_ai_records(IgnTrack *t, const IgnLevel *lv) {
 
     for (int s = 0; s < t->count; s++) {
         int objects[2] = {t->section_obj ? t->section_obj[s] : -1, -1};
-        for (int i = 0; i < t->nobj; i++)
-            if (t->section[i] == -s && s != 0) {
-                objects[1] = i;
-                break;
-            }
+        if (s > 0) objects[1] = ign_track_section_object(t, -s);
         for (int path = 0; path < 2; path++) {
             IgnAiRouteRecord record = {0};
             if (!route_record_for_object(lv, objects[path], &record)) continue;
@@ -292,10 +330,13 @@ fail:
 }
 
 int ign_track_section_object(const IgnTrack *t, int s) {
-    if (t->count <= 0) return -1;
+    if (!t || t->count <= 0) return -1;
     if (s >= 0) return t->section_obj ? t->section_obj[s % t->count] : -1;
+    int section = -s;
+    if (section < t->count && t->section_obj_b && t->section_obj_b[section] >= 0)
+        return t->section_obj_b[section];
     for (int i = 0; i < t->nobj; i++)
-        if (t->section[i] == s) return i;
+        if ((t->section_b && t->section_b[i] == s) || t->section[i] == s) return i;
     return -1;
 }
 
@@ -361,17 +402,16 @@ int ign_track_find_section(const IgnTrack *t, int section, int branch, int step,
 }
 
 int ign_track_section_angle(const IgnTrack *t, const IgnLevel *lv, int s, double *out) {
-    int o0 = ign_track_section_object(t, s), o1 = ign_track_section_object(t, s >= 0 ? s + 1 : s - 1);
-    /* The last branch B section leads to the merge object (class 6) closest to it. */
-    if (s < 0 && o0 >= 0 && o1 < 0) {
-        double best = INFINITY;
-        for (int i = 0; i < t->nobj; i++) {
-            if (t->klass[i] != 6 || t->section[i] < 0 || t->section[i] == IGN_NO_SECTION) continue;
-            double dx = t->center[i][0] - t->center[o0][0], dz = t->center[i][2] - t->center[o0][2];
-            if (dx * dx + dz * dz < best) best = dx * dx + dz * dz, o1 = i;
-        }
+    if (!t || !lv || !out) return 0;
+    int section = s < 0 ? -s : s;
+    int o0 = ign_track_section_object(t, s);
+    int o1 = -1;
+    if (section >= 0 && section < t->count) {
+        int *next = s < 0 ? t->section_next_obj_b : t->section_next_obj;
+        if (next) o1 = next[section];
+        if (o1 < 0 && s >= 0)
+            o1 = ign_track_section_object(t, (section + 1) % t->count);
     }
-    if (s < 0 && o1 < 0) o1 = ign_track_section_object(t, -s + 1);
     if (o0 < 0 || o1 < 0) return 0;
     const int32_t *a = lv->track.objs[o0].pos, *b = lv->track.objs[o1].pos;
     double ang = -atan2((double)a[0] - b[0], (double)a[2] - b[2]);

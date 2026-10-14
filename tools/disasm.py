@@ -3,6 +3,7 @@
 
   disasm.py funcs [--strings]          list discovered functions
   disasm.py coverage                   report function states (incl. auto-detected library) and coverage
+  disasm.py roadmap [-o FILE]           export every discovered function and its roadmap disposition as TSV
   disasm.py dis ADDR                   disassemble one function
   disasm.py sweep                      linear sweep of uncovered code; writes tools/gap_seeds.txt
   disasm.py export ghidra|ida [-o F]   Ghidra/IDA script with function names, comments and structures
@@ -33,12 +34,17 @@ GAP_SEEDS = os.path.join(os.path.dirname(__file__), "gap_seeds.txt")
 END_MNEMONICS = {"ret", "retf", "iret", "iretd", "jmp", "hlt"}
 
 
-FUNCTION_STATUSES = {"unknown", "identified", "ported", "verified", "library"}
+FUNCTION_STATUSES = {
+    "unknown", "identified", "understood", "port-pending", "partial",
+    "ported", "verified", "native", "library",
+}
+STATUS_ALIASES = {"ported-partial": "partial"}
 
 
 def load_symbols():
     names = {}
     statuses = {}
+    roadmaps = {}
     with open(SYMBOLS) as f:
         for line in f:
             parts = line.split()
@@ -47,14 +53,16 @@ def load_symbols():
                 names[addr] = parts[1]
                 for field in parts[2:]:
                     if field.startswith("status="):
-                        status = field.partition("=")[2]
+                        status = STATUS_ALIASES.get(field.partition("=")[2], field.partition("=")[2])
                         if status not in FUNCTION_STATUSES:
                             raise ValueError("invalid function status %r at 0x%x" % (status, addr))
                         statuses[addr] = status
-    return names, statuses
+                    elif field.startswith("roadmap="):
+                        roadmaps[addr] = field.partition("=")[2]
+    return names, statuses, roadmaps
 
 
-NAMES, STATUSES = load_symbols()
+NAMES, STATUSES, ROADMAPS = load_symbols()
 
 
 def load_gap_seeds():
@@ -465,6 +473,8 @@ def main():
     p = sub.add_parser("funcs")
     p.add_argument("--strings", action="store_true")
     sub.add_parser("coverage")
+    p = sub.add_parser("roadmap")
+    p.add_argument("-o", "--output")
     sub.add_parser("dis").add_argument("addr")
     sub.add_parser("all")
     sub.add_parser("sweep")
@@ -534,6 +544,21 @@ def main():
         else:
             sys.stdout.write(text)
         return
+    if args.cmd == "roadmap":
+        rows = ["address\tfunction\tstatus\tinstructions\troadmap"]
+        for fa in sorted(funcs):
+            rows.append("%08x\t%s\t%s\t%d\t%s" % (
+                fa, name(fa), function_status(fa), len(funcs[fa]["insns"]),
+                ROADMAPS.get(fa, "unmapped"),
+            ))
+        text = "\n".join(rows) + "\n"
+        if args.output:
+            with open(args.output, "w") as out:
+                out.write(text)
+            print("wrote %s (%d functions)" % (args.output, len(funcs)))
+        else:
+            sys.stdout.write(text)
+        return
     if args.cmd == "coverage":
         code_objects = [(base, data) for base, data, flags in img.objs if flags & 4]
         covered = {base: bytearray(len(data)) for base, data in code_objects}
@@ -552,17 +577,34 @@ def main():
         total_bytes = sum(len(data) for _, data in code_objects)
         covered_bytes = sum(sum(bits) for bits in covered.values())
         totals = {status: 0 for status in FUNCTION_STATUSES}
+        insns_by_status = {status: set() for status in FUNCTION_STATUSES}
         for fa in funcs:
-            totals[function_status(fa)] += 1
+            status = function_status(fa)
+            totals[status] += 1
+            insns_by_status[status].update(funcs[fa]["insns"])
 
+        status_order = (
+            "unknown", "identified", "understood", "port-pending", "partial",
+            "ported", "verified", "native", "library",
+        )
         print("functions: %d (%s)" % (
             len(funcs),
             ", ".join("%s=%d" % (s, totals[s]) for s in
-                      ("unknown", "identified", "ported", "verified", "library")),
+                      status_order),
         ))
         lib_insns = {a for fa in funcs if function_status(fa) == "library" for a in funcs[fa]["insns"]}
         print("library (C runtime / DOS4G) unique instructions: %d, to exclude from game review" % len(lib_insns))
         print("unique instructions: %d" % len(unique_insns))
+        game_insns = set(unique_insns) - lib_insns
+        ported_insns = (insns_by_status["ported"] | insns_by_status["verified"]) & game_insns
+        print("game instructions marked ported/verified: %d/%d (%.1f%%)" % (
+            len(ported_insns), len(game_insns),
+            100 * len(ported_insns) / len(game_insns) if game_insns else 0,
+        ))
+        print("game instructions marked partial: %d (excluded from ported/verified)" % len(insns_by_status["partial"]))
+        print("functions explicitly linked to roadmap tasks: %d/%d" % (
+            sum(1 for fa in funcs if fa in ROADMAPS), len(funcs),
+        ))
         print("code bytes covered: %d/%d (%.1f%%)" % (
             covered_bytes, total_bytes, 100 * covered_bytes / total_bytes if total_bytes else 0,
         ))

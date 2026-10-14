@@ -115,8 +115,10 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   `load_tri` toma los vértices de `+1` y `+0x17` como **bordes izquierdo/derecho** del tramo (puerta) y el byte `+0x6d`
   divide la puerta en 2 registros (1 = mitad central→derecha y luego izquierda→central; 2 = izquierda→central y luego central→derecha).
   Las coordenadas X/Z de estos registros son vértice + posición PLC + `0x6400`; Y es vértice + posición PLC sin ese origen
-  (`0x1d30b..0x1d392`). `track.c` extrae estas coordenadas y subdivisiones, pero la asociación de registros con rutas depende
-  todavía de la topología heurística de `ign_build_track`; no equivale a las listas de sección del original.
+  (`0x1d30b..0x1d392`). `track.c` extrae estas coordenadas y subdivisiones. `track_real_assets` verifica en las siete
+  pistas que los registros TRI conservan la identidad engine→PLC y se asignan a una topología de ruta válida; esto es
+  una prueba estructural del port, no una comparación runtime exhaustiva con las tablas del original ni equivalencia del
+  selector completo de carril.
 - **GST** (fantasma, `GHOSTS\<nombre>.GST`; lector `0x2adf8`, grabador `0x51204`, escritor `0x2ccc8`; portado en `ghost.c`):
   exactamente `0x49d4c` = 302 412 B (`read_file_into` exige el tamaño). Cabecera: `i16 modelo, i16 pista, i16 tiempo` (carrera
   completa de 3 vueltas en centésimas, `car+0x3a4 × 100` truncado) y `char[4]` nombre (3 letras + NUL). Después 21 600 muestras
@@ -144,18 +146,21 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   procesan y consumen RNG por separado. En el port, `ign_fx_rand15` usa el LCG `seed = seed * 1103515245 + 12345`
   (`rand`, `0x64774`), compartido con el estado de `IgnFx`.
 - `load_tri` se integra al arrancar: registros geométricos extraídos por objeto engine→PLC, incluidas subdivisiones TRI
-  de tipo 1/2. **La topología no es aún equivalente al original**: la construcción de `build_sections` y la
-  correspondencia de registros divididos con el carril elegido siguen aproximadas. Los registros TRI informan las
-  puertas que consulta la IA en el grafo reconstruido, no demuestran por sí solos la ruta/carril que habría escogido
-  el original.
+  de tipo 1/2. `ign_build_track` replica ahora las reglas observadas de `build_sections` para buscar vecinos por origen
+  PLC (distancia euclídea con ΔY×2), contar avances excluyendo el merge de clase 6, conservar el merge alcanzado por B
+  y mapear el objeto de bifurcación en paralelo en ambas rutas. También conserva los objetos siguientes explícitos para
+  calcular los ángulos de ambas ramas. La prueba `track_topology` cubre selección por origen frente a centroide,
+  bifurcación compartida, ángulo de rama B y continuación desde un merge B distinto del merge A. Aún falta cotejar toda la tabla `g_sections` y la asignación de registros
+  divididos/carriles en las siete pistas; no se afirma equivalencia integral.
 - `ai_find_section` (`0x1decc`) ya tiene un helper portado (`ign_track_find_section`): interpreta sección, rama y
   avance como entradas de 16 bits; hace un único ajuste de wrap; cambia a la otra rama si la solicitada no existe;
   ante un registro TRI inválido acepta el actual cuando la condición de bifurcación original lo permite, o avanza
   según el signo del paso. En CANADA (`track_id=0`), las secciones `0xab..0xad` fuerzan el avance en ese caso.
   `ai.c` usa el helper al consultar los registros/puertas de lookahead. La prueba `track_route_selection` cubre fallback,
-  aceptación/avance, wrap y excepción de CANADA. El enlace de ramas y los índices/objetos que alimentan esta lógica
-  todavía dependen de la topología aproximada generada por `ign_build_track`; por tanto esto no acredita aún selección
-  de ruta completa equivalente ni correspondencia exacta de carril para cada pista.
+  aceptación/avance, wrap y excepción de CANADA. El enlace de ramas y los objetos siguientes conservan la topología
+  observada; `track_real_assets` valida la estructura generada y el mapeo engine→PLC de TRI para las siete pistas, pero
+  no coteja la tabla runtime original ni la correspondencia exacta de cada registro dividido con los carriles. Por tanto,
+  esto no acredita aún la selección de ruta completa equivalente.
 - Al construir puertas, el índice de objeto del motor se traduce a índice PLC mediante
   `surface.engine_to_plc` antes de leer el bloque TRI (`4 + plc_index * 500`). No se presupone que ambos índices
   coincidan; los índices ausentes o bloques fuera de rango usan el centro del objeto como fallback. La prueba

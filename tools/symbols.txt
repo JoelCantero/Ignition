@@ -19,8 +19,8 @@
 000230f4  load_plc             LEVELS\..PLC + CARS\CARS.PLC
 0002322c  load_msh             LEVELS\..MSH + CARS\CARS.MSH
 00023368  load_tex             LEVELS\..TEX + CARS.TEX
-0001ce30  load_tri             reads TRI (500 B/object), computes edge angles
-0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car
+0001ce30  load_tri             reads TRI (500 B/object), computes edge angles  roadmap=phase1.ai-route
+0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car  status=partial roadmap=phase1.ai-route
 00026458  cars_init            allocs cars/bodies, torque splines, start grid (slots 0xc33d0); bounded turbo initialization 0x27451..0x27497 verified, full init excluded
 00048a14  car_place_objects    per frame: body/wheels/shadow/name engine objects, front wheel steer
 00040ec8  cars_body_sway       body tilt car+0x584/+0x58c = ground tilt + lean, smoothed 0.25
@@ -86,7 +86,7 @@
 0002d008  cars_update_all      calls car_update
 0001e090  body_step            rigid-body bicycle model, dt 1/72; isolated x87 replay vs physics.c, 190 fixtures (tests/physics_original.py), not whole-game equivalence  status=verified
 00053e70  torque_spline        Hermite curve -> 200 int16  status=ported
-0004d5f4  car_input            verified D/A and J turbo arbitration fragments (10728 cases/82440 steps); J composes decision/refusal commit/countdown excluding audio/FX side effects; human request generation/latch separately verified in P; full dispatcher and cached input unverified
+0004d5f4  car_input            verified D/A and J turbo arbitration fragments (10728 cases/82440 steps); J composes decision/refusal commit/countdown excluding audio/FX side effects; human request generation/latch separately verified in P; full dispatcher and cached input unverified  status=partial roadmap=phase1.controls
 0004db90  car_throttle         drive to 0x4dfbe verified: 6829 cases/30174 steps; drive+revs to 0x4e1a7: 6941/32734, final torque index shared; supplied torque tables, finished/hardware-mode2 input override excluded  status=ported
 0004dfbe  car_revs_block       inside car_throttle to 0x4e1a7; isolated 25016 cases/134208 steps, human/AI air/start/skid/finish rules; final torque index and binary32 km/h supplied, speed production excluded  status=verified
 0004e1bc  car_brake            unfinished-car routine verified: 72 cases/288 steps; input>50 sliding, prestart lock, input>80 and v_fwd>2 skid=10  status=verified
@@ -95,7 +95,7 @@
 00022d08  computer_cars        AI models 0xc5520[difficulty], bonus 0xc55c0 via 0xc57d0, AI param +0x28  status=ported
 000502c4  car_gearbox          verified K ctrl+4=1: shared model-0 signed16 curves, x87 speed, angle, counter>delay; audio excluded
 0002b734  frame_time           ms * 0.036
-0002c5b8  human_input          keyboard: +0x1c..0x23 keys, digital steer ±100 -> car+0x344; P generation 0x2c93a..0x2c9d4 and independent latch 0x2cc9b..0x2ccb5 verified (5184 cases/31104 steps); supplied poll EAX/elapsed +0x3a4, wreck flags aggregated in port; no polling/clock/intermediate callee proof  status=identified
+0002c5b8  human_input          keyboard: +0x1c..0x23 keys, digital steer ±100 -> car+0x344; P generation 0x2c93a..0x2c9d4 and independent latch 0x2cc9b..0x2ccb5 verified (5184 cases/31104 steps); supplied poll EAX/elapsed +0x3a4, wreck flags aggregated in port; no polling/clock/intermediate callee proof  status=partial roadmap=phase1.controls
 001fefe0  g_cars               0x484c bytes per car
 001fefe8  g_bodies             0x1d0 bytes per car
 000c4e20  t_car_mass
@@ -142,12 +142,12 @@
 00041430  respawn_place        after glide: probe point (or 20 to -x), still, airborne; bounded controls reset verified: gear 1/counter 0, preserves delay/turbo/clocks; geometry/full FX excluded (respawn oracle 7422 cases/31344 steps)  status=ported
 0004e688  turbo_start_fx       10 nitro puffs (0xc41a0) when a turbo starts  status=ported
 000413fc  ease_curve           table 0xc0678[f*200]*0.005 (ease in-out)
-00028f08  build_sections       track section order from the start object (ported: track.c)  status=ported
+00028f08  build_sections       route topology from PLC-origin distances; parallel branch B, class-6 merge and next-object angles (track.c)  status=partial roadmap=phase1.ai-route
 000247b0  split_plc_types      class = type & 0xfff, attributes -> [0x1fef7c]
 001ff004  g_section_count
 001feff8  g_sections           24 bytes per section
 000350f0  car_ground_contact   moving-object collisions; calls ground_query
 0002de30  race_elimination     mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), "%s IS OUT"; [0x1fed78]-- ; at 1 left, all finish
-0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> wrap/fallback/invalid-record selection ported; route topology remains approximate  status=partial
+0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> wrap/fallback/invalid-record selection ported; route topology remains approximate  status=partial roadmap=phase1.ai-route
 000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty

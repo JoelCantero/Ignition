@@ -21,10 +21,14 @@ typedef struct IgnTrack {
     int nobj;
     int *klass;        /* PLC type & 0xfff (0 start, 1 start direction, 2/3/7/9 road, 4/5/6 branches) */
     int *section;      /* per object: section index, negative on the second branch, IGN_NO_SECTION if none */
+    int *section_b;    /* branch B section index; also maps the shared fork without replacing its main section */
     float (*center)[3];
     int count;         /* [0x1ff004] */
     int start_obj, dir_obj;
     int *section_obj;  /* main route: object of each section */
+    int *section_next_obj; /* exact next PLC object on the main route */
+    int *section_next_obj_b; /* exact next PLC object on branch B */
+    int *section_obj_b; /* branch B object of each signed section */
     float (*gate_b)[4]; /* branch B gates (negative sections), valid where has_b[s] */
     unsigned char *has_b;
     float (*gate)[4];  /* per section: left x,z and right x,z road edges (TRI vertices) */
@@ -41,8 +45,7 @@ int ign_track_section_object(const IgnTrack *t, int s);
 /* ai_find_section 0x1decc: select a route record, applying branch fallback and invalid-record advancement. */
 int ign_track_find_section(const IgnTrack *t, int section, int branch, int step, int track_id,
                            int *out_section, int *out_branch, int *out_object);
-/* build_sections 0x2970f-0x2a30a: g_sections+4 (+0x10 on branch B) = -atan2(x - x_next, z - z_next) of the PLC
- * origins of the section object and the next one (atan2 0x647ef swaps st0/st1 before fpatan), in [0, 2pi). */
+/* build_sections 0x2970f-0x2a30a: route adjacency and g_sections+4 (+0x10 on branch B) use PLC origins. */
 int ign_track_section_angle(const IgnTrack *t, const IgnLevel *lv, int s, double *out);
 
 /* sub_000247b0 + sub_00028f08. Returns 0 on success. */
