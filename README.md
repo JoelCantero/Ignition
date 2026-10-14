@@ -90,6 +90,7 @@ Pistas: `USA`, `CANADA`, `AUSTRIA`, `BRAZIL`, `CARIB`, `ICELAND`, `JAPAN`. La ru
 | `--res WxH` | resolución interna: 640x480 por defecto (VESA del DOS), 320x200 (modo bajo) u 800x600 (`Ign_win.exe`); siempre a 4:3 |
 | `--persp` | texturas con corrección de perspectiva (PERSP. POLY); por defecto afines como el original |
 | `--sim SEG DIR` | simula `SEG` segundos; `DIR` = −1/0/1 (dirección fija), `auto` (IA) o `turbo` (recta con turbo) |
+| `--sim-ticks N DIR` | con `--shot`: ejecuta exactamente `N` ticks de 1/72 s; mismas opciones de dirección que `--sim` |
 | `--cam x y z yaw pitch` | cámara fija para `--shot` |
 | `--countdown` | con `--shot`: incluye la cuenta atrás de 5,56 s (la ventana siempre la hace) |
 | `--rear` | con `--shot`: fotograma con la vista trasera |
@@ -99,6 +100,7 @@ Pistas: `USA`, `CANADA`, `AUSTRIA`, `BRAZIL`, `CARIB`, `ICELAND`, `JAPAN`. La ru
 | `--ghost F.GST` | dibuja el fantasma (sin choques) en ventana y sin ventana; con `--sim` mide la desviación en x/z |
 
 Variables de entorno de depuración: `IGN_TRACE=1` (traza por tick y estadísticas de tramos y puertas),
+`IGN_TRACE=full` (estado inicial y cada tick, esquema de 98 campos con controles y precisión de 17 cifras),
 `IGN_TRACK_DUMP=archivo` (vuelca los tramos), `IGN_LIFT=u` (eleva el coche en el visor para ver la sombra) e
 `IGN_BANARNE=1` (carrocería alta en el visor).
 
@@ -129,6 +131,51 @@ Esto verifica **la rutina aislada, con x87 emulado y palabra de control `0x037f`
 En la comprobación del estado actual, `physics_original`, `gearbox` y `pos` pasan, pero la regresión general
 preexistente solo pasa **1/23** casos (divergencias de imágenes y de estado de carrera). No se han cambiado
 la física ni los resultados esperados para convertir esas diferencias en un éxito.
+
+### Diagnóstico de regresiones y conducción reproducible
+
+Se reconstruyó aisladamente la revisión `76bfca1`, que pasa **23/23** contra la instantánea histórica de
+`tests/expected.json`. La revisión `3213fd5e` y su compilación limpia Release con AppleClang 21 dan
+**1/23** con imágenes y **16/23** sin imágenes: **7 casos difieren en estado de carrera, 22 en imagen y
+ninguno falla al ejecutar**. Por tanto, no era un problema de objetos de compilación antiguos.
+Los casos con diferencias de estado son USA/CANADA/AUSTRIA con rivales y CARIB/JAPAN tanto solo como con rivales.
+
+Las siete trazas de 40 s con piloto automático y sin rivales ya difieren en altura/suelo tras el primer tick
+entre esas revisiones. Por ejemplo, BRAZIL pasa de `h=515,g=510` a `h=-505,g=-510`, e ICELAND de
+`h=706.2,g=701.2` a `h=-699.8,g=-704.8` (formato antiguo redondeado). Entre ambas revisiones cambiaron el
+signo Y de PLC, las consultas de suelo, el agarre, la IA y la presentación. El signo PLC tiene evidencia
+estática documentada en [formatos](docs/formats.md); no se ha atribuido cada diferencia a una única causa
+ni demostrado que la revisión histórica sea más fiel al original. **No se ha regenerado el baseline para
+ocultar los fallos.**
+
+El nuevo replay sin rivales pasa **21/21** escenarios: siete pistas con auto (2 880 ticks), recta
+(576 ticks) y turbo (576 ticks), coche 9 y dificultad 0. Compara dos procesos nuevos sin tolerancia en los
+98 campos muestreados, estado final e imagen: **56 448 ticks ejecutados**, más 42 estados iniciales.
+La comparación contra una segunda compilación Release hecha desde cero también pasa los **21/21** escenarios.
+El informe conserva argumentos, plataforma, hashes de ejecutables/fuentes/datos y capturas completas; rechaza
+esquemas incompletos, tiempos desalineados, valores no finitos, fallos de proceso y cambios de datos durante la prueba.
+
+```sh
+python3 tests/regress.py --binary build/ignition --report build/regression-report.json
+python3 tests/regress.py --binary build/ignition --no-images --report build/regression-state-report.json
+python3 tests/solo_replay.py --binary build/ignition --report build/solo-replay-report.json
+ctest --test-dir build -R '^(verification_tools|headless_trace_contract|solo_replay|gearbox|pos)$' --output-on-failure
+IGN_TRACE=full ./build/ignition USA --sim-ticks 576 turbo --rivals 0 --car 9 --shot /tmp/x.ppm
+```
+
+`--reference-binary` permite comparar otra compilación del port que admita el mismo esquema.
+`--sim` conserva su acumulación histórica de tiempo en `float`: por ejemplo, 8 s ejecutan 577 ticks.
+El replay usa `--sim-ticks` para no confundir ese redondeo con una divergencia física.
+Los tests sintéticos `verification_tools` comprueban también controles negativos del comparador y del informe.
+`headless_trace_contract` verifica los conteos exactos, rechaza argumentos inválidos y comprueba que activar
+las trazas no modifica el estado final ni la imagen. Pasan 14 controles sintéticos y 3 pruebas de contrato CLI;
+con el oracle original habilitado, CTest pasa 6/7 objetivos y solo falla la regresión histórica.
+Los informes y capturas se guardan en el directorio de compilación; no contienen una carrera DOS de referencia.
+
+**Esto establece determinismo del port en esos escenarios, no equivalencia con el juego DOS ni ausencia de
+atascos o errores de conducción.** La regresión histórica sigue fallando de forma visible.
+El siguiente límite verificable es `car_update`: controles, agarre y altura contra los bytes originales,
+antes de ampliar a colisiones y carreras reales en DOSBox-X.
 
 Ejemplos:
 
@@ -170,6 +217,8 @@ tests/regress.py        regresión determinista sin ventana (23 casos; `ctest --
 tests/gearbox.c         prueba unitaria de cambios manuales y marcha atrás (`ctest --test-dir build -R gearbox`)
 tests/body_step.c       ejecuta la física C para el verificador diferencial
 tests/physics_original.py replay aislado del integrador LE contra el port, con Unicorn opcional
+tests/solo_replay.py    replay sin rivales, exacto por tick, con informe de procedencia (solo port)
+tests/test_verification.py controles positivos y negativos de las herramientas de verificación
 tools/ignassets.py      PIC/COL/TEX/DAT/nivel → PNG
 tools/gst.py            fantasmas GST: cabecera, validación, tiempos por vuelta y trayectoria sobre la pista
 tools/symbols.txt       símbolos identificados (funciones, globales, tablas)
@@ -473,7 +522,11 @@ implementado.
       `library` automático) y un informe automático de cobertura (`disasm.py coverage`).
 - [x] **P2** Pruebas de regresión deterministas: `tests/regress.py` (23 casos: 7 pistas solo, con 3 rivales y con turbo,
       visor y cámara de parrilla; sección, fase, vuelta, NaN y hash del framebuffer; `ctest --test-dir build`).
-      Los resultados esperados son una instantánea del estado actual (incluye el atasco de CANADA en la sección 22).
+      Los resultados esperados son una instantánea histórica, reproducida por `76bfca1`, no del estado actual
+      (incluye el atasco de CANADA en la sección 22). `3213fd5e` pasa 1/23 con imagen y 16/23 sin ella;
+      el informe separa ejecución, estado e imagen y no oculta esos fallos.
+- [x] **P2** Conducción sin rivales reproducible: `tests/solo_replay.py`, 21 escenarios / 56 448 ticks
+      entre dos ejecuciones, 98 campos por fila y controles negativos. Prueba del port, no fidelidad DOS.
 - [~] **P3** Trazas de ejecución del original en DOSBox-X: hecho `tools/trace_compare.py`; DOSBox-X 2026.10.01 está
       instalado; se confirmó la entrada MZ de `MAINDOS.EXE` y que DOS lo mantiene cargado, pero tras reanudar solo se
       observó el bucle de espera de BIOS. Aún falta llegar a carrera, validar el mapeo LE, el muestreo por tick y la

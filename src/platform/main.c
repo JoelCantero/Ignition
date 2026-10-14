@@ -1,5 +1,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -239,6 +241,39 @@ static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     ign_hud_draw(&hud, &frame, car, &race, nrivals + 1);
 }
 
+static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
+    fprintf(stderr, "t=%.17g tick=%d trace_schema=1", tick * IGN_PHYS_DT, tick);
+#define CAR_FIELD(field) fprintf(stderr, " " #field "=%.17g", (double)car->field)
+#define BODY_FIELD(field) fprintf(stderr, " b_" #field "=%.17g", (double)car->body.field)
+#define INPUT_FIELD(field) fprintf(stderr, " in_" #field "=%d", (int)in->field)
+    INPUT_FIELD(accel); INPUT_FIELD(brake); INPUT_FIELD(left); INPUT_FIELD(right); INPUT_FIELD(turbo);
+    INPUT_FIELD(analog); INPUT_FIELD(a_accel); INPUT_FIELD(a_brake); INPUT_FIELD(a_steer);
+    INPUT_FIELD(manual_gear); INPUT_FIELD(gear_shift);
+    CAR_FIELD(id); CAR_FIELD(spec); CAR_FIELD(x); CAR_FIELD(y); CAR_FIELD(z); CAR_FIELD(heading);
+    CAR_FIELD(kmh); CAR_FIELD(height); CAR_FIELD(ground); CAR_FIELD(ground_prev); CAR_FIELD(fall_speed);
+    CAR_FIELD(airborne); CAR_FIELD(ground_object); CAR_FIELD(surface_type); CAR_FIELD(special_ground);
+    CAR_FIELD(level_change); CAR_FIELD(jump_mode); CAR_FIELD(wall_hit); CAR_FIELD(wall_impact); CAR_FIELD(nwalls);
+    CAR_FIELD(gear); CAR_FIELD(forward_gear); CAR_FIELD(steer_visual); CAR_FIELD(revs);
+    CAR_FIELD(turbo_charge); CAR_FIELD(turbo_mode); CAR_FIELD(turbo_wait); CAR_FIELD(turbo_key);
+    CAR_FIELD(creep); CAR_FIELD(creep_ticks); CAR_FIELD(catchup); CAR_FIELD(catchup_clock);
+    CAR_FIELD(section); CAR_FIELD(phase); CAR_FIELD(lap); CAR_FIELD(position);
+    CAR_FIELD(out); CAR_FIELD(wrecked); CAR_FIELD(wrecks); CAR_FIELD(wreck_kind); CAR_FIELD(wreck_frame);
+    CAR_FIELD(landed); CAR_FIELD(offroad); CAR_FIELD(step_x); CAR_FIELD(step_z);
+    BODY_FIELD(mass); BODY_FIELD(inertia); BODY_FIELD(restitution); BODY_FIELD(a); BODY_FIELD(b);
+    BODY_FIELD(heading); BODY_FIELD(yaw_rate); BODY_FIELD(px); BODY_FIELD(pz);
+    BODY_FIELD(vx); BODY_FIELD(vz); BODY_FIELD(v_fwd); BODY_FIELD(v_lat); BODY_FIELD(saturated);
+    BODY_FIELD(steer); BODY_FIELD(pitch); BODY_FIELD(roll); BODY_FIELD(grip_f); BODY_FIELD(grip_r);
+    BODY_FIELD(sliding); BODY_FIELD(drive); BODY_FIELD(fmax_f); BODY_FIELD(fmax_r);
+    BODY_FIELD(radius); BODY_FIELD(impact); BODY_FIELD(contact_x); BODY_FIELD(contact_z);
+    for (int i = 0; i < 4; i++)
+        fprintf(stderr, " wheel_type%d=%d b_corner_x%d=%.17g b_corner_z%d=%.17g",
+                i, car->wheel_type[i], i, car->body.corner_x[i], i, car->body.corner_z[i]);
+#undef CAR_FIELD
+#undef BODY_FIELD
+#undef INPUT_FIELD
+    fputc('\n', stderr);
+}
+
 int main(int argc, char **argv) {
     const char *data_dir = getenv("IGNITION_DATA");
     if (!data_dir) data_dir = DEFAULT_DATA_DIR;
@@ -246,6 +281,7 @@ int main(int argc, char **argv) {
     const char *shot = NULL;
     float sim_seconds = 0.0f, sim_steer = 0.0f;
     int autopilot = 0, want_rivals = -1, sim_turbo = 0, race_mode = 0, countdown = 0, rear_view = 0, car_id = -1;
+    int sim_ticks = -1;
     IgnCamera cam = {0};
     int fixed_cam = 0;
     const char *ghost_out = NULL, *ghost_in = NULL;
@@ -286,12 +322,29 @@ int main(int argc, char **argv) {
             }
             ign_free_level(&pl);
             return 0;
-        } else if (!strcmp(argv[i], "--sim") && i + 2 < argc) {
-            sim_seconds = strtof(argv[++i], NULL);
+        } else if ((!strcmp(argv[i], "--sim") || !strcmp(argv[i], "--sim-ticks")) && i + 2 < argc) {
+            int exact_ticks = !strcmp(argv[i], "--sim-ticks");
+            if (exact_ticks) {
+                char *end;
+                errno = 0;
+                long n = strtol(argv[++i], &end, 10);
+                if (errno || end == argv[i] || *end || n < 0 || n > INT_MAX) {
+                    fprintf(stderr, "--sim-ticks expects an integer from 0 to %d\n", INT_MAX);
+                    return 1;
+                }
+                sim_ticks = (int)n;
+                sim_seconds = (float)(sim_ticks * IGN_PHYS_DT);
+            } else {
+                sim_seconds = strtof(argv[++i], NULL);
+                sim_ticks = -1;
+            }
             i++;
             autopilot = !strcmp(argv[i], "auto");
             sim_turbo = !strcmp(argv[i], "turbo");
             sim_steer = autopilot || sim_turbo ? 0 : strtof(argv[i], NULL);
+        } else if (!strcmp(argv[i], "--sim-ticks")) {
+            fprintf(stderr, "--sim-ticks requires N and DIR\n");
+            return 1;
         } else if (!strcmp(argv[i], "--difficulty") && i + 1 < argc) {
             ign_set_difficulty(atoi(argv[++i]));
         } else if (!strcmp(argv[i], "--car") && i + 1 < argc) {
@@ -337,6 +390,10 @@ int main(int argc, char **argv) {
             level = argv[i];
     }
 
+    if (sim_ticks >= 0 && !shot) {
+        fprintf(stderr, "--sim-ticks requires --shot\n");
+        return 1;
+    }
     IgnLevel lv;
     if (ign_load_level(data_dir, level, &lv)) {
         fprintf(stderr, "cannot load level %s from %s\n", level, data_dir);
@@ -427,6 +484,8 @@ int main(int argc, char **argv) {
     }
 
     if (shot) {
+        const char *trace = getenv("IGN_TRACE");
+        int full_trace = trace && !strcmp(trace, "full"), trace_tick = 0;
         IgnInput in = {.accel = sim_seconds > 0, .left = sim_steer < 0, .right = sim_steer > 0,
                        .turbo = sim_turbo};
         int hits = 0, air = 0, car_hits = 0;
@@ -435,7 +494,12 @@ int main(int argc, char **argv) {
         int pos_ticks = 0;
         double dev_sum = 0, dev_max = 0;
         if (ghost_out) ign_ghost_begin(&rec, car.id, track_id, "PL1");
-        for (float t = 0; t < sim_seconds; t += SIM_DT) {
+        if (full_trace) {
+            IgnInput initial = {0};
+            trace_car(0, &car, &initial);
+        }
+        float t = 0;
+        for (int step = 0; sim_ticks >= 0 ? step < sim_ticks : t < sim_seconds; step++, t += SIM_DT) {
             if (autopilot) {
                 if (ign_race_started(&race) || race.clock > IGN_RACE_AI_WAKE) ign_ai_drive(&player_ai, &car, &track, &in);
                 else in = (IgnInput){0};
@@ -449,6 +513,7 @@ int main(int argc, char **argv) {
                 ign_pos_step(&lv.pos, &lv.track);
                 pos_ticks = 0;
             }
+            if (full_trace) trace_car(++trace_tick, &car, &in);
             if (!ign_race_started(&race)) continue;
             if (ghost_out && !car.out) ign_ghost_record(&rec, &car, track.count);
             if (ghost_in && ticks < IGN_GHOST_SAMPLES) {
@@ -459,7 +524,7 @@ int main(int argc, char **argv) {
             ticks++;
             hits += car.wall_hit;
             air += car.airborne;
-            if (getenv("IGN_TRACE"))
+            if (trace && !full_trace)
                 fprintf(stderr, "t=%.3f x=%.0f z=%.0f h=%.1f g=%.1f v=%.2f air=%d type=0x%x drive=%.0f/%.0f turbo=%d/%.0f kmh=%.0f\n",
                         t, car.x, car.z, car.height, car.ground, car.fall_speed, car.airborne,
                         car.surface_type, car.body.drive, car.body.fmax_f, car.turbo_mode,

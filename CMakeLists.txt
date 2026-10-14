@@ -46,7 +46,15 @@ add_custom_target(elf
 
 # Deterministic headless regression (needs the game data); run with `ctest --test-dir build`.
 enable_testing()
-add_test(NAME regress COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/regress.py --binary $<TARGET_FILE:ignition>)
+add_test(NAME regress COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/regress.py
+  --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}"
+  --report ${CMAKE_BINARY_DIR}/regression-report.json)
+add_test(NAME verification_tools COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/test_verification.py)
+add_test(NAME headless_trace_contract COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/test_verification.py
+  --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}" HeadlessTests)
+add_test(NAME solo_replay COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/solo_replay.py
+  --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}"
+  --report ${CMAKE_BINARY_DIR}/solo-replay-report.json)
 add_executable(gearbox_test tests/gearbox.c)
 target_link_libraries(gearbox_test PRIVATE ignition_core)
 add_test(NAME gearbox COMMAND gearbox_test)

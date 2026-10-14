@@ -16,6 +16,30 @@ IGN_TRACE=1 ./build/ignition USA --sim 20 auto --rivals 0 --shot /tmp/x.ppm 2>&1
 ```
 
 This records one row per 1/72-second simulation tick, with `t`, `x`, `z`, heading, forward speed and `kmh`.
+The legacy row labelled `t=0` is already the state **after** the first tick, with rounded values.
+Do not align it with an initial-state sample from the original.
+
+For precision and repeatable durations, use:
+
+```sh
+IGN_TRACE=full ./build/ignition USA --sim-ticks 1440 auto --rivals 0 --shot /tmp/x.ppm \
+  2> build/port-full.txt
+```
+
+Full schema version 1 has 98 numeric fields: controls, sampled car/body state and four wheel/corner entries.
+It emits an initial row (`tick=0,t=0`), followed by one row after each complete update, at 17-digit precision.
+Tick `n` has timestamp `n/72`; countdown updates are included when requested. This is not a dump of all game
+memory, nor a verified original-game sampling boundary. `--sim-ticks` executes an integer tick count;
+the legacy `--sim` still accumulates `float` time and may execute an extra tick (577 at 8 seconds).
+
+`tests/solo_replay.py` checks the exact schema, tick count and equality between two fresh port processes;
+its JSON report and retained captures carry port-only authority. `--reference-binary` accepts another port build
+with the same schema. A mismatch does not establish which build matches DOS.
+
+`tools/trace_compare.py --all-fields` compares all fields present in matching schemas. Unspecified tolerances
+are zero, but its default `x=2 z=2 kmh=1` still applies; use `--tol x=0 z=0 kmh=0` for exact equality.
+Missing fields, unequal lengths, non-finite numbers and misaligned timestamps/ticks fail. Legacy compound
+`drive=force/limit` and `turbo=mode/charge` values are retained as separate numeric fields.
 
 ## Required original-side capture work
 
