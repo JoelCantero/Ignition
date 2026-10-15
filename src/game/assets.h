@@ -47,7 +47,23 @@ typedef struct {
     int nobj;
     IgnObject *objs;
     uint8_t *plc, *msh;
+    /* Engine object grid (256-unit cells, 200 x 200, [0x24c048]): each cell chains its objects from the last one
+     * placed or moved into it (LI_PLACEOBJECT / LI_MOVEOBJECT insert at the head). Track model only. */
+    int32_t *cell;    /* per object: z cell * 200 + x cell, engine coordinates */
+    uint32_t *stamp;  /* per object: insertion order into its cell */
+    uint32_t clock;
 } IgnModel;
+
+#define IGN_ENGINE_GRID 200
+
+/* World creation 0x2489c: objects of class < 100 are placed first, then the rest, both in PLC order. */
+int ign_engine_place(IgnModel *m);
+/* LI_MOVEOBJECT 0x56d24: an object whose cell changed goes to the head of its new cell. */
+void ign_engine_moved(IgnModel *m, int obj);
+/* sub_00058c1c with the view of sub_0003383c (850, 0): objects of the cells of the original fixed pattern around
+ * engine (x, z), cell by cell, each cell from its head. With `layer` != 0 only objects of layer 0 or `layer` (PLC
+ * type bits 12-15, [0x24bff0]). Returns the count written to `out`. */
+int ign_engine_view(const IgnModel *m, int32_t x, int32_t z, int layer, int *out, int max);
 
 typedef struct {
     uint8_t *data;

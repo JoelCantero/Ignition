@@ -11,7 +11,7 @@ void ign_pos_free(IgnPos *pos);
 /* pos_apply_frame 0x412e8: advances each animated PLC object's pose by one frame. */
 void ign_pos_step(IgnPos *pos, IgnModel *model);
 
-/* Collision objects (world creation 0x24f22, list [0x1fefc0] of 0x98-byte records, count [0x1feeb4]): PLC types
+/* Collision objects (world creation 0x24f22, list [0x1fefc0] of 0x98-byte records, count [0x1feeb4]): PLC classes
  * 0x96-0xc7 that a car knocks flying. Positions in engine coordinates (x/z + IGN_SRF_ORIGIN, height up). */
 #define IGN_MAX_COLL_OBJS 128
 
@@ -52,7 +52,7 @@ void ign_coll_reflect(const double n[3], double v[3]);
 /* 0x35967: height (up) of the query's plane at engine (x, z). */
 double ign_coll_ground_up(const IgnGroundHit *hit, double x, double z);
 
-/* Special objects, PLC types 0x12c-0x15d (list 0x1fef58, world creation 0x255cb). car_update 0x30dbb-0x31303 acts on
+/* Special objects, PLC classes 0x12c-0x15d (list 0x1fef58, world creation 0x255cb). car_update 0x30dbb-0x31303 acts on
  * [esp+0x288]: */
 enum {
     IGN_SPECIAL_NONE,
@@ -60,15 +60,15 @@ enum {
     IGN_SPECIAL_PUSH,   /* 0x12e: thrown up and spun */
     IGN_SPECIAL_MESH    /* 0x12f: flattened (sub_00031858) */
 };
-/* sub_0003383c: integer arguments in engine coordinates (x/z + IGN_SRF_ORIGIN, height up). Among the objects of type
- * 0x12c-0x15d (low 16 bits) the last one with a face over (x, z) within 600 in x and z (900 in jump mode) once one of
- * them has been within 190 in height; returns its type or -1. Vertices are the mesh's plus the object's current
- * position (POS), without rotation. */
-int ign_special_query(const IgnLevel *lv, int32_t x, int32_t y, int32_t z, int jump);
+/* sub_0003383c: integer arguments in engine coordinates (x/z + IGN_SRF_ORIGIN, height up). Over the engine's view list
+ * (ign_engine_view, `layer` as [0x24bff0]), among the objects of class 0x12c-0x15d the last one with a face over (x, z)
+ * within 600 in x and z (900 in jump mode) once one of them has been within 190 in height; returns its class or -1.
+ * Vertices are the mesh's plus the object's current position (POS), without rotation. */
+int ign_special_query(const IgnLevel *lv, int32_t x, int32_t y, int32_t z, int jump, int layer);
 /* car_update 0x2f01f-0x2f2be (first corner probe): for each special object within 200 in x and z of the car, ICELAND's
  * 0x12c objects explode a car within 30 in x, height and z (*wreck = 1); otherwise sub_0003383c under the car decides:
  * 0x12c explosion, 0x130 slide (*wreck = 3), 0x12d/0x131/0x12e/0x12f as above. Returns IGN_SPECIAL_*. */
-int ign_special_probe(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car, int iceland, int *wreck);
+int ign_special_probe(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car, int iceland, int layer, int *wreck);
 /* car_update 0x31303/0x31687 after ign_car_flat_tick: COLL 6 (flattened) / 7 (restored) at the car, and while
  * flattened a SMOKE puff one tick in six. */
 void ign_car_flat_effects(IgnCar *car, IgnFx *fx, float focus_x, float focus_z);

@@ -194,7 +194,7 @@ class Original:
             self.put(pool, "I", pool)
             self.put(pool + 4, "I", mesh)
             self.put(pool + 0xC, "3i", ox, oy, oz)
-            self.put(pool + 0x1C, "I", (otype & 0xFFFF) << 16)
+            self.put(pool + 0x1C, "I", (otype & 0xFFF) << 16)  # split_plc_types leaves the class
             self.put(mesh, "2i", len(verts) // 3, len(faces))
             self.put(mesh + 8, "%di" % len(verts), *verts)
             face_base = mesh + 8 + 4 * len(verts)

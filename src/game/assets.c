@@ -131,7 +131,68 @@ done:
     return rc;
 }
 
+static int32_t engine_cell(const IgnObject *o) {
+    int32_t x = o->pos[0] + IGN_SRF_ORIGIN, z = o->pos[2] + IGN_SRF_ORIGIN;
+    return (z / 256) * IGN_ENGINE_GRID + x / 256; /* sar with rounding toward zero */
+}
+
+int ign_engine_place(IgnModel *m) {
+    free(m->cell), free(m->stamp);
+    m->cell = malloc(sizeof *m->cell * (size_t)(m->nobj ? m->nobj : 1));
+    m->stamp = malloc(sizeof *m->stamp * (size_t)(m->nobj ? m->nobj : 1));
+    if (!m->cell || !m->stamp) return -1;
+    m->clock = 0;
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; i < m->nobj; i++)
+            if (((m->objs[i].type & 0xfff) < 100) == (pass == 0))
+                m->cell[i] = engine_cell(&m->objs[i]), m->stamp[i] = ++m->clock;
+    return 0;
+}
+
+void ign_engine_moved(IgnModel *m, int obj) {
+    if (!m->cell) return;
+    int32_t c = engine_cell(&m->objs[obj]);
+    if (c != m->cell[obj]) m->cell[obj] = c, m->stamp[obj] = ++m->clock;
+}
+
+/* 0xc5d8c: +1/+2 row and column of the first row, then (cells, next row shift) pairs until -5000. With the view
+ * (850 x 0.01, 0) the table 0xc5e40 adds one row. */
+static const int16_t VIEW_ROWS[] = {
+    8, -10, 12, -13, 14, -15, 16, -17, 18, -18, 18, -19, 20, -20, 19, -19, 19, -19, 19, -19, 19, -19, 19, -19, 19,
+    -19, 19, -18, 17, -17, 16, -15, 14, -13, 12, -11, 10, -8, 2
+};
+
+int ign_engine_view(const IgnModel *m, int32_t x, int32_t z, int layer, int *out, int max) {
+    if (!m->cell) return 0;
+    int n = 0;
+    int32_t at = (z / 256 - 10 + 1) * IGN_ENGINE_GRID + x / 256 - 4;
+    size_t nrows = sizeof VIEW_ROWS / sizeof VIEW_ROWS[0];
+    for (size_t r = 0; r < nrows; r += 2) {
+        for (int k = 0; k < VIEW_ROWS[r]; k++) {
+            at++;
+            if (at < 0 || at >= IGN_ENGINE_GRID * IGN_ENGINE_GRID) continue;
+            /* The cell's chain: most recent insertion first. */
+            int first = n;
+            for (int i = 0; i < m->nobj; i++) {
+                if (m->cell[i] != at) continue;
+                int l = (int)((m->objs[i].type >> 12) & 0xf);
+                if (layer && l && l != layer) continue;
+                if (n < max) out[n++] = i;
+            }
+            for (int a = first + 1; a < n; a++)
+                for (int b = a; b > first && m->stamp[out[b]] > m->stamp[out[b - 1]]; b--) {
+                    int t = out[b];
+                    out[b] = out[b - 1], out[b - 1] = t;
+                }
+        }
+        if (r + 1 < nrows) at += IGN_ENGINE_GRID + VIEW_ROWS[r + 1];
+    }
+    return n;
+}
+
 void ign_free_model(IgnModel *m) {
+    free(m->cell);
+    free(m->stamp);
     free(m->tex);
     free(m->plc);
     free(m->msh);
@@ -234,6 +295,7 @@ int ign_load_level(const char *data_dir, const char *name, IgnLevel *out) {
     if (!col_data || ign_parse_col(col_data, col_size, &out->palette)) goto done;
     if (ign_load_pic(pic, &out->backdrop)) goto done;
     if (ign_load_model(plc, msh, tex, &out->track)) goto done;
+    if (ign_engine_place(&out->track)) goto done;
     if (ign_pos_load(pos, out->track.nobj, &out->pos)) {
         fprintf(stderr, "invalid or unreadable POS animation file %s\n", pos);
         goto done;

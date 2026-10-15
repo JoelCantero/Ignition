@@ -113,11 +113,11 @@ int main(int argc, char **argv) {
         for (int step = 0; step < 2; step++) {
             for (int i = 0; i < lv.track.nobj; i++) {
                 const IgnObject *o = &lv.track.objs[i];
-                int type = (int)(int16_t)(o->type & 0xffff);
+                int type = (int)(o->type & 0xfff);
                 int32_t c[3];
                 if (type < 0x12c || type >= 0x15e || face_centre(o, c)) continue;
                 specials++;
-                int q = ign_special_query(&lv, c[0], -o->pos[1], c[2], 0);
+                int q = ign_special_query(&lv, c[0], -o->pos[1], c[2], 0, 0);
                 found += q >= 0x12c && q < 0x15e;
             }
             for (int f = 0; f < 200; f++) ign_pos_step(&lv.pos, &lv.track);

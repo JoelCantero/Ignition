@@ -127,9 +127,14 @@ static int spectate(IgnCar *const *all, int n) {
 }
 
 /* car_update 0x2f01f / 0x30dbb: the special objects (0x12c-0x15d) under a car, before its tick. Track 5 is ICELAND. */
-static void special_tick(IgnCar *c, const IgnLevel *lv) {
+static void special_tick(IgnCar *c, const IgnLevel *lv, const IgnTrack *t) {
     if (c->wrecked) return;
-    int wreck, special = ign_special_probe(lv, &fx, c, track_id == 5, &wreck);
+    /* cars_update_all 0x2d685: [0x24bff0] = layer (PLC type bits 12-15) of the car's section object, until 120
+     * frames after the player's finish. */
+    int layer = 0, obj = ign_track_section_object(t, c->section);
+    if (obj >= 0 && obj < lv->track.nobj && !(player_car->out && finish_clock >= 120.0))
+        layer = (int)((lv->track.objs[obj].type >> 12) & 0xf);
+    int wreck, special = ign_special_probe(lv, &fx, c, track_id == 5, layer, &wreck);
     ign_special_apply(c, special, wreck, &fx, c->x, c->z);
     /* car_update 0x31316: the flattened state of sub_00031858. */
     IgnCar *all[MAX_RIVALS + 1];
@@ -164,7 +169,7 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_ai_set_cars(all, nrivals + 1);
     for (int i = 0; i < nrivals; i++) {
-        special_tick(&rivals[i], lv);
+        special_tick(&rivals[i], lv, t);
         if (!rivals[i].wrecked) {
             ign_car_tick(&rivals[i], lv, NULL);
             ign_race_progress(&race, &rivals[i], t);
@@ -584,7 +589,7 @@ int main(int argc, char **argv) {
         }
         float t = 0;
         for (int step = 0; sim_ticks >= 0 ? step < sim_ticks : t < sim_seconds; step++, t += SIM_DT) {
-            special_tick(&car, &lv);
+            special_tick(&car, &lv, &track);
             if (!car.wrecked) {
                 IgnInput steered = human_steer(&car, in);
                 if (!autopilot && car.progress_lock != 1) player_ai.input = steered;
@@ -745,7 +750,7 @@ int main(int argc, char **argv) {
                 IgnInput tick_input = human_steer(&car, in);
                 tick_input.gear_shift = pending_gear_shift;
                 pending_gear_shift = 0;
-                special_tick(&car, &lv);
+                special_tick(&car, &lv, &track);
                 if (!car.wrecked) {
                     if (car.progress_lock != 1) player_ai.input = tick_input;
                     ign_car_tick(&car, &lv, car.progress_lock == 1 ? NULL : &tick_input);

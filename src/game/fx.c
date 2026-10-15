@@ -500,7 +500,7 @@ void ign_fx_landing_dust(IgnFx *fx, const IgnCar *car, float focus_x, float focu
 void ign_fx_emitters_init(IgnFx *fx, const IgnLevel *lv) {
     fx->nemit = 0;
     for (int i = 0; i < lv->track.nobj && fx->nemit < IGN_FX_MAX_EMITTERS; i++) {
-        uint32_t t = lv->track.objs[i].type;
+        uint32_t t = lv->track.objs[i].type & 0xfff; /* split_plc_types 0x247b0: the class */
         if (t == 0x12e || t == 0x130 || t == 0x131 || (t >= 0x15e && t < 0x168))
             fx->emit[fx->nemit++] = (IgnEmitter){i, (int)t, 0, 0};
     }

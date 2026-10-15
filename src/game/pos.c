@@ -90,6 +90,7 @@ void ign_pos_step(IgnPos *pos, IgnModel *model) {
         IgnObject *o = &model->objs[i];
         for (int k = 0; k < 3; k++)
             o->pos[k] = (int32_t)((uint32_t)o->pos[k] - rd32(frame + (size_t)k * 4));
+        ign_engine_moved(model, i);
         for (int k = 0; k < 3; k++) {
             int32_t angle = rdi32(frame + 12 + (size_t)k * 4);
             o->rotation[k] = angle >= 3600 ? angle - 3600 : angle;
@@ -106,15 +107,17 @@ int ign_coll_init(IgnCollObjs *c, IgnModel *track) {
     int phase = 0;
     for (int i = 0; i < track->nobj && c->n < IGN_MAX_COLL_OBJS; i++) {
         const IgnObject *src = &track->objs[i];
-        if (src->type < 0x96 || src->type >= 0xc8) continue;
+        /* split_plc_types 0x247b0 runs first: the world sees the class, type & 0xfff. */
+        uint32_t klass = src->type & 0xfff;
+        if (klass < 0x96 || klass >= 0xc8) continue;
         IgnCollObj *o = &c->o[c->n++];
-        o->kind = (int)src->type - 0x96;
+        o->kind = (int)klass - 0x96;
         o->obj = i;
         o->pos[0] = src->pos[0] + IGN_SRF_ORIGIN;
         o->pos[1] = -src->pos[1];
         o->pos[2] = src->pos[2] + IGN_SRF_ORIGIN;
         /* 0x25105: mass and inertia by type; the lights share a phase counter stepping 4 frames per object. */
-        switch (src->type) {
+        switch (klass) {
         case 0x96: case 0x9a:
             o->mass = 0.3f, o->inertia = 100.0f, o->period = 30;
             o->frame = (float)phase;
@@ -258,6 +261,7 @@ void ign_coll_frame(IgnCollObjs *c, const IgnLevel *lv, IgnCar *const *cars, int
             e->pos[1] = -(int32_t)trunc(o->pos[1]);
             e->pos[2] = (int32_t)trunc(o->pos[2]) - IGN_SRF_ORIGIN;
             for (int a = 0; a < 3; a++) e->rotation[a] = (int32_t)trunc(o->ang[a]);
+            ign_engine_moved(c->track, o->obj);
         }
         if (o->kind != 4) continue;
         /* 0x35d7a: the light shows during the first fifth of its period (LIGHT.TEX frames 0, 2, 4), 2 frames each. */
@@ -290,14 +294,17 @@ static int face_covers(const int32_t *v0, const int32_t *v1, const int32_t *v2, 
     return inside;
 }
 
-int ign_special_query(const IgnLevel *lv, int32_t x, int32_t y, int32_t z, int jump) {
+int ign_special_query(const IgnLevel *lv, int32_t x, int32_t y, int32_t z, int jump, int layer) {
     int32_t reach = jump ? 900 : 600;
     int near_height = 0, found = -1;
-    /* The original walks the engine's object list after sub_00058c1c (a view from 500 above the car); the port takes
-     * every PLC object in order. */
-    for (int i = 0; i < lv->track.nobj; i++) {
+    /* The engine's object list after sub_00058c1c: the view's cells around the car; without the grid (synthetic
+     * levels) every object in PLC order. */
+    static int list[8192];
+    int n = lv->track.cell ? ign_engine_view(&lv->track, x, z, layer, list, 8192) : lv->track.nobj;
+    for (int k = 0; k < n; k++) {
+        int i = lv->track.cell ? list[k] : k;
         const IgnObject *o = &lv->track.objs[i];
-        int type = (int)(int16_t)(o->type & 0xffff);
+        int type = (int)(o->type & 0xfff); /* word +0x1e: the class */
         if (type < 0x12c || type >= 0x15e) continue;
         int32_t dx = x - (o->pos[0] + IGN_SRF_ORIGIN), dy = y + o->pos[1], dz = z - (o->pos[2] + IGN_SRF_ORIGIN);
         if (abs(dy) < 190) near_height = 1; /* 0x339d0: never cleared for the following objects */
@@ -325,23 +332,24 @@ static int erupting_geyser(const IgnLevel *lv, const IgnFx *fx, const IgnCar *ca
     return 0;
 }
 
-int ign_special_probe(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car, int iceland, int *wreck) {
+int ign_special_probe(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car, int iceland, int layer, int *wreck) {
     *wreck = 0;
     double cx = car->body.px * IGN_WORLD_PER_METRE, cz = car->body.pz * IGN_WORLD_PER_METRE;
     int type = -1;
     for (int i = 0; i < lv->track.nobj; i++) {
         const IgnObject *o = &lv->track.objs[i];
-        if (o->type < 0x12c || o->type >= 0x15e) continue;
+        uint32_t klass = o->type & 0xfff;
+        if (klass < 0x12c || klass >= 0x15e) continue;
         double dx = cx - o->pos[0], dz = cz - o->pos[2];
         if (!(fabs(dx) < 200.0) || !(fabs(dz) < 200.0)) continue;
-        if (iceland && o->type == 0x12c) {
+        if (iceland && klass == 0x12c) {
             /* 0x2f0cd: the 0x12c objects of ICELAND explode a car within 30. */
             if (fabs(dx) < 30.0 && fabs(car->height + o->pos[1]) < 30.0 && fabs(dz) < 30.0) *wreck = 1;
             continue;
         }
         /* 0x2f124: the query does not depend on the entry, so one call answers for all of them. */
         type = ign_special_query(lv, (int32_t)trunc(cx + IGN_SRF_ORIGIN), (int32_t)trunc(car->height),
-                                 (int32_t)trunc(cz + IGN_SRF_ORIGIN), car->jump_mode);
+                                 (int32_t)trunc(cz + IGN_SRF_ORIGIN), car->jump_mode, layer);
         if (type < 0x12c && iceland) continue;
         break;
     }
@@ -439,7 +447,7 @@ int ign_texanim_init(IgnTexAnims *t, IgnModel *track, int period) {
     t->period = period;
     for (int i = 0; i < track->nobj; i++) {
         const IgnObject *src = &track->objs[i];
-        if (src->type != 0xfa) continue;
+        if ((src->type & 0xfff) != 0xfa) continue; /* after split_plc_types: the class */
         int n = 0;
         while (n < src->nf && textured(&src->faces[n])) n++;
         if (n == 0) continue; /* 0x106d0: nothing kept */
