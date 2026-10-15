@@ -414,6 +414,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "cannot load level %s from %s\n", level, data_dir);
         return 1;
     }
+    ign_render_set_level_dir(data_dir, level);
 
     /* Start on the class-0 object facing the class-1 object, as sub_00028f08 walks the track. */
     IgnTrack track;

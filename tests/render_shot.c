@@ -18,6 +18,7 @@ int main(int argc, char **argv) {
     }
     static IgnLevel lv;
     if (ign_load_level(argv[1], argv[2], &lv)) return 1;
+    ign_render_set_level_dir(argv[1], argv[2]);
     int w = 0, h = 0;
     if (sscanf(argv[3], "%dx%d", &w, &h) != 2) return 2;
     ign_frame_init(&frame, w, h);
@@ -36,8 +37,9 @@ int main(int argc, char **argv) {
             const LisaPrim *p = &built->prims[built->order[i]];
             fprintf(t, "%x", p->type);
             for (int k = 0; k < 6; k++) fprintf(t, " %d", p->xy[k]);
-            if (p->type == 0x14) fprintf(t, " L %d %d %d", p->light[0], p->light[1], p->light[2]);
-            fprintf(t, "\n");
+            if (p->type == 0x14 || p->type == 0x15) fprintf(t, " L %d %d %d", p->light[0], p->light[1], p->light[2]);
+            fprintf(t, " P %d T %d\n", (int)((p->tex - lv.track.tex) >> 16),
+                    !p->lut ? 0 : p->lut == lv.shd ? 2 : 1);
         }
         fclose(t);
         if (getenv("IGN_VIS"))

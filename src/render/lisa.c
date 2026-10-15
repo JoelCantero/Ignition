@@ -285,10 +285,8 @@ static LisaPrim *new_prim(LisaFrame *f) { return f->nprim < LISA_MAX_PRIMS ? &f-
 
 /* Bucket insertion of the handlers: objects of class >= 100 move 92 buckets nearer (84 for class 210). */
 static void bucket(LisaFrame *f, const LisaObject *o, int32_t key) {
-    if (o->klass >= 100) {
-        key -= o->klass == 210 ? 84 : 92;
-        if (key < 0) key = 0;
-    }
+    if (o->klass >= 100) key -= o->klass == 210 ? 84 : 92;
+    if (key < 0) key = 0;
     if (key >= LISA_BUCKETS) key = LISA_BUCKETS - 1;
     f->next[f->nprim] = f->head[key];
     f->head[key] = f->nprim++;
@@ -302,9 +300,10 @@ static const uint8_t *face_page(const LisaObject *o, uint32_t word) {
 
 /* sub_0005c144 (face type 17, no MIP levels): trivial reject against the clip box, back faces culled on the
  * 1/16-pixel cross product, faces with z0 + z1 + z2 <= 600 (4 z) dropped. Near faces (bucket <= 720) of road
- * classes (< 100, 200, 300-302) become primitive 0x14 with the vertex depth as light, the spread around the mean
- * faded out between buckets 480 and 720; the rest primitive 0x11. */
-static void face_tex(Ctx *c, const LisaObject *o, const LisaVert *vb, const int32_t *face) {
+ * classes (< 100, 200, 300-302) become the perspective primitive 0x14 with the vertex depth (4 z) as weight, its
+ * spread around the mean faded out between buckets 480 and 720; the rest the affine primitive 0x11.
+ * sub_0005e358 (type 21) is the same handler with every face 80 buckets nearer (decals over other faces). */
+static void face_tex(Ctx *c, const LisaObject *o, const LisaVert *vb, const int32_t *face, int bias) {
     const LisaView *v = c->v;
     LisaFrame *f = c->f;
     const LisaVert *a = &vb[face[1]], *b = &vb[face[2]], *d = &vb[face[3]];
@@ -327,7 +326,7 @@ static void face_tex(Ctx *c, const LisaObject *o, const LisaVert *vb, const int3
     int32_t key = zsum >> 4;
     const uint8_t *tex = face_page(o, (uint32_t)face[10]);
     int k = o->klass;
-    if (key > 720 || !(k < 100 || k == 200 || (k >= 300 && k <= 302))) {
+    if (!v->persp || key > 720 || !(k < 100 || k == 200 || (k >= 300 && k <= 302))) {
         p->type = 0x11;
         p->xy[0] = a->x, p->xy[1] = a->y, p->xy[2] = b->x, p->xy[3] = b->y, p->xy[4] = d->x, p->xy[5] = d->y;
     } else {
@@ -345,7 +344,7 @@ static void face_tex(Ctx *c, const LisaObject *o, const LisaVert *vb, const int3
     }
     memcpy(p->uv, face + 4, sizeof p->uv);
     p->tex = tex;
-    bucket(f, o, key);
+    bucket(f, o, key - bias);
 }
 
 /* sub_0005d718 (face types 18, 19, 22, 23 through 0x5d6d0..0x5d704): blended faces, keyed by the table of
@@ -421,7 +420,8 @@ static void faces(Ctx *c) {
         for (int n = 0; n < o->mesh[1]; n++) {
             int type = face[0] & 0xff;
             switch (type) {
-            case 17: face_tex(c, o, vb, face); break;
+            case 17: face_tex(c, o, vb, face, 0); break;
+            case 21: face_tex(c, o, vb, face, 80); break;
             case 18: face_blend(c, o, vb, face, c->scene->keyed, 0); break;
             case 19: face_blend(c, o, vb, face, c->scene->shade, 0); break;
             case 22: face_blend(c, o, vb, face, c->scene->keyed, 80); break;

@@ -177,6 +177,9 @@ class RenderOriginal:
         self.call(0x60E3D, esi=0xC4840)
         return bytes(self.uc.mem_read(FRAMEBUFFER, self.width * self.height))
 
+    def texture_base(self):
+        return self.get(self.get(self.get(0x24C03C, "I")[0], "I")[0] - 0x14, "I")[0]
+
     def primitives(self):
         """Sorted list of the last render: one text line per primitive (type, 8.8 vertices, 0x14 light)."""
         listing, lines = self.get(0x24BFFC, "I")[0], []
@@ -184,12 +187,17 @@ class RenderOriginal:
             record = self.get(listing + 4 * i, "I")[0]
             if not record:
                 break
-            words = self.get(record, "17i")
-            if words[0] == 0x14:
-                xy, light = [words[k] for k in (2, 3, 5, 6, 8, 9)], [words[k] for k in (4, 7, 10)]
-                lines.append("14 " + " ".join(map(str, xy)) + " L " + " ".join(map(str, light)))
+            words = self.get(record, "18I")
+            signed = [w - (1 << 32) if w >= 1 << 31 else w for w in words]
+            luts = {self.get(0x24C004, "I")[0]: 1, self.get(0x24BFA8, "I")[0]: 2}
+            if words[0] in (0x14, 0x15):
+                xy, light = [signed[k] for k in (2, 3, 5, 6, 8, 9)], [signed[k] for k in (4, 7, 10)]
+                line = f"{words[0]:x} " + " ".join(map(str, xy)) + " L " + " ".join(map(str, light))
+                tex, lut = words[1], luts.get(words[17], 0) if words[0] == 0x15 else 0
             else:
-                lines.append(f"{words[0]:x} " + " ".join(map(str, words[1:7])))
+                line = f"{words[0]:x} " + " ".join(map(str, signed[1:7]))
+                tex, lut = words[8], luts.get(words[9], 0) if words[0] == 0x12 else 0
+            lines.append(line + f" P {(tex - self.texture_base()) >> 16} T {lut}")
         return lines
 
     # primitive tests: records in the format of tests/lisa_prims.c

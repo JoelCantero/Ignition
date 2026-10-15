@@ -3,6 +3,7 @@
 #include "lisa.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -185,6 +186,28 @@ static void draw_object(IgnFrame *fb, const IgnModel *mdl, const IgnObject *o,
 
 static LisaScene scene;
 static const IgnLevel *scene_level;
+static char level_tex_path[1024];
+static uint8_t *level_tex; /* the TEX on whole 64 KB pages, as the loader allocates it (filelength + 0xffff) */
+static int level_tex_pages;
+
+void ign_render_set_level_dir(const char *data_dir, const char *name) {
+    snprintf(level_tex_path, sizeof level_tex_path, "%s/LEVELS/%s/%s.TEX", data_dir, name, name);
+}
+
+/* JAPAN's TEX ends 3/4 into its 16th page and ICELAND's a quarter into its 17th; faces use those partial pages. */
+static void load_level_texture(const IgnModel *m) {
+    free(level_tex);
+    level_tex = NULL;
+    size_t size = 0;
+    uint8_t *data = level_tex_path[0] ? ign_read_file(level_tex_path, &size) : NULL;
+    if (data && size >= (size_t)m->tex_h * 256) {
+        level_tex_pages = (int)((size + 0xffff) >> 16);
+        level_tex = calloc((size_t)level_tex_pages << 16, 1);
+        if (level_tex) memcpy(level_tex, data, size);
+    }
+    free(data);
+    if (!level_tex) level_tex_pages = m->tex_h / 256;
+}
 static int *scene_ids; /* PLC index -> engine object */
 static LisaFrame lisa_frame;
 
@@ -201,6 +224,8 @@ static int build_scene(const IgnLevel *lv) {
     const IgnModel *m = &lv->track;
     if (lisa_scene_init(&scene, 0xc800, 0xc800, m->nobj + 64)) return -1;
     scene.shade = lv->shd;
+    load_level_texture(m);
+    const uint8_t *tex = level_tex ? level_tex : m->tex;
     scene_ids = malloc(sizeof *scene_ids * (size_t)(m->nobj ? m->nobj : 1));
     if (!scene_ids) return -1;
     for (int pass = 0; pass < 2; pass++)
@@ -208,7 +233,7 @@ static int build_scene(const IgnLevel *lv) {
             const IgnObject *o = &m->objs[i];
             int klass = (int)(o->type & 0xfff);
             if ((klass < 100) != (pass == 0)) continue;
-            int id = lisa_create(&scene, o->verts - 2, m->tex, m->tex_h / 256, klass, (int)((o->type >> 12) & 0xf));
+            int id = lisa_create(&scene, o->verts - 2, tex, level_tex_pages, klass, (int)((o->type >> 12) & 0xf));
             scene_ids[i] = id;
             int32_t x, y, z;
             int16_t ang[3];

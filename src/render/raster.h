@@ -29,6 +29,8 @@ typedef struct {
 /* Sets the resolution (clamped to IGN_MAX_W x IGN_MAX_H); every mode is shown at 4:3. */
 void ign_frame_init(IgnFrame *fb, int w, int h);
 void ign_frame_clear(IgnFrame *fb);
+/* Where the level's TEX is, to read it whole (the model keeps whole pages only). Call before rendering a level. */
+void ign_render_set_level_dir(const char *data_dir, const char *name);
 /* Static and POS-animated level objects through the Lisa 2 engine (render_scene 0x56410) and rasterizer. */
 void ign_render_track(IgnFrame *fb, const IgnLevel *lv, const IgnCamera *cam);
 /* Primitive list of the last ign_render_track (struct LisaFrame of lisa.h), for verification tools. */
