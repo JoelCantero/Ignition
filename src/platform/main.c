@@ -74,7 +74,8 @@ static int track_id;
 /* Post-race view of sub_000420cc: [0x1fb4d0] frames since the player finished, camera [0x1fee80] (0-2 fixed,
  * 3 = following a car) and the followed car [0xc0b34] with its switch delay [0xc0b38]. */
 static double finish_clock;
-/* Records, IGN_DOS.BTZ and time-trial ghosts in the user folder: always in the window, with --time-trial headless. */
+/* Records, IGN_DOS.BTZ and time-trial ghosts in the user folder: always in the window; headless with --time-trial
+ * or IGN_SAVE_DIR. */
 static IgnSession session;
 static int session_on, session_saved;
 static int tv_index = 3, spectated, spectate_wait;
@@ -128,22 +129,29 @@ static int spectate(IgnCar *const *all, int n) {
 
 /* Persistence hooks once per physics tick: ghost sample, "LAP RECORD" (0x2f43a) and the end of the race
  * (records of render_main 0x45938, ghost and BTZ of sub_0002ccc8). */
-static void session_hooks(const IgnCar *player, const IgnTrack *t, double best_lap, int was_out) {
+static void session_hooks(IgnCar *const *all, int n, const IgnTrack *t, double best_lap, int was_out) {
+    const IgnCar *player = all[0];
     int language = ign_btz_i32(&session.btz, IGN_BTZ_LANGUAGE);
     if (ign_race_started(&race)) ign_session_tick(&session, player, t->count);
     if (race.best_lap < best_lap && player->last_lap == race.best_lap)
         printf("%s %.2f\n", ign_lap_record_text(language), player->last_lap);
-    if (!player->out || was_out) return;
-    session_saved = ign_session_finish(&session, player);
-    if (session_saved < 0) {
-        fprintf(stderr, "cannot save records or ghost in %s\n", session.dir);
-        return;
+    if (player->out && !was_out) {
+        session_saved = ign_session_finish(&session, player);
+        if (session_saved < 0)
+            fprintf(stderr, "cannot save records or ghost in %s\n", session.dir);
+        else if (session_saved & IGN_SAVED_TRACK_RECORD)
+            printf("%s %.2f\n", ign_track_record_text(language), player->race_elapsed);
+        if (session_saved >= 0 && session.time_trial)
+            printf("time trial: %.2f s against %.2f s, ghost %s\n", player->race_elapsed, session.record_cs / 100.0,
+                   session_saved & IGN_SAVED_GHOST ? session.ghost_path : "not saved");
     }
-    if (session_saved & IGN_SAVED_TRACK_RECORD)
-        printf("%s %.2f\n", ign_track_record_text(language), player->race_elapsed);
-    if (session.time_trial)
-        printf("time trial: %.2f s against %.2f s, ghost %s\n", player->race_elapsed, session.record_cs / 100.0,
-               session_saved & IGN_SAVED_GHOST ? session.ghost_path : "not saved");
+    /* sub_0002ccc8 once every car is out: championship round and grid, grid shuffle, IGN_DOS.BTZ. */
+    if (race.finished >= n && !session.ended) {
+        int place[MAX_RIVALS + 1];
+        for (int i = 0; i < n; i++) place[i] = all[i]->place - 1;
+        if (ign_session_race_end(&session, race.mode, place, n) < 0)
+            fprintf(stderr, "cannot save %s in %s\n", IGN_BTZ_NAME, session.dir);
+    }
 }
 
 /* SDL_GetPrefPath, or IGN_SAVE_DIR (tests); never the game folder. */
@@ -241,7 +249,7 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
     if (started) ign_race_step(&race, all, nrivals + 1);
     /* car_update 0x2f37f: the player's finish restarts [0x1fb4d0] and selects the car-following camera. */
     if (player->out && !was_out) finish_clock = 0, tv_index = 3, spectate_wait = 100;
-    if (session_on) session_hooks(player, t, best_lap, was_out);
+    if (session_on) session_hooks(all, nrivals + 1, t, best_lap, was_out);
     /* sub_00047f94 runs once per rendered frame for every car; the original renders at most 36 frames per second. */
     if (ghost_tick % 2 == 0) {
         for (int i = 0; i <= nrivals; i++) ign_chase_update(&cams[i], all[i], lv, t, started);
@@ -514,7 +522,8 @@ int main(int argc, char **argv) {
         return 1;
     }
     ign_race_init(&race, race_mode, nrivals + 1);
-    if ((race_mode == IGN_MODE_TIME_TRIAL || !shot) &&
+    /* Headless runs keep the user folder untouched unless --time-trial or an explicit IGN_SAVE_DIR. */
+    if ((race_mode == IGN_MODE_TIME_TRIAL || !shot || getenv("IGN_SAVE_DIR")) &&
         !session_setup(data_dir, level, car.id, race_mode == IGN_MODE_TIME_TRIAL) &&
         session.ghost_state == IGN_TRIAL_GHOST && !ign_car_init(&ghost_car, &lv, ghost.car, sx, sz, sh))
         ghost_on = 1;
