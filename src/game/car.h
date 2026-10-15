@@ -101,6 +101,7 @@ typedef struct {
     /* cars_update_all 0x2da4a: rear (car+0x48/+0x50) and front (+0x68/+0x70) axle points and their last tick steps
      * (+0x58/+0x60, +0x78/+0x80), world units. */
     double axle[2][2], axle_step[2][2];
+    int axle_front, axle_rear;     /* car+0x5ac/+0x5b0: |x| of wheels 1 and 3 from the body in CARS.PLC (0x267be) */
     /* car_ground_contact operand: car+0x640/+0x648 = mean axle step at the frame start (sub_00032d8c); mass 10,
      * inertia 4000 (cars_init 0x273b3) and the impact of the last object hit (car+0x634/+0x638/+0x63c). */
     double contact_v[2];

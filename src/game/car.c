@@ -329,13 +329,11 @@ int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, 
     return count;
 }
 
-/* cars_update_all 0x2da32: rear axle car+0x5b0 behind and front axle car+0x5ac ahead of the car along car+0xf8. The
- * integer offsets come from per-model tables of cars_init (0x27594) that are not decoded; the port truncates the
- * wheel offsets of the CARS.PLC model. */
+/* cars_update_all 0x2da32: rear axle car+0x5b0 behind and front axle car+0x5ac ahead of the car along car+0xf8. */
 static void axle_points(const IgnCar *car, double out[2][2]) {
     double x = car->body.px * IGN_WORLD_PER_METRE, z = car->body.pz * IGN_WORLD_PER_METRE;
     double c = cos(car->body.heading), s = sin(car->body.heading);
-    double rear = trunc(-car->rear), front = trunc(car->front);
+    double rear = car->axle_rear, front = car->axle_front;
     out[0][0] = x - c * rear, out[0][1] = z - s * rear;
     out[1][0] = x + front * c, out[1][1] = z + front * s;
 }
@@ -496,6 +494,9 @@ int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, floa
             car->part_off[p][0] = dx;
             car->part_off[p][1] = 0;
             car->part_off[p][2] = dz;
+            /* cars_init 0x267be: per-model tables, |x| of wheel 1 (front axle) and wheel 3 (rear axle). */
+            if (o->type % 10 == 1) car->axle_front = abs(o->pos[0] - car->origin[0]);
+            if (o->type % 10 == 3) car->axle_rear = abs(o->pos[0] - car->origin[0]);
             if (dx > car->front) car->front = dx;
             if (dx < car->rear) car->rear = dx;
             if (fabsf(dz) > car->half_width) car->half_width = fabsf(dz);
