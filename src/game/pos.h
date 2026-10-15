@@ -58,7 +58,7 @@ enum {
     IGN_SPECIAL_NONE,
     IGN_SPECIAL_LAUNCH, /* 0x12d, or 0x131 next to an erupting geyser: somersault (car+0x554) */
     IGN_SPECIAL_PUSH,   /* 0x12e: thrown up and spun */
-    IGN_SPECIAL_MESH    /* 0x12f: sub_00031858 mesh swap, not ported */
+    IGN_SPECIAL_MESH    /* 0x12f: flattened (sub_00031858) */
 };
 /* sub_0003383c: integer arguments in engine coordinates (x/z + IGN_SRF_ORIGIN, height up). Among the objects of type
  * 0x12c-0x15d (low 16 bits) the last one with a face over (x, z) within 600 in x and z (900 in jump mode) once one of
@@ -69,6 +69,9 @@ int ign_special_query(const IgnLevel *lv, int32_t x, int32_t y, int32_t z, int j
  * 0x12c objects explode a car within 30 in x, height and z (*wreck = 1); otherwise sub_0003383c under the car decides:
  * 0x12c explosion, 0x130 slide (*wreck = 3), 0x12d/0x131/0x12e/0x12f as above. Returns IGN_SPECIAL_*. */
 int ign_special_probe(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car, int iceland, int *wreck);
+/* car_update 0x31303/0x31687 after ign_car_flat_tick: COLL 6 (flattened) / 7 (restored) at the car, and while
+ * flattened a SMOKE puff one tick in six. */
+void ign_car_flat_effects(IgnCar *car, IgnFx *fx, float focus_x, float focus_z);
 /* car_update 0x30dbb-0x31303 for one car and tick (before ign_car_tick): wrecks, launch with debris, push with its
  * sample (one per 15 car updates, [0x1fee3c]). */
 void ign_special_apply(IgnCar *car, int special, int wreck, IgnFx *fx, float focus_x, float focus_z);

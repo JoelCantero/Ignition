@@ -106,6 +106,11 @@ typedef struct {
     double contact_v[2];
     float contact_mass, contact_inertia, contact_impact;
     int launch;                    /* car+0x554: ticks of the somersault started by a 0x12d object, 0 = none */
+    /* sub_00031858: flattened by a car landing on it or by a 0x12f object; ticks since (car+0x558), 0 = normal. The
+     * body mesh is scaled x1.2 / y0.2 / z1.6 (the port's renderer only takes the height, body_stretch). */
+    int flat;
+    int flat_sound;                /* event for the caller: 6 flattened, 7 restored (COLL samples) */
+    float flat_saved_stretch;
 } IgnCar;
 
 #define IGN_WRECK_FRAMES 80.0
@@ -194,6 +199,12 @@ typedef struct {
     double x, z, impact;
 } IgnCarHit;
 int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, int *nhits);
+
+/* sub_00031858: flattens the car (mesh, COLL 6 event). */
+void ign_car_flatten(IgnCar *car);
+/* car_update 0x31316 (per tick, before the effects): a flattened car counts up; from 200 ticks, if no other car is within
+ * 30 in x and z, it gets its mesh back, pops up 6 (when grounded) and raises COLL 7; else it waits at 200. */
+void ign_car_flat_tick(IgnCar *car, IgnCar *const *cars, int n, int index);
 
 /* sub_00032d8c, once per frame before the cars move: car+0x640/+0x648 = mean of the last axle steps. */
 void ign_car_frame_velocity(IgnCar *car);

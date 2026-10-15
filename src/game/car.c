@@ -286,6 +286,27 @@ static void place(IgnCar *car) {
     car->y = (float)-car->height;
 }
 
+void ign_car_flatten(IgnCar *car) {
+    car->flat = 1;
+    car->flat_saved_stretch = car->body_stretch;
+    car->body_stretch *= 0.2f;
+    car->flat_sound = 6;
+}
+
+void ign_car_flat_tick(IgnCar *car, IgnCar *const *cars, int n, int index) {
+    if (car->flat <= 0) return;
+    if (++car->flat < 200) return;
+    for (int i = 0; i < n; i++)
+        if (i != index && fabs((double)cars[i]->x - car->x) < 30.0 && fabs((double)cars[i]->z - car->z) < 30.0) {
+            car->flat = 200;
+            return;
+        }
+    car->flat = 0;
+    car->body_stretch = car->flat_saved_stretch;
+    if (!car->airborne) car->fall_speed += -6.0;
+    car->flat_sound = 7;
+}
+
 int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, int *nhits) {
     int count = 0, nh = 0;
     for (int i = 0; i < n; i++)
@@ -293,6 +314,10 @@ int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, 
             IgnCar *a = cars[i], *b = cars[j];
             if (fabsf(a->x - b->x) >= 200 || fabsf(a->z - b->z) >= 200 || fabsf(a->y - b->y) >= 70)
                 continue;
+            /* 0x2d3c2: two cars 25 apart in x and z, neither flattened: the one falling slower (underneath) is. */
+            if (!a->wrecked && !b->wrecked && !a->flat && !b->flat && fabsf(a->x - b->x) < 25 &&
+                fabsf(a->z - b->z) < 25)
+                ign_car_flatten(a->fall_speed < b->fall_speed ? a : b);
             if (!ign_body_collide_pair(&a->body, &b->body)) continue;
             count++;
             if (hits && nh < max_hits)

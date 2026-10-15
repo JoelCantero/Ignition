@@ -287,6 +287,36 @@ static void test_special(void) {
     CHECK(car.fall_speed == -8.0); /* once per somersault */
 }
 
+static void test_flatten(void) {
+    IgnCar a = {0}, b = {0};
+    a.body_stretch = b.body_stretch = 1.0f;
+    a.x = 100, a.z = 100, b.x = 120, b.z = 90, b.y = -40;
+    a.fall_speed = -1, b.fall_speed = 3; /* b falls onto a */
+    IgnCar *cars[2] = {&a, &b};
+    ign_cars_collide(cars, 2, NULL, 0, NULL);
+    CHECK(a.flat == 1 && !b.flat && a.body_stretch == 0.2f && a.flat_sound == 6);
+    /* Already flattened: nobody else is. */
+    ign_cars_collide(cars, 2, NULL, 0, NULL);
+    CHECK(!b.flat);
+    IgnFx fx;
+    ign_fx_init(&fx);
+    ign_car_flat_effects(&a, &fx, 0, 0);
+    CHECK(fx.nsounds == 1 && fx.sounds[0].sub == 2 && fx.sounds[0].idx == 6 && a.flat_sound == 0);
+    /* 200 ticks later it waits while b is within 30, then gets up (popping 6 up) with COLL 7. */
+    for (int i = 0; i < 198; i++) ign_car_flat_tick(&a, cars, 2, 0);
+    CHECK(a.flat == 199);
+    ign_car_flat_tick(&a, cars, 2, 0);
+    CHECK(a.flat == 200);
+    b.x = 200;
+    ign_car_flat_tick(&a, cars, 2, 0);
+    CHECK(a.flat == 0 && a.body_stretch == 1.0f && a.fall_speed == -7 && a.flat_sound == 7);
+    /* 0x12f: flattened by the object. */
+    IgnCar c = {0};
+    c.body_stretch = 3.0f;
+    ign_special_apply(&c, IGN_SPECIAL_MESH, 0, &fx, 0, 0);
+    CHECK(c.flat == 1 && fabsf(c.body_stretch - 0.6f) < 1e-6f);
+}
+
 static int read_obj(IgnCollObj *o) {
     return scanf("%d %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf", &o->flying, &o->pos[0], &o->pos[1], &o->pos[2],
                  &o->vel[0], &o->vel[1], &o->vel[2], &o->ang[0], &o->ang[1], &o->ang[2], &o->spin[0], &o->spin[1],
@@ -388,6 +418,7 @@ int main(int argc, char **argv) {
     test_flight();
     test_frame();
     test_special();
+    test_flatten();
     if (failures) fprintf(stderr, "%d failures\n", failures);
     else printf("contact: all checks passed\n");
     return failures != 0;

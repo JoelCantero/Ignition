@@ -388,7 +388,31 @@ void ign_special_apply(IgnCar *car, int special, int wreck, IgnFx *fx, float foc
             push_wait = 15;
         }
     }
+    else if (special == IGN_SPECIAL_MESH && !car->flat)
+        ign_car_flatten(car); /* 0x31229: car+0x558/+0x55c/+0x560 and sub_00031858 */
     if (push_wait > 0) push_wait--;
+}
+
+void ign_car_flat_effects(IgnCar *car, IgnFx *fx, float focus_x, float focus_z) {
+    int was_flat = car->flat > 0 && car->flat_sound != 6;
+    if (car->flat_sound) {
+        ign_fx_sound(fx, 0, 2, car->flat_sound, 0x10000, 22000, (float)trunc(car->x), (float)trunc(car->z));
+        car->flat_sound = 0;
+    }
+    /* 0x31687: while flattened, one tick in six a puff of SMOKE around the car. */
+    if (!was_flat || (int)trunc(ign_fx_rand(fx) * 6.0) != 0) return;
+    int32_t t[IGN_FX_WORDS] = {IGN_FX_SPRITE};
+    t[1] = (int32_t)trunc((ign_fx_rand(fx) * 50.0 + car->x + -25.0) * 1024.0);
+    t[2] = (int32_t)trunc((car->height + 10.0) * 1024.0);
+    t[3] = (int32_t)trunc((ign_fx_rand(fx) * 50.0 + car->z + -25.0) * 1024.0);
+    t[4] = (int32_t)trunc((ign_fx_rand(fx) + -0.5) * 1024.0);
+    t[5] = (int32_t)trunc((ign_fx_rand(fx) + 1.0) * 1024.0);
+    t[6] = (int32_t)trunc((ign_fx_rand(fx) + -0.5) * 1024.0);
+    t[7] = 0x400, t[9] = 5, t[10] = 0xc00, t[11] = 0x66;
+    t[12] = (int32_t)trunc((ign_fx_rand(fx) * 150.0 + 150.0) * 1024.0);
+    t[13] = (int32_t)trunc((ign_fx_rand(fx) * 3.0 + 3.0) * 1024.0);
+    t[14] = 0xc4110, t[22] = 50;
+    ign_fx_add(fx, t, focus_x, focus_z);
 }
 
 int ign_texanim_period(int track) {
