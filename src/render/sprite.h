@@ -26,10 +26,15 @@ int ign_sprite_from_pic(IgnSprite *s, const IgnPic *pic, int x, int y, int w, in
  * [0x257e48] (sub_000791c9: dst = lut[src * 256 + dst]); with a NULL table index 0 is transparent and the rest
  * opaque. */
 void ign_sprite_draw(IgnFrame *fb, const IgnClip *clip, const IgnSprite *s, int x, int y, const uint8_t *lut);
-/* sub_00062184 with {scale, angle = 0}: nearest-neighbour scale about the top-left corner (¿?). */
+/* sub_00062184 with {scale, angle = 0}: the sprite goes into a 256 x 256 page and is drawn by the matrix path. */
 void ign_sprite_draw_scaled(IgnFrame *fb, const IgnClip *clip, const IgnSprite *s, int x, int y, float scale,
                             const uint8_t *lut);
-/* Raster primitive 0x0f (0x729f3): flat triangle in the given colour, clipped to `clip`. */
-void ign_fill_triangle(IgnFrame *fb, const IgnClip *clip, const int xy[6], uint8_t color);
+/* sub_00082950: sprite at (u0, v0, w, h) of a 256 x 256 texture page, 16.16 matrix m, top-left at the 8.8 position
+ * (x, y), as two affine textured triangles (sub_00078304, clipped by sub_00078ac0); dst = lut[texel * 256 + dst]. */
+void ign_sprite_draw_matrix(IgnFrame *fb, const IgnClip *clip, const uint8_t page[65536], int u0, int v0, int w,
+                            int h, const int32_t m[4], int32_t x, int32_t y, const uint8_t *lut);
+/* Raster primitive 0x0f (0x729f3): flat triangle with the original 16.16 edge walk, both span ends included, clipped
+ * to `clip` (inclusive x1 - 1 / y1 - 1 as the raster state). The colour is shade[color * 256] when a table is given. */
+void ign_fill_triangle(IgnFrame *fb, const IgnClip *clip, const int xy[6], uint8_t color, const uint8_t *lut);
 
 #endif

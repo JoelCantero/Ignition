@@ -148,6 +148,13 @@ static void test_fnt(void) {
     free(bad);
 }
 
+static int differs_from_zero(int x0, int y0, int x1, int y1) {
+    int n = 0;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) n += frame.color[y * frame.w + x] != 0;
+    return n;
+}
+
 static void test_sprites(void) {
     uint8_t pixels[6 * 4];
     for (int i = 0; i < 24; i++) pixels[i] = (uint8_t)i;
@@ -176,11 +183,12 @@ static void test_sprites(void) {
     CHECK(frame.color[0] == 7 && frame.color[1] == 8 && frame.color[2] == 5, "frame edges clip");
     memset(frame.color, 0, sizeof frame.color);
     ign_sprite_draw_scaled(&frame, NULL, &s, 20, 20, 2.0f, NULL);
-    CHECK(frame.color[20 * 320 + 23] == 1 && frame.color[23 * 320 + 25] == 8 && frame.color[20 * 320 + 26] == 0,
-          "scaled sprite");
+    /* The matrix path (exact against the original in tests/hud_original.py) covers about 6 x 4 pixels here. */
+    int scaled = differs_from_zero(0, 0, 320, 200);
+    CHECK(scaled >= 12 && scaled <= 24 && differs_from_zero(19, 19, 27, 25) == scaled, "scaled sprite (%d)", scaled);
     memset(frame.color, 0, sizeof frame.color);
     int tri[6] = {10, 10, 10, 20, 20, 10};
-    ign_fill_triangle(&frame, NULL, tri, 0xd7);
+    ign_fill_triangle(&frame, NULL, tri, 0xd7, NULL);
     CHECK(frame.color[11 * 320 + 11] == 0xd7 && frame.color[18 * 320 + 18] == 0 && frame.color[10 * 320 + 9] == 0,
           "flat triangle");
 }
@@ -304,7 +312,8 @@ static void test_game_data(const char *dir, const char *out) {
         CHECK(bar_changed > 20, "turbo bar follows the charge (%d pixels)", bar_changed);
         cars[0].turbo_charge = 55.0;
         memcpy(frame.color, full, sizeof full);
-        CHECK(count_colour(0xc4, w - 120, h - 120, w, h) > 0, "needle colour 0xc4");
+        /* Primitive colours go through the shade table: PAN[0xc4 * 256] (146 in USA). */
+        CHECK(count_colour(hud.pan[0xc4 << 8], w - 120, h - 120, w, h) > 0, "needle colour PAN[0xc400]");
         if (out) {
             char name[64];
             snprintf(name, sizeof name, "hud_%s_racing", NAMES[layout]);
@@ -382,7 +391,68 @@ static void test_game_data(const char *dir, const char *out) {
     ign_free_level(&lv);
 }
 
+/* --triangles: reads "x0 y0 x1 y1 x2 y2 cx0 cy0 cx1 cy1" lines (clip x1/y1 exclusive) and prints the spans filled
+ * in a 320x200 frame as "y:l-r ..." for tests/hud_original.py. */
+static int triangles(void) {
+    int t[6], c[4];
+    ign_frame_init(&frame, 320, 200);
+    while (scanf("%d %d %d %d %d %d %d %d %d %d", &t[0], &t[1], &t[2], &t[3], &t[4], &t[5], &c[0], &c[1], &c[2],
+                 &c[3]) == 10) {
+        memset(frame.color, 0, sizeof frame.color);
+        IgnClip clip = {c[0], c[1], c[2], c[3]};
+        ign_fill_triangle(&frame, &clip, t, 1, NULL);
+        for (int y = 0; y < 200; y++) {
+            int l = -1, r = -1;
+            for (int x = 0; x < 320; x++)
+                if (frame.color[y * 320 + x]) {
+                    if (l < 0) l = x;
+                    r = x;
+                }
+            if (l >= 0) printf("%d:%d-%d ", y, l, r);
+        }
+        printf("\n");
+    }
+    return 0;
+}
+
+/* Deterministic page, blend table and background shared with tests/hud_original.py. */
+static uint8_t mix(uint32_t v) {
+    v ^= v >> 15;
+    v *= 0x2c1b3c6du;
+    v ^= v >> 12;
+    v *= 0x297a2d39u;
+    v ^= v >> 15;
+    return (uint8_t)v;
+}
+
+/* --sprites: "u0 v0 w h m0 m1 m2 m3 x y cx0 cy0 cx1 cy1 seed" (x, y 8.8; clip x1/y1 exclusive); prints the FNV-1a
+ * hash of the 320x200 frame after ign_sprite_draw_matrix. */
+static int sprites(void) {
+    static uint8_t page[65536], lut[65536];
+    int u0, v0, w, h, m[4], x, y, c[4];
+    unsigned seed;
+    ign_frame_init(&frame, 320, 200);
+    while (scanf("%d %d %d %d %d %d %d %d %d %d %d %d %d %d %u", &u0, &v0, &w, &h, &m[0], &m[1], &m[2], &m[3], &x, &y,
+                 &c[0], &c[1], &c[2], &c[3], &seed) == 15) {
+        for (uint32_t i = 0; i < 65536; i++) {
+            page[i] = mix(i * 2654435761u + seed);
+            if (page[i] < 40) page[i] = 0;
+            lut[i] = (i >> 8) == 0 ? (uint8_t)i : mix(i + seed * 7919u);
+        }
+        for (int i = 0; i < 320 * 200; i++) frame.color[i] = (uint8_t)((i % 320) * 7 + (i / 320) * 13);
+        IgnClip clip = {c[0], c[1], c[2], c[3]};
+        const int32_t mat[4] = {m[0], m[1], m[2], m[3]};
+        ign_sprite_draw_matrix(&frame, &clip, page, u0, v0, w, h, mat, x, y, lut);
+        uint64_t hash = 1469598103934665603ull;
+        for (int i = 0; i < 320 * 200; i++) hash = (hash ^ frame.color[i]) * 1099511628211ull;
+        printf("%016llx\n", (unsigned long long)hash);
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--triangles")) return triangles();
+    if (argc > 1 && !strcmp(argv[1], "--sprites")) return sprites();
     test_lft();
     test_fnt();
     test_sprites();

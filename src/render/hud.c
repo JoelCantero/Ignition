@@ -395,7 +395,7 @@ static void draw_dial(IgnHud *hud, IgnFrame *fb, const IgnClip *vp, const IgnHud
     double c = n * 3.1415926535898 * 0.005555555555555555;
     int tri[6] = {(int)(cx + cos(a) * half), (int)(cy + sin(a) * half), (int)(cx + cos(b) * len),
                   (int)(cy + sin(b) * len), (int)(cx + cos(c) * half), (int)(cy + sin(c) * half)};
-    ign_fill_triangle(fb, vp, tri, 0xc4);
+    ign_fill_triangle(fb, vp, tri, 0xc4, hud->pan);
     draw_sprite(hud, fb, vp, &hud->needle_cap, x1 + p[P_CAP_X], y1 + p[P_CAP_Y]);
     char speed[16];
     int v = (int)(car->body.v_fwd * 3.6);
@@ -475,8 +475,8 @@ void ign_hud_draw(IgnHud *hud, IgnFrame *fb, const IgnHudState *st) {
     int bottom = y1 + p[P_BAR_Y], top = (int)(bottom - car->turbo_charge * k);
     int left = x1 + p[P_BAR_X0], right = x1 + p[P_BAR_X1];
     int quad_a[6] = {left, bottom, left, top, right, bottom}, quad_b[6] = {right, bottom, left, top, right, top};
-    ign_fill_triangle(fb, &vp, quad_a, 0xd7);
-    ign_fill_triangle(fb, &vp, quad_b, 0xd7);
+    ign_fill_triangle(fb, &vp, quad_a, 0xd7, hud->pan);
+    ign_fill_triangle(fb, &vp, quad_b, 0xd7, hud->pan);
     draw_sprite(hud, fb, &vp, &hud->turbo_frame, x1 + p[P_TURBO_X], y1 + p[P_TURBO_Y]);
     const IgnSprite *light = NULL;
     if (car->turbo_mode == 0 && car->turbo_charge >= 20.0 && car->turbo_charge < 100.0)

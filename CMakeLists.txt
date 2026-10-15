@@ -107,6 +107,14 @@ if(NOT MSVC)
 endif()
 option(IGN_VERIFY_ORIGINAL "Compare physics and car kernels with original LE bytes (requires Python unicorn)" OFF)
 if(IGN_VERIFY_ORIGINAL)
+  # Triangle primitive 0x729f3 and matrix sprites 0x82950 against the original LE bytes (Unicorn).
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME hud_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/hud_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:hud_assets_test>
+            --report ${CMAKE_BINARY_DIR}/hud-original-report.json)
+endif()
+if(IGN_VERIFY_ORIGINAL)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME ai_schedule_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_schedule_original.py
