@@ -28,6 +28,9 @@ static const int ANIM_C42C0[16][4] = { /* BOOM */
     {0, 128, 64, 192}, {64, 128, 128, 192}, {128, 128, 192, 192}, {192, 128, 256, 192},
     {0, 192, 64, 256}, {64, 192, 128, 256}, {128, 192, 192, 256}, {192, 192, 256, 256},
 };
+static const int ANIM_C4010[5][4] = { /* flashing lights of collision objects 0x9a, LIGHT.TEX (0x35e9b) */
+    {0, 0, 64, 64}, {64, 0, 128, 64}, {128, 0, 192, 64}, {192, 0, 256, 64}, {0, 64, 64, 128},
+};
 static const int ANIM_C4060[12][4] = { /* water splash, LIGHT.TEX */
     {64, 64, 128, 128}, {128, 64, 192, 128}, {192, 64, 256, 128}, {0, 128, 64, 192},
     {64, 128, 128, 192}, {128, 128, 192, 192}, {192, 128, 256, 192}, {0, 192, 64, 256},
@@ -48,7 +51,7 @@ static const struct {
 } ANIMS[] = {
     {0xc4110, ANIM_C4110, 8}, {0xc4230, ANIM_C4230, 8}, {0xc43c0, ANIM_C43C0, 12}, {0xc42c0, ANIM_C42C0, 16},
     {0xc4060, ANIM_C4060, 12}, {0xc41a0, ANIM_C41A0, 9}, {0xc44c0, ANIM_C44C0, 4}, {0xc4500, ANIM_C4500, 4},
-    {0xc4550, ANIM_C4550, 1},
+    {0xc4550, ANIM_C4550, 1}, {0xc4010, ANIM_C4010, 5}, {0xc4030, ANIM_C4010 + 2, 3}, {0xc4050, ANIM_C4010 + 4, 1},
 };
 
 /* Frame `f` of table `addr` (entries past the known ones clamp to the last). */

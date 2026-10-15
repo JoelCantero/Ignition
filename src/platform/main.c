@@ -76,6 +76,7 @@ static double finish_clock;
 static int tv_index = 3, spectated, spectate_wait;
 static IgnSkids skids;
 static IgnFx fx;
+static IgnCollObjs colls;
 static IgnWeather weather;
 
 /* Start grid of sub_00026458: PLC origin of the type-0 object facing the type-1 object; slot i is
@@ -188,7 +189,10 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
                           player->out ? finish_clock : -1.0, focus_x, focus_z);
         ign_fx_emitters(&fx, lv, focus_x, focus_z);
         ign_fx_frame(&fx, all, nrivals + 1, focus_x, focus_z);
+        ign_coll_frame(&colls, lv, all, nrivals + 1, &fx, focus_x, focus_z);
         ign_sound_frame(all, nrivals + 1, spectated, &race, player->out ? finish_clock : -1.0, &weather, &fx);
+        /* sub_00032d8c at the start of the next frame: the last tick's axle steps. */
+        for (int i = 0; i <= nrivals; i++) ign_car_frame_velocity(all[i]);
     }
     ign_skids_step(&skids);
     if (started) ign_race_step(&race, all, nrivals + 1);
@@ -438,6 +442,10 @@ int main(int argc, char **argv) {
     ign_skids_init(&skids);
     ign_fx_init(&fx);
     ign_fx_emitters_init(&fx, &lv);
+    if (ign_coll_init(&colls, &lv.track) < 0) {
+        fprintf(stderr, "Ingen info om kollisions objektet!!\n");
+        return 1;
+    }
     ign_weather_init(&weather, level);
     ign_chase_init(&cams[0], &car);
     for (int i = 0; i < nrivals; i++) ign_chase_init(&cams[i + 1], &rivals[i]);
