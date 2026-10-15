@@ -1,6 +1,7 @@
 #include "ai.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -186,6 +187,7 @@ static double road_angle(const IgnTrack *t, const IgnAi *ai, int s, int bb) {
     return atan2(bz - az, bx - ax);
 }
 
+/* One-pass wrap (e.g. 0x1b4b3..0x1b4e5): the -pi test first, then +pi. */
 static double original_wrap(double angle) {
     if (angle < -3.1415926535898) angle += 6.2831853071796;
     if (angle > 3.1415926535898) angle -= 6.2831853071796;
@@ -193,19 +195,88 @@ static double original_wrap(double angle) {
 }
 
 double ign_ai_travel(double heading, double motion) {
-    double delta = original_wrap(motion - heading);
-    double product = 0.15 * delta;
-    double travel = heading + product;
-    double tail = travel - heading;
-    double residual = (heading - (travel - tail)) + (product - tail) +
-                      fma(0.15, delta, -product);
-    /* 0x1be84 stores binary64, but the first comparison still sees the x87 sum. */
-    if (travel < -3.1415926535898 || (travel == -3.1415926535898 && residual < 0))
-        travel += 6.2831853071796;
-    if (travel > 3.1415926535898) travel -= 6.2831853071796;
+    /* Control word 0x127f rounds every x87 sum to binary64 before the comparisons. */
+    double travel = original_wrap(heading + 0.15 * original_wrap(motion - heading));
     double separation = fabs(heading - motion);
     if (separation > 3.1415926535898) separation = 6.2831853071796 - separation;
     return separation > 0.78539816339745 ? heading : travel;
+}
+
+int ign_ai_lookahead_section(int section, int k, int count) {
+    int s = section + look_off[k];
+    if (s >= count) s -= count;
+    if (s >= count - 3) s = count - 1;
+    return s;
+}
+
+/* 0x1b50d..0x1b536: 32-bit a + (b - a) / 2, truncating towards zero. */
+static int32_t record_mid(int32_t a, int32_t b) {
+    int32_t half = (int32_t)((uint32_t)b - (uint32_t)a) / 2;
+    return (int32_t)((uint32_t)a + (uint32_t)half);
+}
+
+/* t_surface_grip (0xc33f0, 30 doubles) indexed by the signed TRI byte. The seven tracks also index
+ * read-only words outside the table: -21, 79, 90 and 97 (raw little-endian bit patterns below). */
+static double record_grip(int index) {
+    static const struct {
+        int index;
+        uint64_t bits;
+    } outside[] = {{-21, 0}, {79, 0x000000390000000dull}, {90, 0x000000160000000dull}, {97, 54}};
+    if (index >= 0 && index < 30) return ign_surface_grip[index];
+    for (size_t i = 0; i < sizeof outside / sizeof outside[0]; i++) {
+        if (outside[i].index != index) continue;
+        double value;
+        memcpy(&value, &outside[i].bits, sizeof value);
+        return value;
+    }
+    return 0; /* Deviation: other out-of-table bytes are not reached by the shipped TRI files. */
+}
+
+void ign_ai_target(const IgnAiRouteRecord *current, const IgnAiRouteRecord *const ahead[6],
+                   double s38, double car_x, double car_z, IgnAiTarget *out) {
+    /* 0x1b4a2..0x1b4e9: centre-heading change to the first lookahead record. */
+    out->first = original_wrap((double)ahead[0]->heading[1] - (double)current->heading[1]);
+
+    /* 0x1b4f1..0x1b6f6: from the farthest record inwards, aim at its integer centre and accept it when,
+     * for every record up to it, the centre is seen from the two inset points on opposite sides of
+     * the aim. A blocking record keeps the side of its left inset; the last tested centre is kept. */
+    out->index = 0;
+    out->sign = 0;
+    for (int k = 5; k > 0; k--) {
+        const IgnAiRouteRecord *target = ahead[k];
+        out->x = record_mid(target->point[0], target->point[3]);
+        out->z = record_mid(target->point[2], target->point[5]);
+        out->aim = atan2(out->z - car_z, out->x - car_x);
+        int j = 0;
+        for (; j <= k; j++) {
+            const int32_t *inset = ahead[j]->inset;
+            double left = original_wrap(atan2(out->z - inset[1], out->x - inset[0]) - out->aim);
+            double right = original_wrap(atan2(out->z - inset[3], out->x - inset[2]) - out->aim);
+            if (!(0 > left * right)) {
+                out->sign = 0 > left ? -1 : 1;
+                break;
+            }
+        }
+        if (j > k) {
+            out->index = k;
+            break;
+        }
+    }
+    out->offset = look_off[out->index];
+
+    /* 0x1b721..0x1b75d: grip term of the current record's TRI byte, clamped at zero. */
+    out->grip = (8.0 - record_grip(current->surface)) * 0.125;
+    if (0 > out->grip) out->grip = 0;
+
+    /* 0x1b764..0x1b821: squared centre-heading changes between min(index + 1, 5) record pairs. */
+    int pairs = out->index + 1 > 5 ? 5 : out->index + 1;
+    out->curve = 0;
+    for (int j = 0; j < pairs; j++) {
+        double turn = fabs((double)ahead[j]->heading[1] - (double)ahead[j + 1]->heading[1]);
+        if (turn > 3.1415926535898) turn = fabs(turn + -6.2831853071796);
+        double weight = (s38 * 0.4 + 0.6) * 1.6;
+        out->curve = turn * (weight * turn) / pairs + out->curve;
+    }
 }
 
 void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, IgnInput *in) {
@@ -229,30 +300,32 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, Ig
     ai->side = ratio < 1 && ratio > 0 ? -1 / ratio : ratio;
     ign_ai_update_route_choice(ai, s, fx);
 
-    /* Lookahead records: sections s + {1,2,3,4,6,8}, stopping where the turn direction flips. */
+    /* 0x1b1a5..0x1b278: record/lane selection still uses the port's route helpers. */
     double cur_ang = road_angle(t, ai, s, bb);
-    double sum = 0, first = 0;
-    int used = 0, sign = 0;
-    double lx = 0, lz = 0;
+    const IgnAiRouteRecord *current =
+        record_at(t, s, selected_path(t, ai, s, bb), ai->route_choice, NULL, NULL);
+    const IgnAiRouteRecord *ahead[6];
+    int complete = current && current->geometry_valid;
     for (int k = 0; k < 6; k++) {
-        int sk = s + look_off[k];
-        double d = wrap(road_angle(t, ai, sk, bb) - cur_ang);
-        int sg = d > 0.02 ? 1 : d < -0.02 ? -1 : 0;
-        if (sg && !sign) sign = sg;
-        if (sg && sign && sg != sign) break;
-        if (k == 0) first = d;
-        sum += fabs(d);
-        used++;
-        mid_of(selected_edge(t, ai, sk, bb), &lx, &lz);
+        int sk = ign_ai_lookahead_section(s, k, t->count);
+        ahead[k] = record_at(t, sk, selected_path(t, ai, sk, bb), ai->route_choice, NULL, NULL);
+        complete = complete && ahead[k] && ahead[k]->geometry_valid;
     }
-    if (!used) {
-        used = 1;
-        mid_of(selected_edge(t, ai, s + 1, bb), &lx, &lz);
+    IgnAiTarget target = {0};
+    /* Records keep SRF coordinates (world + 25600), which the original compares with car +0x00/+0x10. */
+    double car_x = cx + IGN_SRF_ORIGIN, car_z = cz + IGN_SRF_ORIGIN;
+    if (complete) {
+        ign_ai_target(current, ahead, p.s38, car_x, car_z, &target);
+    } else {
+        /* Port fallback without TRI geometry (not reached by the shipped tracks): nearest gate centre. */
+        target.offset = look_off[0];
+        mid_of(selected_edge(t, ai, s + 1, bb), &target.x, &target.z);
+        target.x += IGN_SRF_ORIGIN, target.z += IGN_SRF_ORIGIN;
+        target.aim = atan2(target.z - car_z, target.x - car_x);
     }
-    int off = look_off[used - 1];
-    double grip = fmax(0, (8 - ign_surface_grip[car->surface_type >= 0 && car->surface_type < 30 ? car->surface_type : 0]) * 0.125);
-    /* 0x1b7b0-0x1b84a */
-    double a8 = 1 + (grip + 0.8) * sum * ((p.s38 * 0.4 + 0.6) * 1.6) / used;
+    int off = target.offset;
+    /* 0x1b823..0x1b86b */
+    double a8 = 1 + (target.grip + 0.8) * target.curve;
 
     /* Curve speed override of the current section (last matching entry wins). */
     int key = (bb ? -s : s) & ~1, override = -1;
@@ -261,7 +334,7 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, Ig
 
     /* Throttle (0x1b9a2-0x1bad1): T is the pedal fraction, scaled by 100 at the end. */
     double kmh = car->kmh;
-    double T = ((1 + p.s00) * 0.5 + 0.3) / (p.s10 * 6 / (3.0 * used + 6) + 1);
+    double T = ((1 + p.s00) * 0.5 + 0.3) / (p.s10 * 6 / (3.0 * target.index + 6) + 1);
     T /= (a8 - 1) * 0.4 + 1;
     double cap = p.s18 * 60 + 120;
     double x88 = fmax(0, cap - kmh) / cap * (p.s18 * 1.5) + 1;
@@ -280,9 +353,7 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, Ig
     double h = b->heading;
     double dirt = (car->step_x != 0 || car->step_z != 0) ? atan2(car->step_z, car->step_x) : 0;
     double travel = ign_ai_travel(h, dirt);
-    double aim = atan2(lz - cz, lx - cx);
-    double c0 = wrap(aim - travel);
-    double e40 = first;
+    double c0 = wrap(target.aim - travel); /* 0x1bde2..0x1bdfc recomputes the same aim */
     double dir = c0 * 75 * ((a8 - 1) * 0.25 + 1);
     dir *= diff == 1 ? 0.9 : diff == 2 ? 0.8 : diff == 3 ? 0.75 : 1;
     dir = clampd(dir, -100, 100);
@@ -308,15 +379,15 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, Ig
         }
     }
 
-    /* Hug the inside edge of the next bend (0x1c3e0-0x1c5be). */
-    if (off > 2 && a8 < 2 && fabs(e40) < 0.3) {
-        if (sign == -1) {
+    /* Hug the inside edge of the next bend (0x1c40d-0x1c5be), from the last blocking side. */
+    if (target.index > 2 && a8 < 2 && fabs(target.first) < 0.3) {
+        if (target.sign == -1) {
             double tg = fmin(50, (a8 - 1) * 50);
             double dv = ai->side >= 0 ? ai->side * 2.5 : 2.5;
             dir += (tg - dir) / dv;
-        } else if (sign == 1) {
+        } else if (target.sign == 1) {
             double tg = fmax(-50, (a8 - 1) * -50);
-            double dv = ai->side <= 0 ? 2.5 : ai->side * -2.5;
+            double dv = ai->side > 0 ? 2.5 : ai->side * -2.5; /* 0x1c57a..0x1c5a4 */
             dir += (tg - dir) / dv;
         }
     }
