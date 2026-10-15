@@ -1,24 +1,22 @@
 #include "gfx2d.h"
 
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "../game/assets.h"
 
 static struct {
-    uint8_t *buf;
-    int pitch, w, h; /* clip rectangle (0, 0, w, h) */
+    IgnFrame *fb;
+    IgnClip clip;
     const uint8_t *lut;
 } g_target;
 
-void ign_gfx_set_target(uint8_t *buf, int pitch, int w, int h) {
-    g_target.buf = buf;
-    g_target.pitch = pitch;
-    g_target.w = w;
-    g_target.h = h;
+void ign_gfx_set_target(IgnFrame *fb) {
+    g_target.fb = fb;
+    g_target.clip = (IgnClip){0, 0, fb->w, fb->h};
 }
 
+IgnFrame *ign_gfx_target(void) { return g_target.fb; }
 void ign_gfx_set_lut(const uint8_t *lut) { g_target.lut = lut; }
 const uint8_t *ign_gfx_lut(void) { return g_target.lut; }
 
@@ -32,141 +30,48 @@ const uint8_t *ign_gfx_identity_lut(void) {
     return lut;
 }
 
-int ign_sprite_set(IgnSprite *s, const uint8_t *src, int w, int h, int pitch, int hotx, int hoty) {
+int ign_menu_sprite_set(IgnMenuSprite *s, const uint8_t *src, int w, int h, int pitch, int hotx, int hoty) {
     uint8_t *px = malloc(w > 0 && h > 0 ? (size_t)w * h : 1);
     if (!px) return -1;
     for (int y = 0; y < h; y++) memcpy(px + (size_t)y * w, src + (size_t)y * pitch, (size_t)w);
     free(s->px);
     s->px = px;
-    s->w = w;
-    s->h = h;
+    s->s = (IgnSprite){px, w, h, w};
     s->hotx = hotx;
     s->hoty = hoty;
     return 0;
 }
 
-void ign_sprite_free(IgnSprite *s) {
+void ign_menu_sprite_free(IgnMenuSprite *s) {
     free(s->px);
     memset(s, 0, sizeof *s);
 }
 
-void ign_sprite_put(const IgnSprite *s, int x88, int y88, const float *xform) {
-    const uint8_t *lut = g_target.lut;
-    if (!s->px || !g_target.buf || !lut) return;
+static int32_t mul16(int32_t a, int32_t b) { return (int32_t)(((int64_t)a * b) >> 16); }
+
+void ign_menu_sprite_put(const IgnMenuSprite *s, int x88, int y88, const float *xform) {
+    if (!s->px || !g_target.fb || !g_target.lut) return;
     if (!xform) {
-        /* 0x791c9: top-left = (pos - hot) >> 8, clipped to the target, dst = lut[src << 8 | dst]. */
-        int x0 = (x88 - s->hotx) >> 8, y0 = (y88 - s->hoty) >> 8;
-        for (int y = 0; y < s->h; y++) {
-            int ty = y0 + y;
-            if (ty < 0 || ty >= g_target.h) continue;
-            uint8_t *d = g_target.buf + (size_t)ty * g_target.pitch;
-            const uint8_t *p = s->px + (size_t)y * s->w;
-            for (int x = 0; x < s->w; x++) {
-                int tx = x0 + x;
-                if (tx >= 0 && tx < g_target.w) d[tx] = lut[p[x] << 8 | d[tx]];
-            }
-        }
+        ign_sprite_draw(g_target.fb, &g_target.clip, &s->s, (x88 - s->hotx) >> 8, (y88 - s->hoty) >> 8, g_target.lut);
         return;
     }
-    /* 0x82950 rotozoom with the 16.16 matrix (scale * 65536 * cos, sin) about the hot spot. The frontend only uses
-     * angle 0; texels are taken at the nearest sample. */
-    double scale = xform[0], angle = xform[1];
-    if (scale <= 0.0) return;
-    double c = cos(angle) / scale, sn = sin(angle) / scale;
-    double hx = s->hotx / 256.0, hy = s->hoty / 256.0, px = x88 / 256.0, py = y88 / 256.0;
-    double r = (s->w + s->h) * scale + 2;
-    int bx0 = (int)floor(px - r), bx1 = (int)ceil(px + r), by0 = (int)floor(py - r), by1 = (int)ceil(py + r);
-    if (bx0 < 0) bx0 = 0;
-    if (by0 < 0) by0 = 0;
-    if (bx1 > g_target.w) bx1 = g_target.w;
-    if (by1 > g_target.h) by1 = g_target.h;
-    for (int y = by0; y < by1; y++) {
-        uint8_t *d = g_target.buf + (size_t)y * g_target.pitch;
-        for (int x = bx0; x < bx1; x++) {
-            double dx = x + 0.5 - px, dy = y + 0.5 - py;
-            int u = (int)floor(hx + dx * c + dy * sn), v = (int)floor(hy - dx * sn + dy * c);
-            if (u < 0 || v < 0 || u >= s->w || v >= s->h) continue;
-            d[x] = lut[s->px[(size_t)v * s->w + u] << 8 | d[x]];
-        }
-    }
+    if (s->s.w > 256 || s->s.h > 256) return;
+    /* geputget copies the sprite into a 256 x 256 page; 0x62184 builds {S cos a, S sin a, S sin a, S cos a}. */
+    static uint8_t page[65536];
+    memset(page, 0, sizeof page);
+    for (int r = 0; r < s->s.h; r++) memcpy(page + r * 256, s->px + (size_t)r * s->s.w, (size_t)s->s.w);
+    int32_t S = (int32_t)(xform[0] * 65536.0f);
+    const int32_t m[4] = {S, 0, 0, S};
+    int32_t x = x88 + mul16(-s->hotx, m[0]) + mul16(-s->hoty, m[2]);
+    int32_t y = y88 + mul16(-s->hotx, m[1]) + mul16(-s->hoty, m[3]);
+    ign_sprite_draw_matrix(g_target.fb, &g_target.clip, page, 0, 0, s->s.w, s->s.h, m, x, y, g_target.lut);
 }
 
-/* ---- LFT fonts (0x61220) ------------------------------------------------------------------------------------- */
-
-#define LFT_GLYPHS 224
-#define LFT_BITMAPS 0x84c
-
-static unsigned rd16(const uint8_t *p) { return (unsigned)(p[0] | p[1] << 8); }
-static uint32_t rd32(const uint8_t *p) {
-    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+void ign_gfx_text(const IgnFont *f, const char *s, int x, int y) {
+    if (g_target.fb) ign_font_draw(g_target.fb, &g_target.clip, f, s, x, y, g_target.lut);
 }
 
-int ign_font_load(IgnFont *f, const char *path) {
-    memset(f, 0, sizeof *f);
-    size_t size;
-    uint8_t *d = ign_read_file(path, &size);
-    if (!d) return -1;
-    if (size < LFT_BITMAPS || memcmp(d, "LFT\0", 4) || rd16(d + 4) != 100) {
-        free(d);
-        return -1;
-    }
-    f->cellw = (int16_t)rd16(d + 8);
-    f->h = (int16_t)rd16(d + 10);
-    for (int i = 0; i < LFT_GLYPHS; i++) {
-        uint32_t off = rd32(d + 12 + i * 4);
-        int w = (int16_t)rd16(d + 0x68c + i * 2);
-        f->width[i + 0x20] = (int16_t)w;
-        if (off == UINT32_MAX || w <= 0 || f->h <= 0) continue;
-        if ((size_t)off > size - LFT_BITMAPS || (size_t)w * f->h > size - LFT_BITMAPS - off) continue;
-        if (ign_sprite_set(&f->glyph[i + 0x20], d + LFT_BITMAPS + off, w, f->h, w, 0, 0)) continue;
-        f->present[i + 0x20] = 1;
-    }
-    free(d);
-    /* fontInit 0x61220 leaves spacing 1; load_system_gfx 0x21860 then sets proportional = 1, spacing = 1. */
-    f->loaded = 1;
-    f->proportional = 1;
-    f->spacing = 1;
-    return 0;
-}
-
-void ign_font_free(IgnFont *f) {
-    for (int i = 0; i < 256; i++) ign_sprite_free(&f->glyph[i]);
-    memset(f, 0, sizeof *f);
-}
-
-/* Space advance of proportional fonts: trunc(cellw * 256 * 0.35 * (1 / 256)) (__CHP). */
-static int space_advance(const IgnFont *f) { return (int)((double)(f->cellw << 8) * 0.35 * 0.00390625); }
-
-int ign_font_width(const IgnFont *f, const char *s) {
-    if (!f || !f->loaded || f->disabled) return 0;
-    int x = 0;
-    for (const unsigned char *c = (const unsigned char *)s; *c; c++) {
-        if (f->present[*c]) x += (f->proportional ? f->width[*c] : f->cellw) + f->spacing;
-        else if (*c == ' ') x += f->proportional ? space_advance(f) : f->cellw + f->spacing;
-    }
-    return x;
-}
-
-void ign_font_draw(const IgnFont *f, const char *s, int x, int y) {
-    if (!f || !f->loaded || f->disabled) return;
-    if (f->align) {
-        int w = ign_font_width(f, s);
-        x -= f->align == 1 ? w / 2 : w;
-    }
-    for (const unsigned char *c = (const unsigned char *)s; *c; c++) {
-        if (f->present[*c]) {
-            if (f->proportional) {
-                ign_sprite_put(&f->glyph[*c], x << 8, y << 8, NULL);
-                x += f->width[*c] + f->spacing;
-            } else {
-                int off = f->width[*c] != f->cellw ? (f->cellw - f->width[*c]) / 2 : 0;
-                ign_sprite_put(&f->glyph[*c], (x + off) << 8, y << 8, NULL);
-                x += f->cellw + f->spacing;
-            }
-        } else if (*c == ' ')
-            x += f->proportional ? space_advance(f) : f->cellw + f->spacing;
-    }
-}
+int ign_gfx_text_width(const IgnFont *f, const char *s) { return ign_font_text_width(f, s); }
 
 void ign_blend_rect(const uint8_t *src, int x0, int y0, int x1, int y1, uint8_t *dst, int dx, int dy,
                     const uint8_t *lut, int sp, int dp, int buf_w, int buf_h) {

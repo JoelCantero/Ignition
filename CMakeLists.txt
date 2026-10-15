@@ -29,6 +29,8 @@ add_library(ignition_core STATIC
   src/game/track.c
   src/render/raster.c
   src/render/hud.c
+  src/render/sprite.c
+  src/render/font.c
   src/render/camera.c
   src/frontend/cdp.c
   src/frontend/frontend.c
@@ -102,6 +104,10 @@ add_test(NAME track_topology COMMAND track_topology_test)
 add_executable(track_real_assets_test tests/track_real_assets.c)
 target_link_libraries(track_real_assets_test PRIVATE ignition_core)
 add_test(NAME track_real_assets COMMAND track_real_assets_test "${GAME_DIR}")
+# 2D race overlay: LFT/FNT fonts, sprites, HUD frames (the game data part is skipped without the directory).
+add_executable(hud_assets_test tests/hud_assets.c)
+target_link_libraries(hud_assets_test PRIVATE ignition_core)
+add_test(NAME hud_assets COMMAND hud_assets_test "${GAME_DIR}")
 add_executable(pos_test tests/pos.c)
 target_link_libraries(pos_test PRIVATE ignition_core)
 add_test(NAME pos COMMAND pos_test)
@@ -123,9 +129,18 @@ if(NOT MSVC)
   target_compile_options(track_real_assets_test PRIVATE -Wall -Wextra)
   target_compile_options(ai_route_choice_test PRIVATE -Wall -Wextra)
   target_compile_options(ai_schedule_test PRIVATE -Wall -Wextra)
+  target_compile_options(hud_assets_test PRIVATE -Wall -Wextra)
   target_compile_options(palette_test PRIVATE -Wall -Wextra)
 endif()
 option(IGN_VERIFY_ORIGINAL "Compare physics and car kernels with original LE bytes (requires Python unicorn)" OFF)
+if(IGN_VERIFY_ORIGINAL)
+  # Triangle primitive 0x729f3 and matrix sprites 0x82950 against the original LE bytes (Unicorn).
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME hud_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/hud_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:hud_assets_test>
+            --report ${CMAKE_BINARY_DIR}/hud-original-report.json)
+endif()
 if(IGN_VERIFY_ORIGINAL)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME ai_geometry_original

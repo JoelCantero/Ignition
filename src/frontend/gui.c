@@ -312,7 +312,7 @@ static void draw_element(const IgnMenuElem *e, const char *text_override, int us
     if (!text) return;
     const uint8_t *saved = ign_gfx_lut();
     ign_gfx_set_lut(ign_gfx_identity_lut());
-    ign_font_draw(g_gui.fonts[e->font], text, e->tx + cx, e->ty + cy);
+    ign_gfx_text(g_gui.fonts[e->font], text, e->tx + cx, e->ty + cy);
     ign_gfx_set_lut(saved);
 }
 

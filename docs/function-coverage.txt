@@ -1,10 +1,10 @@
-functions: 1112 (unknown=391, identified=81, understood=1, port-pending=2, partial=19, ported=118, verified=7, native=5, library=488)
-library (C runtime / DOS4G) unique instructions: 20323, to exclude from game review
+functions: 1112 (unknown=372, identified=87, understood=1, port-pending=2, partial=20, ported=129, verified=14, native=5, library=482)
+library (C runtime / DOS4G) unique instructions: 20167, to exclude from game review
 unique instructions: 128832
-game instructions marked ported/verified: 33392/108509 (30.8%)
-game instructions marked partial: 13767 (excluded from ported/verified)
-game functions linked to roadmap tasks: 222/624 (35.6%)
-all functions linked to roadmap tasks (including library): 222/1112
+game instructions marked ported/verified: 38200/108665 (35.2%)
+game instructions marked partial: 12481 (excluded from ported/verified)
+game functions linked to roadmap tasks: 247/630 (39.2%)
+all functions linked to roadmap tasks (including library): 247/1112
 code bytes covered: 474981/482383 (98.5%)
 address  status      instructions  function
 00010010  native      25            main
@@ -123,8 +123,8 @@ address  status      instructions  function
 000230f4  identified  95            load_plc
 0002322c  identified  96            load_msh
 00023368  identified  1247          load_tex
-000240f4  identified  205           load_fonts
-000243e0  identified  269           load_panel_gfx
+000240f4  ported      205           load_fonts
+000243e0  ported      269           load_panel_gfx
 000247b0  identified  47            split_plc_types
 00024840  unknown     22            sub_00024840
 0002489c  unknown     1494          sub_0002489c
@@ -133,9 +133,9 @@ address  status      instructions  function
 00026154  ported      204           weather_init
 00026458  identified  1306          cars_init
 00027df8  identified  114           chase_camera_init
-00028000  unknown     668           sub_00028000
-00028a14  unknown     28            sub_00028a14
-00028a84  unknown     289           sub_00028a84
+00028000  ported      668           hud_build_sprites
+00028a14  partial     28            hud_select_layout
+00028a84  identified  289           hud_rebuild_sprites
 00028f08  partial     1227          build_sections
 0002a410  identified  43            reset_race_times
 0002a4ec  ported      306           sound_load
@@ -215,20 +215,20 @@ address  status      instructions  function
 0004894c  unknown     55            sub_0004894c
 00048a14  identified  616           car_place_objects
 000492fc  identified  270           race_setup_video
-00049724  unknown     232           sub_00049724
+00049724  partial     232           race_viewports
 00049a54  unknown     14            sub_00049a54
 00049a8c  ported      182           sound_play
 00049d34  unknown     190           sub_00049d34
-00049fdc  unknown     112           sub_00049fdc
-0004a150  unknown     132           sub_0004a150
-0004a320  partial     1630          race_hud
-0004bdf4  unknown     41            sub_0004bdf4
-0004be7c  unknown     300           sub_0004be7c
+00049fdc  ported      112           debug_overlay
+0004a150  ported      132           wrong_way_counter
+0004a320  ported      1630          race_hud
+0004bdf4  ported      41            format_race_time
+0004be7c  ported      300           hud_rev_dial
 0004c2d8  unknown     292           sub_0004c2d8
 0004c738  verified    42            update_car_clocks
-0004c7c0  unknown     49            sub_0004c7c0
-0004c858  unknown     28            sub_0004c858
-0004c89c  unknown     78            sub_0004c89c
+0004c7c0  ported      49            hud_message_add
+0004c858  ported      28            hud_message_tick
+0004c89c  ported      78            hud_message_draw
 0004c990  unknown     8             sub_0004c990
 0004c9b4  unknown     736           sub_0004c9b4
 0004d5f4  partial     335           car_input
@@ -272,7 +272,7 @@ address  status      instructions  function
 000534cc  ported      267           gui_navigate
 0005383c  ported      143           gui_draw_element
 000539f8  ported      240           gui_item_build_sprite
-00053d60  unknown     86            sub_00053d60
+00053d60  ported      86            fnt_draw_text
 00053e70  ported      280           torque_spline
 000541c0  unknown     5             sub_000541c0
 000541d4  ported      57            menubox_init
@@ -319,10 +319,10 @@ address  status      instructions  function
 00055920  unknown     6             sub_00055920
 00055930  unknown     2             sub_00055930
 00055948  unknown     6             sub_00055948
-00055958  unknown     2             sub_00055958
+00055958  identified  2             gfx_set_clip
 00055960  unknown     2             sub_00055960
-00055968  ported      2             sprite_put
-00055970  ported      2             sprite_create
+00055968  identified  2             gfx_draw_sprite
+00055970  identified  2             gfx_create_sprite
 000559d0  unknown     6             sub_000559d0
 000559e4  unknown     47            sub_000559e4
 00055ae4  unknown     92            sub_00055ae4
@@ -402,7 +402,7 @@ address  status      instructions  function
 0005f670  unknown     781           sub_0005f670
 00060210  unknown     784           sub_00060210
 00060dbc  library     32            sub_00060dbc
-00060dc4  unknown     48            sub_00060dc4
+00060dc4  identified  48            raster_init
 00060e3d  partial     2214          raster_draw_list
 00060f40  identified  36            read_file_into
 00060f9c  identified  92            load_file
@@ -413,21 +413,21 @@ address  status      instructions  function
 00061164  library     7             sub_00061164
 0006117c  unknown     12            sub_0006117c
 000611a0  unknown     58            sub_000611a0
-00061220  ported      51            font_init
+00061220  ported      51            font_system_init
 00061319  unknown     39            sub_00061319
-00061399  ported      146           font_create
+00061399  ported      146           font_parse_lft
 000615eb  ported      35            font_load
-00061653  unknown     41            sub_00061653
+00061653  identified  41            font_free
 000616db  ported      154           font_text_width
-00061959  ported      331           font_draw
-00061eb0  library     49            sub_00061eb0
+00061959  ported      331           font_draw_text
+00061eb0  identified  49            gfx_install
 00061f80  library     2             sub_00061f80
 00061f88  library     2             sub_00061f88
 00061f8c  unknown     39            sub_00061f8c
 00062040  unknown     46            sub_00062040
 000620ec  unknown     23            sub_000620ec
 0006214c  unknown     23            sub_0006214c
-00062184  partial     34            sprite_put_xform
+00062184  ported      34            sprite_draw
 0006220c  unknown     42            sub_0006220c
 00062278  unknown     44            sub_00062278
 00062310  unknown     50            sub_00062310
@@ -821,7 +821,7 @@ address  status      instructions  function
 000770d0  library     67            sub_000770d0
 00077171  library     17            sub_00077171
 00077190  library     27            sub_00077190
-000771e0  unknown     118           sub_000771e0
+000771e0  partial     118           sprite_create
 00077364  library     3             sub_00077364
 00077370  library     3             sub_00077370
 0007737c  library     3             sub_0007737c
@@ -829,10 +829,10 @@ address  status      instructions  function
 000773e4  unknown     486           sub_000773e4
 00077bbc  unknown     432           sub_00077bbc
 00078270  library     24            sub_00078270
-000782b0  library     23            sub_000782b0
-00078304  unknown     494           sub_00078304
-00078ac0  unknown     431           sub_00078ac0
-00079174  library     24            sub_00079174
+000782b0  identified  23            tex_init
+00078304  verified    494           tex_triangle
+00078ac0  verified    431           tex_triangle_clip
+00079174  verified    24            tex_edge_slope
 000791a8  library     9             sub_000791a8
 000791c9  ported      136           sprite_blit
 000793c0  unknown     48            sub_000793c0
@@ -1036,10 +1036,10 @@ address  status      instructions  function
 000826fc  library     9             sub_000826fc
 0008271c  library     47            sub_0008271c
 00082792  library     39            sub_00082792
-0008283c  library     10            sub_0008283c
-00082862  library     30            sub_00082862
-000828b7  library     20            sub_000828b7
-00082950  unknown     171           sub_00082950
+0008283c  verified    10            tex_span_setup
+00082862  verified    30            tex_span
+000828b7  verified    20            tex_span_clipped
+00082950  verified    171           sprite_matrix
 00082bc7  library     50            sub_00082bc7
 00082c28  library     44            sub_00082c28
 00082c95  library     6             sub_00082c95

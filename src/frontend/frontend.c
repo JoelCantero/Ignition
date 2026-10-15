@@ -42,7 +42,9 @@ static IgnFrontendHost g_host;
 static IgnFont g_font_rec[8];          /* 0x24c214 records, slots 0x1ac4a8 */
 static IgnFont *g_font_slot[8];
 static uint8_t *g_sysgfx;              /* N_SYSGFX.PIC pixels, 256 x 412 */
-static IgnSprite g_corner[4];          /* 0x1ac478: TL, TR, BL, BR, 20 x 20 */
+static IgnMenuSprite g_corner[4];      /* 0x1ac478: TL, TR, BL, BR, 20 x 20 */
+/* Draw targets: the menu back buffer [0xea400] and the text layer [0xea408] (320 x 200, pitch 320). */
+static IgnFrame g_back_frame, g_text_frame;
 static uint8_t *g_iris_tab;            /* [0x1fef4c]: 405 x 800 */
 static uint32_t g_cheat[7];            /* 0x1fb2f0 */
 static int g_first_menu = 1;           /* 0xbed18 */
@@ -58,8 +60,8 @@ static struct {
     IgnPalette pal_black, pal_white, pal_work; /* 0xea204, 0xea208, 0xea20c */
     uint8_t *menu_tab;                         /* 0xea218: MENU.TAB */
     uint8_t *pic_bilar, *pic_trk_spr, *pic_ign_logo, *pic_car_sel, *pic_flaggor; /* 0xea750.. */
-    IgnSprite spr_logo, spr_sys_a, spr_sys_b, spr_cells[12], spr_car_sel; /* 0xea2b8.., 0xea2dc */
-    IgnSprite spr_carname, spr_trk, spr_flag[5]; /* 0xea2a8, 0xea2b0, 0xea2c8 */
+    IgnMenuSprite spr_logo, spr_sys_a, spr_sys_b, spr_cells[12], spr_car_sel; /* 0xea2b8.., 0xea2dc */
+    IgnMenuSprite spr_carname, spr_trk, spr_flag[5]; /* 0xea2a8, 0xea2b0, 0xea2c8 */
     int pages[25];                             /* 0xea47c: menu index per page slot, current language */
     int car_list[11], car_count;               /* 0xea444, 0xea470 */
     double clock, dt;                          /* 0xea21c, 0xea224 */
@@ -241,10 +243,12 @@ int ign_frontend_init(const char *data_dir, const IgnFrontendHost *host) {
     g_host = *host;
     ign_gfx_set_lut(ign_gfx_identity_lut());
     for (int i = 0; i < 8; i++) {
-        if (ign_font_load(&g_font_rec[i], data_path(fonts[i]))) {
+        if (ign_font_load_lft(&g_font_rec[i], data_path(fonts[i]))) {
             fprintf(stderr, "Could not get a font handle (%s).\n", data_path(fonts[i]));
             return -1;
         }
+        g_font_rec[i].proportional = 1; /* load_system_gfx 0x21860 after each load */
+        g_font_rec[i].spacing = 1;
         g_font_slot[i] = &g_font_rec[i];
     }
     /* load_system_gfx 0x21860: N_SYSGFX.PIC, 0x34e-byte header then 256 x 412 pixels. */
@@ -253,7 +257,7 @@ int ign_frontend_init(const char *data_dir, const IgnFrontendHost *host) {
     g_sysgfx = xcalloc((size_t)size);
     read_file_into(data_path("n_sysgfx.pic"), g_sysgfx, (size_t)size, 0);
     for (int i = 0; i < 4; i++) /* rect 0xc3cd8 = {236, 0, 20, 20}, tiles stacked down */
-        ign_sprite_set(&g_corner[i], g_sysgfx + 0x34e + (20 * i) * 256 + 236, 20, 20, 256, 0, 0);
+        ign_menu_sprite_set(&g_corner[i], g_sysgfx + 0x34e + (20 * i) * 256 + 236, 20, 20, 256, 0, 0);
     if (ign_menubox_init(data_path("menubkg.dat"))) return -1;
     iris_table_build();
     memset(g_cheat, 0, sizeof g_cheat);
@@ -262,7 +266,7 @@ int ign_frontend_init(const char *data_dir, const IgnFrontendHost *host) {
 
 void ign_frontend_destroy(void) {
     for (int i = 0; i < 8; i++) ign_font_free(&g_font_rec[i]);
-    for (int i = 0; i < 4; i++) ign_sprite_free(&g_corner[i]);
+    for (int i = 0; i < 4; i++) ign_menu_sprite_free(&g_corner[i]);
     ign_menubox_free();
     free(g_sysgfx);
     free(g_iris_tab);
@@ -395,7 +399,7 @@ static const char *menu_format_time(double t) {
 
 static void menu_draw_hiscores(void) {
     static const char *const rank[5] = {"1", "2", "3", "4", "5"};
-    ign_gfx_set_target(M.textbuf, W, W, H);
+    ign_gfx_set_target(&g_text_frame);
     ign_gfx_set_lut(ign_gfx_identity_lut());
     ign_menubox_clear();
     for (int y = 77; y != 172; y += 19) {
@@ -414,13 +418,13 @@ static void menu_draw_hiscores(void) {
         double sec;
         memcpy(&sec, t + 0x14 + 8 * i, 8);
         f->align = 1;
-        ign_font_draw(f, rank[i], 59, y);
-        ign_font_draw(f, name, 116, y);
-        ign_font_draw(f, menu_format_time(sec), 217, y);
+        ign_gfx_text(f, rank[i], 59, y);
+        ign_gfx_text(f, name, 116, y);
+        ign_gfx_text(f, menu_format_time(sec), 217, y);
         f->align = 0;
     }
     ign_gfx_set_lut(M.menu_tab);
-    ign_gfx_set_target(M.backbuf, W, W, H);
+    ign_gfx_set_target(&g_back_frame);
 }
 
 /* ---- 0x1aaf8 / 0x19508 menu cars and background animation ------------------------------------------------------ */
@@ -549,14 +553,14 @@ static void blend(int x0, int y0, int x1, int y1) {
     ign_blend_rect(M.textbuf, x0, y0, x1, y1, M.backbuf, x0, y0, M.menu_tab, W, W, W, H);
 }
 
-static int value_text_width(const IgnMenuElem *e) { return e->text ? ign_font_width(font(e->font), e->text) : 0; }
+static int value_text_width(const IgnMenuElem *e) { return e->text ? ign_gfx_text_width(font(e->font), e->text) : 0; }
 
 /* sub_000155d0 (inlined at 0x1789a..0x17ffe): highlight boxes and texts of the current page, or the credits. */
 static void menu_draw_text_layer(void) {
     if (M.snd_on) sound_update();
     memset(M.textbuf, 0, SCREEN_BYTES);
     if (M.intro_t != 0.0) return;
-    ign_gfx_set_target(M.textbuf, W, W, H);
+    ign_gfx_set_target(&g_text_frame);
     ign_gfx_set_lut(ign_gfx_identity_lut());
     double t = M.idle_t;
     const int16_t *slide = ign_menu_slides[slide_index(t)];
@@ -568,7 +572,7 @@ static void menu_draw_text_layer(void) {
             const IgnMenuItem *it = ign_gui_item(CUR_PAGE, i);
             if (it->elems < 0) continue;
             const IgnMenuElem *el = &ign_menu_elems[it->elems];
-            if (el[0].text) BAR(el[0].tx + W / 2, el[0].ty + H / 2, ign_font_width(font(el[0].font), el[0].text), 0);
+            if (el[0].text) BAR(el[0].tx + W / 2, el[0].ty + H / 2, ign_gfx_text_width(font(el[0].font), el[0].text), 0);
             if (it->value >= 0) {
                 const IgnMenuElem *v = &el[2 + 2 * (ign_cfg_get(it->value) - it->min)];
                 BAR(v->tx + W / 2, v->ty + H / 2, value_text_width(v), 1);
@@ -576,7 +580,7 @@ static void menu_draw_text_layer(void) {
                 const IgnMenuEdit *ed = &ign_menu_edits[it->edit];
                 const char *s = ed->type == 3 ? ign_menu_key_names[g_cfg[ed->dest]] : (const char *)g_cfg + ed->dest;
                 IgnFont *f = font(ed->font_sel);
-                int w = g_gui_pub.editmode == 1 ? ign_font_width(f, "WWW|") : ign_font_width(f, s);
+                int w = g_gui_pub.editmode == 1 ? ign_gfx_text_width(f, "WWW|") : ign_gfx_text_width(f, s);
                 BAR(ed->x + W / 2, ed->y + H / 2, w, 1);
             }
         }
@@ -584,12 +588,12 @@ static void menu_draw_text_layer(void) {
         ign_menubox_clear();
         if (slide[0] >= 0) {
             title = TEXT(slide[0]);
-            ign_menubox_add(11, 3, ign_font_width(font(F_RED_LITE), title), 5, 0);
+            ign_menubox_add(11, 3, ign_gfx_text_width(font(F_RED_LITE), title), 5, 0);
         }
         for (int k = 3, y = 123; k >= 1; k--, y += 19)
             if (slide[k] >= 0) {
                 name[k] = ign_menu_credit_names[slide[k]];
-                int w = ign_font_width(font(F_BLUELITE), name[k]);
+                int w = ign_gfx_text_width(font(F_BLUELITE), name[k]);
                 BAR(296 - w, y, w, 1);
             }
         ign_menubox_draw(M.textbuf, W, W, H);
@@ -598,31 +602,31 @@ static void menu_draw_text_layer(void) {
         ign_menubox_draw(M.textbuf, W, W, H);
         ign_gui_draw_items();
     } else if (t >= 1080.0) {
-        if (slide[0] >= 0) ign_font_draw(font(F_RED_LITE), title, 24, 74);
+        if (slide[0] >= 0) ign_gfx_text(font(F_RED_LITE), title, 24, 74);
         for (int k = 3, y = 123; k >= 1; k--, y += 19)
             if (slide[k] >= 0)
-                ign_font_draw(font(F_BLUELITE), name[k], 296 - ign_font_width(font(F_BLUELITE), name[k]), y);
+                ign_gfx_text(font(F_BLUELITE), name[k], 296 - ign_gfx_text_width(font(F_BLUELITE), name[k]), y);
         const char *p = TEXT(1); /* PRESS ANY KEY */
-        ign_font_draw(font(F_MINI), p, 160 - ign_font_width(font(F_MINI), p) / 2, 191);
+        ign_gfx_text(font(F_MINI), p, 160 - ign_gfx_text_width(font(F_MINI), p) / 2, 191);
     }
     if (t < 1080.0) {
         int pg = CUR_PAGE;
         if (M.key_msg_ms) { /* KEY ALREADY ASSIGNED */
             const char *s = TEXT(0);
-            int w = ign_font_width(font(F_RED_LITE), s), x = 160 - w / 2;
+            int w = ign_gfx_text_width(font(F_RED_LITE), s), x = 160 - w / 2;
             ign_menubox_clear();
             ign_menubox_add(x - 13, 4, w, 2, 0);
             ign_menubox_draw(M.textbuf, W, W, H);
-            ign_font_draw(font(F_RED_LITE), s, x, 90);
+            ign_gfx_text(font(F_RED_LITE), s, x, 90);
         }
         int q = pg == PAGE(22) ? 47 : pg == PAGE(23) ? 48 : pg == PAGE(24) ? 49 : -1;
         if (q >= 0) { /* QUIT? / RESTORE SETTINGS? / RESET GHOST CAR? */
             const char *s = TEXT(q);
-            int w = ign_font_width(font(F_BLUELITE), s), x = 160 - w / 2;
+            int w = ign_gfx_text_width(font(F_BLUELITE), s), x = 160 - w / 2;
             ign_menubox_clear();
             ign_menubox_add(x - 13, 3, w, 1, 1);
             ign_menubox_draw(M.textbuf, W, W, H);
-            ign_font_draw(font(F_BLUELITE), s, x, 70);
+            ign_gfx_text(font(F_BLUELITE), s, x, 70);
         }
         int lines = pg == PAGE(17) || pg == PAGE(18) ? 4 : pg == PAGE(19) || pg == PAGE(20) ? 5 : 0;
         if (lines) { /* joystick (25..28) or wheel and pedals (35..39) calibration */
@@ -632,21 +636,21 @@ static void menu_draw_text_layer(void) {
             IgnFont *f = font(F_BLUELITE);
             ign_menubox_clear();
             for (int i = 0, y = 70; i < lines; i++, y += 19) {
-                int w = ign_font_width(f, TEXT(base + i));
+                int w = ign_gfx_text_width(f, TEXT(base + i));
                 BAR(160 - w / 2, y, w, 1);
             }
             if (italian) {
-                int w = ign_font_width(f, extra);
+                int w = ign_gfx_text_width(f, extra);
                 BAR(160 - w / 2, 165, w, 1);
             }
             ign_menubox_draw(M.textbuf, W, W, H);
             for (int i = 0, y = 70; i < lines; i++, y += 19)
-                ign_font_draw(f, TEXT(base + i), 160 - ign_font_width(f, TEXT(base + i)) / 2, y);
-            if (italian) ign_font_draw(f, extra, 160 - ign_font_width(f, extra) / 2, 165);
+                ign_gfx_text(f, TEXT(base + i), 160 - ign_gfx_text_width(f, TEXT(base + i)) / 2, y);
+            if (italian) ign_gfx_text(f, extra, 160 - ign_gfx_text_width(f, extra) / 2, 165);
         }
     }
     ign_gfx_set_lut(M.menu_tab);
-    ign_gfx_set_target(M.backbuf, W, W, H);
+    ign_gfx_set_target(&g_back_frame);
 }
 
 static int wrap_car(int i) {
@@ -655,7 +659,7 @@ static int wrap_car(int i) {
     return M.car_list[i];
 }
 
-static void put_sprite(const IgnSprite *s, int x, int y) { ign_sprite_put(s, x << 8, y << 8, NULL); }
+static void put_sprite(const IgnMenuSprite *s, int x, int y) { ign_menu_sprite_put(s, x << 8, y << 8, NULL); }
 
 static void menu_page_draw(void) {
     int pg = CUR_PAGE, entered = g_gui_pub.page_entered;
@@ -687,7 +691,7 @@ static void menu_page_draw(void) {
         const IgnMenuItem *it = ign_gui_item(pg, ign_gui_page(pg)->sel);
         int car = M.car_list[ign_cfg_get(it->value)];
         M.carpic_dirty = 0;
-        ign_sprite_set(&M.spr_carname, M.pic_bilar + car * 0x2c52, 186, 61, 186, 0x5d00, 0x1e80);
+        ign_menu_sprite_set(&M.spr_carname, M.pic_bilar + car * 0x2c52, 186, 61, 186, 0x5d00, 0x1e80);
     }
     if ((entered && pg == PAGE(6)) || M.trkpic_dirty) {
         page_item(6, 5)->enabled = 1;
@@ -695,13 +699,13 @@ static void menu_page_draw(void) {
         int ndis = 2 - page_item(15, 0)->max;
         for (int i = 0; i < ndis; i++) page_item(6, 6 - i)->enabled = 0;
         M.trkpic_dirty = 0;
-        ign_sprite_set(&M.spr_trk, M.pic_trk_spr + ign_menu_track_thumbs[page(6)->sel], 115, 99, 115, 0x3980, 0x3980);
+        ign_menu_sprite_set(&M.spr_trk, M.pic_trk_spr + ign_menu_track_thumbs[page(6)->sel], 115, 99, 115, 0x3980, 0x3980);
     }
     if ((entered && pg == PAGE(21)) || M.flags_dirty) {
         M.flags_dirty = 0;
         int cursor = ign_cfg_get(CFG_LANGUAGE);
         for (int i = 0; i < 5; i++)
-            ign_sprite_set(&M.spr_flag[i], M.pic_flaggor + i * 0xca1 + (i == cursor ? 0x4bc6 : 0), 61, 53, 61, 0, 0);
+            ign_menu_sprite_set(&M.spr_flag[i], M.pic_flaggor + i * 0xca1 + (i == cursor ? 0x4bc6 : 0), 61, 53, 61, 0, 0);
     }
 
     /* 4. text layer */
@@ -763,7 +767,7 @@ static void menu_page_draw(void) {
                 put_sprite(&M.spr_flag[i], col * 69 + 26, 74);
             }
             const char *s = "SELECT YOUR LANGUAGE";
-            ign_font_draw(font(F_MINI), s, 160 - ign_font_width(font(F_MINI), s) / 2, 191);
+            ign_gfx_text(font(F_MINI), s, 160 - ign_gfx_text_width(font(F_MINI), s) / 2, 191);
         }
         if (pg == PAGE(4) || pg == PAGE(5)) {
             double f = 1.0 - M.carpic_ms * 2.5 * 0.0025;
@@ -772,12 +776,12 @@ static void menu_page_draw(void) {
             if (M.carpic_ms == 0) put_sprite(&M.spr_carname, 160, 90);
             else {
                 float sa[2] = {(float)f, 0.0f};
-                ign_sprite_put(&M.spr_carname, 160 << 8, 90 << 8, sa);
+                ign_menu_sprite_put(&M.spr_carname, 160 << 8, 90 << 8, sa);
             }
             put_sprite(&M.spr_car_sel, 32, 122);
             if (page(0)->sel == 1 && page(2)->sel == 0) {
                 const char *s = TEXT(pg == PAGE(4) ? 5 : 6);
-                ign_font_draw(font(F_MINI), s, 160 - ign_font_width(font(F_MINI), s) / 2, 192);
+                ign_gfx_text(font(F_MINI), s, 160 - ign_gfx_text_width(font(F_MINI), s) / 2, 192);
             }
         }
         if (pg == PAGE(6)) {
@@ -787,7 +791,7 @@ static void menu_page_draw(void) {
             if (M.trkpic_ms == 0) put_sprite(&M.spr_trk, 251, 136);
             else {
                 float sa[2] = {(float)f, 0.0f};
-                ign_sprite_put(&M.spr_trk, 251 << 8, 136 << 8, sa);
+                ign_menu_sprite_put(&M.spr_trk, 251 << 8, 136 << 8, sa);
             }
             if (entered) {
                 if (page(0)->sel == 1 && page(2)->sel == 0) M.anim_b = 1;
@@ -924,7 +928,7 @@ static int menu_page_key(int sc, int ev) {
                 M.intro_clip = 0;
                 memset(M.backbuf, 0, SCREEN_BYTES);
                 const char *s = TEXT(46); /* LOADING */
-                ign_font_draw(font(F_SMALL), s, 160 - ign_font_width(font(F_SMALL), s) / 2, 94);
+                ign_gfx_text(font(F_SMALL), s, 160 - ign_gfx_text_width(font(F_SMALL), s) / 2, 94);
                 present();
                 for (int k = 0; k < 6; k++) {
                     const char *path = data_path(ign_menu_intro_clips[k]);
@@ -986,7 +990,11 @@ int ign_frontend_load(void) {
     memset(&M, 0, sizeof M);
     M.abort = 0;
     read_file_into(data_path("baltazar\\data\\menu.col"), M.menu_pal.rgb, 0x300, 8);
-    M.backbuf = xcalloc(MENU_BUF);
+    ign_frame_init(&g_back_frame, W, H);
+    ign_frame_init(&g_text_frame, W, H);
+    memset(g_back_frame.color, 0, sizeof g_back_frame.color);
+    memset(g_text_frame.color, 0, sizeof g_text_frame.color);
+    M.backbuf = g_back_frame.color;
     set_palette(M.menu_pal.rgb[0]);
     if (g_first_menu) {
         int32_t ver = 0;
@@ -1003,11 +1011,11 @@ int ign_frontend_load(void) {
     M.menu_tab = xcalloc(0x10000);
     read_file_into(data_path("baltazar\\data\\menu.tab"), M.menu_tab, 0x10000, 0);
     ign_gfx_set_lut(M.menu_tab);
-    ign_gfx_set_target(M.backbuf, W, W, H);
+    ign_gfx_set_target(&g_back_frame);
     memset(M.backbuf, 0, SCREEN_BYTES);
     {
         const char *s = TEXT(46); /* LOADING */
-        ign_font_draw(font(F_SMALL), s, 160 - ign_font_width(font(F_SMALL), s) / 2, 94);
+        ign_gfx_text(font(F_SMALL), s, 160 - ign_gfx_text_width(font(F_SMALL), s) / 2, 94);
     }
     present();
 
@@ -1030,7 +1038,7 @@ int ign_frontend_load(void) {
     memset(&M.pal_black, 0, sizeof M.pal_black);
     memset(&M.pal_white, 0xff, sizeof M.pal_white);
     M.bgbuf = xcalloc(MENU_BUF);
-    M.textbuf = xcalloc(MENU_BUF);
+    M.textbuf = g_text_frame.color;
     M.pic_bilar = load_pic_pixels("baltazar\\data\\bilar.pic", 0x1e786);
     M.pic_trk_spr = load_pic_pixels("baltazar\\data\\trk_spr.pic", 0x1374f);
     M.pic_ign_logo = load_pic_pixels("baltazar\\data\\ign_logo.pic", 0x2685);
@@ -1078,13 +1086,13 @@ int ign_frontend_load(void) {
     M.intro_snd_a = M.intro_snd_b = -1;
     M.key_msg_ms = 0;
     uint8_t *sys = g_sysgfx + 0x34e;
-    ign_sprite_set(&M.spr_logo, M.pic_ign_logo, 173, 57, 173, 0, 0);
-    ign_sprite_set(&M.spr_sys_a, sys + 248 * 256, 253, 58, 256, 0x7e80, 0x1d00);
-    ign_sprite_set(&M.spr_sys_b, sys + 306 * 256, 126, 106, 256, 0x3f00, 0x3500);
+    ign_menu_sprite_set(&M.spr_logo, M.pic_ign_logo, 173, 57, 173, 0, 0);
+    ign_menu_sprite_set(&M.spr_sys_a, sys + 248 * 256, 253, 58, 256, 0x7e80, 0x1d00);
+    ign_menu_sprite_set(&M.spr_sys_b, sys + 306 * 256, 126, 106, 256, 0x3f00, 0x3500);
     for (int row = 0; row < 3; row++)
         for (int c = 0; c < 4; c++)
-            ign_sprite_set(&M.spr_cells[row * 4 + c], sys + row * 44 * 256 + c * 51, 51, 44, 256, 0x1900, 0x1600);
-    ign_sprite_set(&M.spr_car_sel, M.pic_car_sel, 255, 74, 255, 0, 0);
+            ign_menu_sprite_set(&M.spr_cells[row * 4 + c], sys + row * 44 * 256 + c * 51, 51, 44, 256, 0x1900, 0x1600);
+    ign_menu_sprite_set(&M.spr_car_sel, M.pic_car_sel, 255, 74, 255, 0, 0);
     M.redraw = 1;
     M.anim_a = M.anim_b = -1;
     M.cd_tracks = g_host.cd_tracks ? g_host.cd_tracks() : 0;
@@ -1101,14 +1109,12 @@ int ign_frontend_shutdown(void) {
     if (g_host.sound_shutdown) g_host.sound_shutdown();
     M.snd_on = 0;
     menu_free_car();
-    IgnSprite *spr[] = {&M.spr_carname, &M.spr_trk, &M.spr_logo, &M.spr_sys_a, &M.spr_sys_b, &M.spr_car_sel};
-    for (size_t i = 0; i < sizeof spr / sizeof spr[0]; i++) ign_sprite_free(spr[i]);
-    for (int i = 0; i < 5; i++) ign_sprite_free(&M.spr_flag[i]);
-    for (int i = 0; i < 12; i++) ign_sprite_free(&M.spr_cells[i]);
+    IgnMenuSprite *spr[] = {&M.spr_carname, &M.spr_trk, &M.spr_logo, &M.spr_sys_a, &M.spr_sys_b, &M.spr_car_sel};
+    for (size_t i = 0; i < sizeof spr / sizeof spr[0]; i++) ign_menu_sprite_free(spr[i]);
+    for (int i = 0; i < 5; i++) ign_menu_sprite_free(&M.spr_flag[i]);
+    for (int i = 0; i < 12; i++) ign_menu_sprite_free(&M.spr_cells[i]);
     for (int k = 0; k < 6; k++) free(M.intro_buf[k]);
-    free(M.backbuf);
     free(M.bgbuf);
-    free(M.textbuf);
     free(M.pic_bilar);
     free(M.pic_trk_spr);
     free(M.pic_ign_logo);
@@ -1316,7 +1322,7 @@ int ign_frontend_frame(void) {
         if (!(M.msg_time[k] > 0.0)) continue;
         M.msg_time[k] -= M.dt;
         if (M.msg_time[k] < 0.0) M.msg_time[k] = 0.0;
-        ign_font_draw(font(F_RED_DARK), M.msg_text[k], 0, k * 16);
+        ign_gfx_text(font(F_RED_DARK), M.msg_text[k], 0, k * 16);
     }
     present();
     M.frames++;
