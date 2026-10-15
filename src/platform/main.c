@@ -76,6 +76,7 @@ static double finish_clock;
 static int tv_index = 3, spectated, spectate_wait;
 static IgnSkids skids;
 static IgnFx fx;
+static const IgnTrack *hud_track;
 static IgnWeather weather;
 
 /* Start grid of sub_00026458: PLC origin of the type-0 object facing the type-1 object; slot i is
@@ -230,6 +231,22 @@ static void race_view(const IgnCar *player, int rear, IgnCamera *cam) {
     ign_chase_view(&cams[0], player, rear, cam);
 }
 
+/* Race data read by the HUD (sub_0004a320); all[0] is the player. */
+static IgnHudState hud_state(const IgnLevel *lv, const IgnCar *const *all) {
+    return (IgnHudState){.cars = all, .ncars = nrivals + 1, .level = lv, .track = hud_track, .mode = race.mode,
+                         .remaining = race.remaining, .difficulty = ign_get_difficulty(), .clock = race.clock,
+                         .total = race.total, .best_lap = race.best_lap,
+                         .shake = cams[0].shake};
+}
+
+/* Per-frame HUD counters, advanced from the race clock so headless runs see the same frames. */
+static void hud_tick(const IgnLevel *lv, const IgnCar *car) {
+    const IgnCar *all[MAX_RIVALS + 1] = {car};
+    for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
+    const IgnHudState hs = hud_state(lv, all);
+    ign_hud_update(&hud, &hs);
+}
+
 static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     ign_frame_clear(&frame);
     ign_render_track(&frame, lv, cam);
@@ -246,7 +263,9 @@ static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_render_fx(&frame, lv, &fx, all, nrivals + 1, cam);
     ign_render_weather(&frame, lv, &weather, cam);
-    ign_hud_draw(&hud, &frame, car, nrivals + 1);
+    const IgnHudState hs = hud_state(lv, (const IgnCar *const *)all);
+    ign_hud_update(&hud, &hs);
+    ign_hud_draw(&hud, &frame, &hs);
 }
 
 static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
@@ -454,7 +473,8 @@ int main(int argc, char **argv) {
             return 1;
         ghost_on = 1;
     }
-    if (ign_hud_init(&hud, data_dir, &lv.palette)) {
+    hud_track = &track;
+    if (ign_hud_init(&hud, data_dir, level, frame.w, frame.h)) {
         fprintf(stderr, "cannot load HUD panel or fonts from %s\n", data_dir);
         ign_free_level(&lv);
         return 1;
@@ -528,6 +548,7 @@ int main(int argc, char **argv) {
                 ign_pos_step(&lv.pos, &lv.track);
                 pos_ticks = 0;
             }
+            hud_tick(&lv, &car);
             if (full_trace) trace_car(++trace_tick, &car, &in);
             if (!ign_race_started(&race)) continue;
             if (ghost_out && !car.out) ign_ghost_record(&rec, &car, track.count);
