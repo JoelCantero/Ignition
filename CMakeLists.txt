@@ -23,6 +23,7 @@ add_library(ignition_core STATIC
   src/game/track.c
   src/render/raster.c
   src/render/hud.c
+  src/render/sprite.c
   src/render/camera.c
 )
 target_include_directories(ignition_core PUBLIC src)
