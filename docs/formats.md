@@ -911,12 +911,29 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   `+0xc6` (255 = sin glifo), offsets `u32` en `+0x1c6`, bitmaps en `+0x546`. Un texel no nulo se escribe como
   `texel + color`; la pluma avanza `ancho + separación`.
 - **Sprites** (`geputget.c`, `sub_000771e0` vía `[0x20a088]`): `{?, w, h, ?, píxeles, stride, hotspot x, y}`; el HUD crea
-  todos con hotspot 0, así que la posición es la esquina superior izquierda. `sub_00062184` dibuja en coordenadas 8.8;
-  con `{escala, ángulo}` pasa a una matriz 16.16 (`escala·65536.0f`) y a `0x82950`. El blit sin matriz (`0x791c9`)
-  recorta contra la ventana de `sub_00055958` y escribe `dst = lut[src·256 + dst]` con `lut = [0x257e48]`: en carrera,
-  la **PAN** del nivel. Filas 160–255 de PAN son constantes (= fila: colores opacos compartidos con la paleta de pista),
-  la fila 0 es casi identidad (≈205/256: transparente), 1–15 son vidrios/sombras y 16–159 valen 0. Los PIC del HUD
-  usan esos índices directamente; no hay conversión de paleta.
+  todos con hotspot 0, así que la posición es la esquina superior izquierda. Cada sprite se copia a una página de
+  textura de 256 × 256 (`0x68e4c`); `sub_00062310` arma el manejador `{hx, hy, u0, v0, u1, v1, página, lut}` (8.8,
+  `lut = [0x257e48]`). Sin matriz (`0x791c9`) recorta contra la ventana de `sub_00055958` y escribe
+  `dst = lut[src·256 + dst]`; en carrera la tabla es la **PAN** del nivel. Filas 160–255 de PAN son constantes (en
+  general = fila: colores opacos compartidos con la paleta de pista, aunque no siempre, p. ej. USA fila 0xc4 = 146), la
+  fila 0 es casi identidad (≈205/256: transparente), 1–15 son vidrios/sombras y 16–159 valen 0. Los PIC del HUD usan
+  esos índices directamente; no hay conversión de paleta.
+- **Sprites con matriz** (`sub_00062184` con `{escala, ángulo}` → `sub_00082950`, verificado): `S = trunc(escala·65536.0f)`,
+  matriz `{S cos, S sin, S sin, S cos}`; esquinas `pos`, `pos + (u1 − 16 − u0)·(m0, m1)`, `pos + (v1 − 16 − v0)·(m2, m3)`
+  y su suma (productos `>> 16` de 64 bits), dos triángulos con texturas afines: `sub_00078304` (ordena por y, va a
+  `0x78ac0` si sale de la ventana 8.8), gradientes `0x90a80` (du/dx y dv/dx desde el punto del lado largo a la altura del
+  vértice medio, anchos −2..2 forzados a ±4, tabla de difuminado `k·(−d/dx >> 3)` por los 3 bits altos de la fracción
+  de x), bordes `0x914d0` (alto ≤ 64 en 8.8 pasa a 65, o a 3 si |dx| > 1,0; prepaso `256 − (y & 0xff)`) recorridos con
+  u, v enteros (`0x911e0`, lado izquierdo) o 8.8 difuminados (`0x91220`, lado derecho), y tramos de derecha a izquierda
+  (`0x82862`) con u.fracción y v 8.8 empaquetados en 32 bits (el acarreo de v entra en la fracción de u) y el texel del
+  extremo izquierdo tomado del borde entero. La variante recortada (`0x78ac0`) recorta los bordes en y y por la derecha
+  (`0x91270`, partiendo el borde en un tramo vertical en x = derecha) y por la izquierda en el tramo (`0x828b7`).
+- **Triángulo plano** (primitiva `0x0f`, `0x729f3`, verificado): bordes 16.16 con pendiente `(dx ± 1)·recip(dy)`,
+  `recip(n) = 65536/(n+1) − 1` (tabla `0xc9168`), fracción inicial 0 o `0xffff` y un paso adelantado según el lado y el
+  sentido (cada borde decide el caso dx = 0 a su manera), tramos con ambos extremos incluidos, mitad inferior con el
+  paso antes de cada fila, ventana inclusiva `x1 − 1`/`y1 − 1`. El color sale de la tabla de estado `[0xc484c]`
+  (`sombra[color·256 + byte +0x2d]`), que el HUD apunta a la PAN: la aguja (0xc4) y el turbo (0xd7) son
+  `PAN[0xc400]` y `PAN[0xd700]`.
 - **Recortes** (`sub_00028000`, tablas `{x, y, w, h}` × 36 en `0xc3618` (320×200, `S_PANGFX.PIC`, stride `0x7b`),
   `0xc3858` (640×480, `N_PANGFX.PIC`, `0xe3`) y `0xc3a98` (800×600, `H_PAN1.PIC`/`H_PAN2.PIC`, `0x100`)): 0 TOTAL TIME,
   1 LAP TIME, 2 POS, 3 esfera, 4–12 palanca de cambios (de `[0x1fef64]`, `H_PAN2` en 800×600), 26 tapa de la aguja,
@@ -925,8 +942,11 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   `(9 + 12f, 139 + 17c)` de `N_PANGFX` (índice `4f + c` = modelo), explosión 24 × 23 en `(83 + 24c, 23f)` (10
   fotogramas), barra de eliminación 7 × 120 en `(0, 139)` de `N_PANGFX` o 7 × 300 en `(225, 0)` de `H_PAN2`, corona
   17 × 12 en `(11, 207)` y lugares 1–3 (89 × 84) de `N_SYSG_2.PIC` en `(153, 0)`, `(0, 88)`, `(89, 88)`.
+- **Ventanas** (`sub_00049724`): con un jugador, centrada con los factores `0xc0b80[tamaño]` (1×1, 0,8×1, 0,6×1,
+  0,5×0,83); con dos, la mitad del ancho: jugador 0 a la derecha (`x0 = 3W/4 − w/2 + 1`, `x1 = 3W/4 + w/2`) y jugador 1
+  a la izquierda (`x0 = W/4 − w/2`, `x1 = W/4 + w/2 − 1`). `x1`/`y1` son exclusivos para la ventana de recorte.
 - **Colocación** (`[0x1fef20]`, 28 `int` en `0xc3d48`/`0xc3db8`/`0xc3e28`, relativos a las esquinas de la ventana
-  `[0x1fefd0]+0x2c..0x38` = 0, 0, ancho, alto con un jugador) y **texto** (`[0x1fef1c]`, 8 `int` en
+  `[0x1fefd0]+0x2c..0x38` del jugador) y **texto** (`[0x1fef1c]`, 8 `int` en
   `0xc3ce8`/`0xc3d08`/`0xc3d28`). En 640×480: paneles en `(x0+7, y0+7)` y `(x0+7, y0+33)`; tiempos en `x0+7`, filas
   `y0+20/46/59/72`; POS en `(x0+8, y1−55)` y su número en `(x0+8, y1−40)`; esfera en `(x1−73, y1−88)`, pivote de la aguja
   `(x1−56, y1−37)`, media anchura 3 y longitud 26; velocidad `"%.3d"` en `(x1−44, y1−29)`; palanca en `(x1−28, y1−73)`;
@@ -948,24 +968,39 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   a `car+0x580` (máx. 120) mientras el rumbo difiere del ángulo del tramo − π/2 entre 2π/3 y 4π/3, y lo resta si no.
   Semáforo: recorte 0 con `[0x1fb4e8]` en `[50, 100)`, 1 en `[100, 150)`, 2 en `[150, 200)` y 3 (GO) en carrera
   mientras `[0x1fb4d8] < 250`. Eliminación: barra con el marcador de cada coche a `|tramo|/n_tramos` (0 antes de 250),
-  la corona del líder y la explosión `car+0x60c` (0,3 por fotograma hasta 10, `cars_body_sway`) de los eliminados.
+  la corona del líder y la explosión `car+0x60c` (0,3 por fotograma hasta 10, `cars_body_sway`) de los eliminados; en
+  la vista del segundo jugador su marcador se vuelve a dibujar encima (`0x4b648`).
   Tras la meta: lugar 1–3 (eliminación: solo 1) durante 120 fotogramas (`[0x1fed9c]`), escalado `car+0x5d4·0,04`
   mientras crece (25 fotogramas) con la esquina en el centro de la ventana; el HUD desaparece cuando
   `[0x1fb4d0] > 120` (`sub_000420cc` `0x4310c`).
 - **Mensajes** (`sub_0004c7c0`/`0x4c858`/`0x4c89c`): 5 ranuras de `0x78` B; cada fotograma `temporizador++` y la
-  ranura se libera al pasar la duración; se ven mientras `fmod(t, 2·periodo) < periodo`, centrados, con `MINI.LFT`
-  (320×200) o `SMALL.LFT` y `(ranura + 1)·8|16` píxeles por encima del borde inferior. «%s IS OUT» (eliminación,
-  `0x2e085`, duración 80, periodo 8, nombre de 3 letras `0xc3350` por modelo: COO, BAN, VAC, ENF, RED, BUS, MON, BUG,
-  SMO, VEG, IGN), «LAP RECORD» (vuelta humana por debajo de `[0x1fb390]`, `0x2f43a`), «TRACK RECORD» (`0x2f548`) y,
-  desde el propio HUD, «WARNING, YOU'RE LAST!» cada fotograma con duración 0 y periodo 1. Idioma `[0x1ff6eb]`: 0 inglés,
-  1 alemán, 2 italiano, 3 español, 4 sueco, 5 francés (en el port, `IGN_LANG`).
-- **Desviaciones del port**: una sola ventana (las ramas del segundo jugador no se portan); los contadores por
-  fotograma avanzan una vez por cada 1/36 s de `[0x1fb4d8]` en lugar de por fotograma dibujado; el primer fotograma
-  pone aguja y palanca en su objetivo; el temblor usa un generador propio en vez de `sub_00051714`; los eventos de
-  mensajes se detectan comparando el estado entre fotogramas (no hay «TRACK RECORD» porque no hay récords guardados) y
-  los pilotos usan el código de su modelo como nombre; los triángulos se rellenan con una regla de píxel propia; la
-  escala del lugar es al vecino más próximo sobre la esquina superior izquierda (¿?); los fuegos artificiales de
-  `0x4bca8` (solo consumen `rand`) y los sonidos del semáforo dentro del HUD no se portan (el reloj ya los emite).
+  ranura se libera al pasar la duración; se ven mientras `fmod(t, 2·periodo) < periodo`, centrados en la pantalla
+  (ventana −1) o en la ventana del mensaje, con `MINI.LFT` (320×200) o `SMALL.LFT` y `(ranura + 1)·8|16` píxeles por
+  encima del borde inferior de la ventana 0. «%s IS OUT» (eliminación, `0x2e085`, duración 80, periodo 8, uno por
+  ventana, nombre de 3 letras `0xc3350` por modelo: COO, BAN, VAC, ENF, RED, BUS, MON, BUG, SMO, VEG, IGN), «LAP RECORD»
+  (vuelta de un jugador por debajo de `[0x1fb390]`, `0x2f43a`), «TRACK RECORD» (tercera vuelta de un jugador fuera de
+  eliminación con `car+0x3a4` por debajo del récord guardado, `0x2f548`) y, desde el propio HUD, «WARNING, YOU'RE
+  LAST!» cada fotograma con duración 0 y periodo 1. Ventana: −1 con un jugador, la del jugador con dos. Idioma
+  `[0x1ff6eb]`: 0 inglés, 1 alemán, 2 italiano, 3 español, 4 sueco, 5 francés (en el port, `IGN_LANG`).
+- **Récords guardados** (`IGN_DOS.BTZ`): volcado de `0x597` B de `0x1ff158..0x1ff6ef` (`0x2b4f6`, `sub_00061078`); el
+  récord de carrera de la pista t es el `double` en `0x1ff32b + t·0x78` (desplazamiento `0x1d3 + t·0x78` del archivo) y
+  el de vuelta 0x3c más allá. En el archivo de GOG: USA 135,436 s, CANADA 110,258, … JAPAN 233.
+- **Superposición de depuración** (`sub_00049fdc`, `[0xc0b4c]` nunca activo en la versión publicada): «X %.0f»,
+  «Y %.0f», «Z %.0f», «X VIN %.2f», «Y VIN %.2f» de la cámara de depuración (`[0x1fb380]`, `[0x1fb330]`, `[0x1fb388]`,
+  `[0x1fb320]`, `[0x1fb328]`) con `IGNITION.FNT` en color 0x14, filas 0, 10, 20, 30, 40. El port la muestra con la
+  cámara libre (F1).
+- **Verificación ejecutable** (`tests/hud_original.py`, con `IGN_VERIFY_ORIGINAL`): ejecuta los bytes originales del
+  triángulo (`0x60e3d` tras las tablas de `0x60dc4` y `0x729e4`) y de `sub_00082950` en Unicorn y compara píxel a píxel
+  con `sprite.c`: 6 009 triángulos (aleatorios, recortados, planos, degenerados) y 624 sprites (escalas 0,05–2,5,
+  rotaciones, posiciones fuera de pantalla, ventanas) idénticos, pasando por todas las ramas de recorte.
+- **Desviaciones del port**: `main.c` solo usa una ventana (el HUD admite dos); los contadores por fotograma avanzan una
+  vez por cada 1/36 s de `[0x1fb4d8]` en lugar de por fotograma dibujado; el primer fotograma pone aguja y palanca en
+  su objetivo; el temblor usa un generador propio en vez de `sub_00051714`; los eventos de mensajes se detectan
+  comparando el estado entre fotogramas y los pilotos usan el código de su modelo como nombre; la capa de layout se
+  elige por el ancho del fotograma (la tabla `0x1d5eb0` se rellena en ejecución); cada sprite escalado ocupa su propia
+  página de textura en el origen (los vecinos de la página original solo se verían con muestras fuera del sprite);
+  no se emiten el sonido del lugar al terminar (`0x4bc54`, audio) ni el bucle de «fuegos» de `0x4bca8`, que solo
+  consume `rand` y no dibuja.
 
 ## Pendiente / desviaciones
 
