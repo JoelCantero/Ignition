@@ -207,9 +207,7 @@
 0001034c  pit_read             latched PIT ch0 count >> g_pit_shift  status=native roadmap=phase4.loop
 00010390  anim_free_all        PLC 0xfa texture-tile animations [0xab5f0]  roadmap=phase2.world
 0001044c  anim_free_all2       byte-identical copy of 0x10390  roadmap=phase2.world
-00010508  anim_register        faces of a 0xfa mesh = frames (64x64 tiles); collects matching world faces  roadmap=phase2.world
 0001098c  anim_count_faces     roadmap=phase2.world
-00010a00  anim_step            shifts collected faces' UV/page to the next frame (collisions_pass)  roadmap=phase2.world
 00010b30  anim_collect         roadmap=phase2.world
 00010bc8  anim_count_matches   roadmap=phase2.world
 00010c5c  face_in_tile         roadmap=phase2.world
