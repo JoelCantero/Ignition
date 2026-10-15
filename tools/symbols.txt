@@ -151,3 +151,19 @@
 0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> wrap/fallback/invalid-record selection ported; route topology remains approximate  status=partial roadmap=phase1.ai-route
 000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty
+# --- Persistence: IGN_DOS.BTZ, records and time-trial ghosts (src/game/save.c, ghost.c, tools/btz.py) ---
+0002293c  race_config_load     read_file_into([0xc0c64]='ign_dos.btz') -> 0x1ff158 (0x597 B), copies settings to globals and participants  status=partial roadmap=phase4.ui
+00022f38  set_track_names      [0x1fef10] -> g_level_dir, g_level_name, ghost basename 0x1ff141  status=ported roadmap=phase6.ghost
+0002adf8  ghost_load           mode 2 && [0x1fee4c]: GHOSTS\%s.GST; missing -> [0x1fee4c]=0, [0x1fee04]=3000000; other track -> [0x1fee00]=1  status=partial roadmap=phase6.ghost
+0002b430  shutdown_save        frees resources, writes 0x597 B of 0x1ff158 to ign_dos.btz  status=partial roadmap=phase4.ui
+0002ccc8  race_end_save        mode 2, !overflow, [0x1fee04]*0.01 > car+0x3a4 -> pad and write GST; mode 0 championship points/grid; calls 0x2cf60  status=partial roadmap=phase6.ghost
+0002cf60  btz_save             mode != 0: shuffle grid 0x1ff28b ncars times; +0x107=[0x1fef08], +0x10b=[0x1fefcc]; write ign_dos.btz  status=ported roadmap=phase4.ui
+00061078  write_file           (eax=name, edx=buf, ebx=size) fopen 'wb' + fwrite; 1 ok, 0x7d0/0x7e4 errors
+001ff158  g_btz                IGN_DOS.BTZ image, 0x597 B packed; layout in docs/formats.md (BTZ)
+001ff317  g_track_records      7 x 0x78: race names[5][4], race times f64[5] (+0x14), lap names (+0x3c), lap times f64[5] (+0x50)
+001ff141  g_ghost_basename     MOOSEJAW, GOLDRUSH, ... (sub_00022f38)
+001ff6eb  g_language           BTZ+0x593: 0 EN, 1 DE, 2 IT, 3 ES, 4 SV, 5 FR
+001feefc  g_game_mode          BTZ+0x8: 0 championship, 1 ¿?, 2 time trial, 3 elimination
+001fee04  g_ghost_record_cs    time to beat in centiseconds (ghost header, 3000000 without ghost)
+001fee00  g_ghost_overflow     recording over 300 s or ghost of another track: no GST written
+001fee4c  g_ghost_on           BTZ+0x10, kept only in time trial
