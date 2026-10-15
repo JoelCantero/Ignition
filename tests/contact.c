@@ -447,6 +447,26 @@ static int runner(void) {
                 }
                 printf("\n");
             }
+        } else if (mode == 'V') {
+            int32_t x, z;
+            int layer, n;
+            if (scanf("%d %d %d %d", &x, &z, &layer, &n) != 4 || n < 0 || n > 512) return 1;
+            static IgnObject objs[512];
+            static const int32_t vz[3] = {0, 0, 0};
+            for (int i = 0; i < n; i++) {
+                objs[i] = (IgnObject){.verts = vz};
+                int32_t ox, oz;
+                if (scanf("%u %d %d", &objs[i].type, &ox, &oz) != 3) return 1;
+                objs[i].pos[0] = ox - IGN_SRF_ORIGIN, objs[i].pos[2] = oz - IGN_SRF_ORIGIN;
+            }
+            IgnModel m = {.nobj = n, .objs = objs};
+            if (ign_engine_place(&m)) return 1;
+            int out[512];
+            int k = ign_engine_view(&m, x, z, layer, out, 512);
+            printf("%d", k);
+            for (int i = 0; i < k; i++) printf(" %d", out[i]);
+            printf("\n");
+            free(m.cell), free(m.stamp);
         } else {
             return 1;
         }

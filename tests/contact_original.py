@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from le2elf import LE, convert  # noqa: E402
 
 ORIGINAL_SHA256 = "179c654ba65281f08bbcda2b5943ab9f35c309ec718600f81104644d22db948c"
-SCRATCH, STACK, RETURN = 0x400000, 0x500000, 0x600000
+SCRATCH, STACK, RETURN, GRID = 0x400000, 0x500000, 0x600000, 0x700000
 ESP = STACK + 0x8000
 POLY_A, POLY_B, BODY_A, BODY_B, RECORD, HIT = (SCRATCH + o for o in (0, 0x100, 0x200, 0x300, 0x400, 0x500))
 VIEW, LIST, CARS, POOL, MESH = (SCRATCH + o for o in (0x600, 0x700, 0x800, 0x1000, 0x2000))
@@ -54,6 +54,7 @@ class Original:
             self.uc.mem_write(obj["base"], bytes(images[obj["index"]]))
         for base in (SCRATCH, STACK, RETURN):
             self.uc.mem_map(base, 0x10000)
+        self.uc.mem_map(GRID, 0x40000)
         if self.uc.mem_read(0xE68C8, 1)[0] & 1:
             raise ValueError("Original selects the software-FPU runtime path")
         constants = struct.unpack("<5d", self.uc.mem_read(0xA92CC, 40))
@@ -241,6 +242,39 @@ class Original:
         return out
 
 
+    def view(self, x, z, layer, objects):
+        """sub_00058c1c with the view of sub_0003383c (850, 0) over a 200 x 200 grid built like LI_PLACEOBJECT."""
+        self.put(SCRATCH, "%dI" % (0x8000 // 4), *([0] * (0x8000 // 4)))
+        self.uc.mem_write(GRID, bytes(0x40000))
+        self.put(VIEW_PTR, "I", VIEW)
+        self.put(VIEW, "d", float(x))
+        self.put(VIEW + 0x10, "d", float(z))
+        self.put(VIEW + 0x18, "2d", 850.0, 0.0)
+        self.put(LIST_PTR, "I", LIST)
+        self.put(0x24C014, "i", 200)
+        self.put(0x24C048, "I", GRID)
+        self.put(0x24BFF0, "i", layer)
+        order = [i for i, o in enumerate(objects) if (o[0] & 0xFFF) < 100] + \
+                [i for i, o in enumerate(objects) if (o[0] & 0xFFF) >= 100]
+        pool_of = {}
+        for slot, i in enumerate(order):
+            otype, ox, oz = objects[i]
+            pool = POOL + 0x30 * slot
+            pool_of[pool] = i
+            cell = GRID + 4 * ((oz // 256) * 200 + ox // 256)
+            head, = self.get(cell, "I")
+            self.put(pool, "I", pool)
+            self.put(pool + 0xC, "i", ox)
+            self.put(pool + 0x14, "i", oz)
+            self.put(pool + 0x20, "hhh", 0, -1, (otype >> 12) & 0xF)
+            self.put(pool + 0x26, "I", head)
+            self.put(cell, "I", pool)
+        self.run(0x58C1C, RETURN, [(0x58C1C, 0x58EBA), (0x55F9C, 0x55FC0)],
+                 [(VIEW + 0x60, VIEW + 0x68), (LIST, LIST + 0x800), (0x24C01C, 0x24C020), (0x24C05C, 0x24C060)], {})
+        n, = self.get(VIEW + 0x60, "i")
+        return [n] + [pool_of[p] for p in self.get(LIST, "%dI" % n)] if n else [0]
+
+
 def f32(v):
     return struct.unpack("<f", struct.pack("<f", v))[0]
 
@@ -338,6 +372,14 @@ def cases(seed):
             objects.append((otype, ox, oy, oz, verts, faces))
         out.append(("G", rnd.choice((0, 50)), rnd.choice((-1, 0, 3, 0x12C, 0x15E)), x, y, z, rnd.randrange(2),
                     objects))
+    # Engine view lists (sub_00058c1c): objects scattered over cells around and beyond the view, with layers.
+    for i in range(300):
+        x, z = rnd.randrange(5000, 46000), rnd.randrange(5000, 46000)
+        objects = []
+        for _ in range(rnd.randrange(1, 120)):
+            otype = rnd.choice((2, 7, 0x96, 0x12C, 0x1002, 0x112C, 0x2007, 0x3200))
+            objects.append((otype, x + rnd.randrange(-3200, 3200), z + rnd.randrange(-3200, 3200)))
+        out.append(("V", x, z, rnd.choice((0, 0, 1, 2, 3)), objects))
     return out
 
 
@@ -354,6 +396,9 @@ def runner_input(case):
         return "R " + " ".join("%.17g" % x for x in case[1] + case[2])
     if kind == "F":
         return "F %d " % case[1][0] + " ".join("%.17g" % x for x in case[1][1:])
+    if kind == "V":
+        return "V %d %d %d %d " % (case[1], case[2], case[3], len(case[4])) + \
+            " ".join("%d %d %d" % o for o in case[4])
     if kind == "G":
         parts = ["G %d %d %d %d %d %d %d" % (case[1], case[2], case[3], case[4], case[5], case[6], len(case[7]))]
         for otype, ox, oy, oz, verts, faces in case[7]:
@@ -384,6 +429,8 @@ def original_output(orig, case):
         return orig.fly(case[1])
     if kind == "Q":
         return orig.query(case[1], case[2], case[3], case[4], case[5])
+    if kind == "V":
+        return orig.view(case[1], case[2], case[3], case[4])
     if kind == "G":
         # Road answers are compared with the normal and points; special objects by their class only.
         return orig.ground_list(*case[1:])
@@ -399,11 +446,13 @@ def close(a, b, rel, abs_tol):
 # Port intermediates are binary64 where the x87 keeps 80 bits. sub_000346cc rounds jB0 = -1.25 * j0 (masses 10 and
 # 2) to float32: the exact value can lie on a float midpoint, and the 80-bit rounding of 1 / (mA + mB) breaks the tie,
 # so that intermediate may end one float ulp apart; "I" allows it and the exact cases are counted separately.
-TOLERANCE = {"G": (0, 0), "Q": (0, 0), "P": (2.5e-7, 1e-4), "I": (1e-6, 1e-5), "R": (1e-12, 1e-10), "F": (1e-15, 1e-12), "B": (1e-12, 1e-9)}
+TOLERANCE = {"V": (0, 0), "G": (0, 0), "Q": (0, 0), "P": (2.5e-7, 1e-4), "I": (1e-6, 1e-5), "R": (1e-12, 1e-10), "F": (1e-15, 1e-12), "B": (1e-12, 1e-9)}
 EXACT = (1e-12, 1e-12)
 
 
 def compare(kind, port, orig, tolerance=None):
+    if kind == "V":
+        return [int(v) for v in port] == [int(v) for v in orig]
     if kind == "G":
         n = len(port)
         return [int(v) for v in port] == [int(v) for v in orig[:n]]
