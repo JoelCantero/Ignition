@@ -6,6 +6,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
+# The original rounds every x87 operation to binary64 (control word 0x127f); fused multiply-adds would not.
+if(NOT MSVC)
+  add_compile_options(-ffp-contract=off)
+endif()
 
 find_package(SDL3 REQUIRED CONFIG)
 
@@ -17,6 +21,7 @@ add_library(ignition_core STATIC
   src/game/ghost.c
   src/game/skid.c
   src/game/fx.c
+  src/game/palette.c
   src/game/weather.c
   src/game/physics.c
   src/game/race.c
@@ -82,6 +87,9 @@ add_test(NAME track_real_assets COMMAND track_real_assets_test "${GAME_DIR}")
 add_executable(pos_test tests/pos.c)
 target_link_libraries(pos_test PRIVATE ignition_core)
 add_test(NAME pos COMMAND pos_test)
+add_executable(palette_test tests/palette.c)
+target_link_libraries(palette_test PRIVATE ignition_core)
+add_test(NAME palette COMMAND palette_test)
 
 add_executable(body_step_test tests/body_step.c)
 target_link_libraries(body_step_test PRIVATE ignition_core)
@@ -97,6 +105,7 @@ if(NOT MSVC)
   target_compile_options(track_real_assets_test PRIVATE -Wall -Wextra)
   target_compile_options(ai_route_choice_test PRIVATE -Wall -Wextra)
   target_compile_options(ai_schedule_test PRIVATE -Wall -Wextra)
+  target_compile_options(palette_test PRIVATE -Wall -Wextra)
 endif()
 option(IGN_VERIFY_ORIGINAL "Compare physics and car kernels with original LE bytes (requires Python unicorn)" OFF)
 if(IGN_VERIFY_ORIGINAL)
@@ -133,6 +142,10 @@ if(IGN_VERIFY_ORIGINAL)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/respawn_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
             --report ${CMAKE_BINARY_DIR}/respawn-original-report.json)
+  add_test(NAME palette_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/palette_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:palette_test>
+            --report ${CMAKE_BINARY_DIR}/palette-original-report.json)
   add_test(NAME lap_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/lap_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>

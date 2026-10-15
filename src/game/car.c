@@ -484,7 +484,7 @@ void ign_car_steer(IgnCar *car, int input, double grip_avg, int analog) {
     double limit = 0.3;
     if (fabs(car->kmh) < ign_car_steer_speed[p])
         limit = (ign_car_steer_speed[p] - car->kmh) / ign_car_steer_div[p] + 0.3;
-    double target = 5.0 / grip_avg * (input * 0.01) * limit;
+    double target = 5.0 / grip_avg * (input * 0.01 * limit); /* 0x501e8: 5/grip x (input x 0.01 x limit) */
     if (car->ai || analog) {
         b->steer = target;
         return;
@@ -513,18 +513,9 @@ double ign_car_update_grip(IgnCar *car, const int types[4]) {
     return avg;
 }
 
+/* The game's x87 control word (0x127f) rounds the product to binary64 before __CHP truncates it. */
 static int speed_index(double velocity) {
-    double kmh = velocity * 3.6;
-    int speed = (int)kmh;
-    /* x87 truncates the extended product, not a binary64 product rounded to an integer. */
-    if (speed && kmh == speed) {
-        double residual = fma(velocity, 3.6, -kmh);
-        double half_ulp = ldexp(1.0, ilogb(fabs(kmh)) - 64);
-        if (speed > 0 && residual < -half_ulp) speed--;
-        if (speed < 0 && residual > half_ulp) speed++;
-    }
-
-    return abs(speed);
+    return abs((int)(velocity * 3.6));
 }
 
 int ign_car_input_throttle(const IgnCar *car, int accel, int brake, int automatic) {
@@ -570,11 +561,7 @@ int ign_car_throttle(IgnCar *car, int input) {
     static const double SPEED_DIV[4] = {1.0, 1.15, 1.3, 1.3};
     IgnBody *b = &car->body;
     int magnitude = speed_index(b->v_fwd);
-    double divisor = SPEED_DIV[difficulty], quotient = magnitude / divisor;
-    int idx = (int)quotient;
-    if (idx && quotient == idx &&
-        fma(-idx, divisor, magnitude) < -ldexp(1.0, ilogb(quotient) - 64) * divisor)
-        idx--;
+    int idx = (int)(magnitude / SPEED_DIV[difficulty]);
     if (idx > IGN_TORQUE_POINTS - 1) idx = IGN_TORQUE_POINTS - 1;
     /* 0x4dd05: wheelspin against the motion gives no torque. */
     if (car->slip > 1.5707963267949 && car->slip < 4.7123889803847 && car->kmh > 2.0 && input > 0)

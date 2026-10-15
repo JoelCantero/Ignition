@@ -324,8 +324,8 @@ esquiva según el lateral del rival y cotejo integral de selección de carril y 
 
 ## Caja de cambios y dificultad
 
-- `sub_000502c4(coche)` (automático): `idx = min(abs(trunc_x87(v_long·3.6)), 199)`, producto con el
-  `double` original 3.6. Usa curvas **compartidas del modelo 0** en `0x1fb6d8` (marcha 1) y `0x1fb868`
+- `sub_000502c4(coche)` (automático): `idx = min(abs(trunc(v_long·3.6)), 199)`, producto con el
+  `double` original 3.6 redondeado a binary64 por la palabra de control `0x127f`. Usa curvas **compartidas del modelo 0** en `0x1fb6d8` (marcha 1) y `0x1fb868`
   (marcha 2), comparación `int16` con signo, sin dividir el índice por dificultad.
   Si `par1[idx] > par2[idx]`, objetivo 1; en caso contrario objetivo 2 dentro del intervalo estricto
   `(-1.5707963267949, 1.5707963267949)` o por encima de `4.7123889803847`; fuera, objetivo 1.
@@ -682,13 +682,28 @@ planificador cambia deliberadamente la conducción de IA. No se regenera ese bas
   Analógico y rivales fijan directamente el ángulo; rivales usan límites del perfil 11.
   Dirección visual `visual += (10·0.01·entrada·4−visual)·0.1`.
 
+### Palabra de control x87
+
+La tabla XI de Watcom registra en `0xe706e` la entrada `00 01 94 62 05 00` (cercana, prioridad 1):
+`0x56294` salta a `0x6f634`, que hace `fninit` y en `0x6f651` `fldcw [0xe6be0]`, con `[0xe6be0] = 0x127f`:
+precisión de 53 bits (double), redondeo al más cercano y excepciones enmascaradas. La otra lectura
+(`0x6f8bb`, vía `sub_000821d0`) carga el mismo valor y nadie lo escribe. `__CHP` (`0x55f9c`) usa `0x1f7f`
+(truncar, 64 bits) solo alrededor de `frndint` y lo restaura; el operando ya llega redondeado a double.
+La cola compartida del rasterizador (`0x7616c`/`0x765c3`, llamada por unas 60 rutinas de spans) baja a
+**24 bits** (`and ax, 0xfcff`) mientras dibuja y restaura la palabra al salir.
+
+Todos los oracles fijan `0x127f`, comprueban que coincide con `[0xe6be0]` y que la rutina la conserva.
+Con `0x037f` (64 bits) cambiaban 1 435 de 1 658 ticks de `body_step`, 47 973 pasos del coche y 588 decisiones
+de la caja de cambios; reloj, reaparición, vueltas e IA no cambiaban. El port se compila con
+`-ffp-contract=off`: cada operación x87 se redondea a double y una multiplicación-suma fusionada no.
+
 ### Verificación ejecutable de `body_step`
 
 `tests/physics_original.py` carga los objetos LE reubicados mediante el parser existente `tools/le2elf.py`;
 no parchea ni ejecuta el archivo original como proceso del sistema. Identidad admitida:
 SHA-256 `179c654ba65281f08bbcda2b5943ab9f35c309ec718600f81104644d22db948c`.
 Se emula x86-32 con Unicorn 2.1.4, EAX = cuerpo, EDX = indicador de aire, `slope_k` double en ESP+4,
-retorno centinela y palabra de control x87 `0x037f`. El cuerpo Watcom se serializa por offsets, incluidos
+retorno centinela y palabra de control x87 `0x127f` (véase [Palabra de control x87](#palabra-de-control-x87)). El cuerpo Watcom se serializa por offsets, incluidos
 los doubles no alineados a partir de `+0xac`; nunca se copia la estructura C nativa.
 
 - Constantes originales comprobadas en `0xa7c6c..0xa7c94`: `1.570798`, `1/72`, `9.81`, `0.2`, `2`, `3`.
@@ -715,9 +730,12 @@ los doubles no alineados a partir de `+0xac`; nunca se copia la estructura C nat
 con semilla fija, junto con límites `nextafter`, signos, cuatro cuadrantes, reposo y agarre cero.
 Se exige ejecutar ramas de giro limitado en ambos sentidos, giro directo, derrape en reposo/movimiento,
 recorte motriz/lateral, aire, `FPATAN` y los cinco `D9 D8` del integrador.
-Tolerancia por salida: `2e-11 + 2e-12·|original|` (redondeo x87 frente a double/libm);
+Tolerancia por salida: `2e-14 + 1e-14·|original|` (transcendentes x87 frente a libm);
 indicadores y campos inmutables exactos. En macOS ARM64 el mayor error observado fue aproximadamente
-`3.64e-12` en fuerza y `1.14e-13` en posición. El informe en `build/physics-original-report.json`
+`3.64e-12` en fuerza (relativo `2e-16`) y `1.07e-14` en posición. Unicorn 2.1.4 calcula `FSIN`, `FCOS`,
+`FPTAN`, `FPATAN` y `FSINCOS` con `double` del host (los 11 bits bajos de la mantisa extendida quedan a cero)
+e ignora la precisión de la palabra de control en ellas, así que este oracle no reproduce el último bit de un
+387 real y no puede exigir igualdad exacta. El informe en `build/physics-original-report.json`
 registra el resultado y su procedencia; una ejecución fallida no mantiene un informe de éxito anterior.
 
 No se necesitó alterar la fórmula del port. Esta evidencia solo cubre los estados finitos probados,
@@ -735,11 +753,12 @@ de agarre termina en `0x30874`.
 
 | Límite | Casos | Pasos | Mayor error absoluto observado |
 |---|---:|---:|---:|
-| `car_steer`, `0x500f0` | 732 | 5 856 | `7.11e-15` |
-| Agarre, `0x3070a..0x30874` | 672 | 1 536 | `1.78e-15` |
-| Aritmética vertical, `0x2e234` | 252 | 1 008 | `1.43e-14` |
+| `car_steer`, `0x500f0` | 732 | 5 856 | `0` |
+| Agarre, `0x3070a..0x30874` | 672 | 1 536 | `0` |
+| Aritmética vertical, `0x2e234` | 252 | 1 008 | `0` |
 
-Total: **1 656 casos / 8 400 pasos**, con tolerancia `2e-11 + 2e-12·|original|` e indicadores exactos.
+Total: **1 656 casos / 8 400 pasos**, con tolerancia cero bajo `0x127f`. El objetivo de dirección agrupa
+`5/agarre · (entrada·0,01 · límite)` como `0x501e8..0x50203`; otra asociación difiere en el último bit.
 Incluye los 12 modelos, ambos controladores, cuatro dificultades, velocidades con signo, límites de velocidad,
 rebote y caída, entradas aleatorias con semilla fija, y secuencias válido→inválido→válido en cada rueda.
 El oracle exige ramas concretas, límites de ejecución, pila/control x87 conservados y escrituras solo en
@@ -755,7 +774,7 @@ sin alterar el integrador corporal ni regenerar la instantánea de regresión. L
 Estos tres bloques **no** verifican todo `car_update`, consultas geométricas, acelerador/turbo, daños de aterrizaje, efectos,
 colisiones ni una carrera DOS. Excluye la desviación declarada de subidas con `level_change` (comprobada
 separadamente como contrato del port). El umbral `suelo+30 < altura` pertenece al caller `car_update`, no al
-kernel vertical. Son estados finitos muestreados bajo x87 emulado `0x037f`, no equivalencia para cualquier entrada.
+kernel vertical. Son estados finitos muestreados bajo x87 emulado `0x127f`, no equivalencia para cualquier entrada.
 
 ### Verificación ejecutable de aceleración, freno y turbo
 
@@ -767,22 +786,22 @@ Se ejecuta la conversión `__CHP` original y se comprueban frontera, ESP, contro
 
 | Límite | Casos | Pasos | Mayor error absoluto observado |
 |---|---:|---:|---:|
-| Aceleración, `0x4db90..0x4dfbe` | 6 829 | 30 174 | `1.82e-12` |
+| Aceleración, `0x4db90..0x4dfbe` | 6 829 | 30 174 | `0` |
 | Freno, `0x4e1bc` | 72 | 288 | `0` |
-| Aritmética de turbo, `0x4e3a7..0x4e656` | 2 016 | 96 768 | `9.32e-10` |
+| Aritmética de turbo, `0x4e3a7..0x4e656` | 2 016 | 96 768 | `0` |
 
 Nuevos bloques: **8 917 casos / 127 230 pasos**. Suite de seis kernels: **10 573 / 135 630**.
-La tolerancia sigue siendo `2e-11 + 2e-12·|original|`; indicadores y contadores son exactos, con controles
-negativos para cada modo. El informe conserva hashes del original, fuentes, runner y entradas, además de
+La tolerancia es cero para todos los campos, con controles negativos para cada modo. El informe conserva hashes del original, fuentes, runner y entradas, además de
 cobertura por bloque. Incluye modelos, controladores, dificultades, marchas, límites `nextafter` de índices
 de par, patinaje, catch-up y freno, y secuencias de carga/agotamiento/recarga del turbo.
 
 Correcciones verificadas:
 
-- El índice de par trunca primero `v_fwd*3.6` en precisión extendida x87, toma el valor absoluto, divide por
-  `[1, 1.15, 1.3, 1.3]`, trunca y limita a 199. Redondear antes el producto a binary64 puede cambiar el índice
-  (por ejemplo, `10/3.6`). El port usa el residuo FMA y el umbral de redondeo extendido, también en la división,
-  sin depender de que `long double` tenga precisión x87. Se prueban ambos signos y vecinos de índices 0..210.
+- El índice de par trunca `v_fwd*3.6`, toma el valor absoluto, divide por `[1, 1.15, 1.3, 1.3]`, trunca y
+  limita a 199. Con la palabra de control del juego (`0x127f`) el producto y el cociente se redondean a binary64
+  antes de `__CHP`, igual que en C. Una versión anterior emulaba la truncación del producto extendido: era un
+  artefacto del oracle con `0x037f` y cambiaba el índice en fronteras como `10/3.6`. Se prueban ambos signos y
+  vecinos de índices 0..210; el control negativo con `0x037f` exige diferencias en ese barrido.
 - Patinaje: límites estrictos originales `1.5707963267949` y `4.7123889803847`, no `PI/2` y `3*PI/2`;
   con velocidad en km/h > 2 y acelerador positivo se usa índice cero y derrape 10. Saturación 1 en suelo
   fija derrape 30. El suavizado de fuerza del 20 % ocurre tras la salida: reloj original negativo (−1 en
@@ -978,7 +997,7 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   par\u00e1metro de IA `+0x28` del modelo `= 0,19\u00b7dificultad + 0,4`. Usan el perfil 11 para el l\u00edmite de direcci\u00f3n (40 km/h,
   /90) y la fijan sin suavizar (como la entrada anal\u00f3gica), la fuerza del turbo (145) y las velocidades punta de las
   revoluciones.
-- **Acelerador** (`car_throttle` 0x4db90): índice = `min(199, trunc(|trunc_x87(v*3.6)| / 0xc5450[dificultad]))`; con patinaje
+- **Acelerador** (`car_throttle` 0x4db90): índice = `min(199, trunc(|trunc(v*3.6)| / 0xc5450[dificultad]))`; con patinaje
   contra el movimiento \u00edndice 0. Si la curva da \u2264 3, `car+0x520` cuenta y cada `8\u00b7car+0x51c + 15` ticks sube
   `car+0x51c`; si no, se divide entre 2. El humano recibe cada 182 fotogramas `car+0x594 = (posici\u00f3n \u2212 1)\u00b71,5`
   (`[0xc0b50] = 1`). Objetivo = `(par + 0x51c + 0x594 + 0x524)\u00b71000\u00b7acelerador/100`, o \u221225000 con la marcha atr\u00e1s

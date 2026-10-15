@@ -52,7 +52,7 @@ class ScheduleOriginal(InputOriginal):
         for reg, value in (registers or {}).items():
             self.uc.reg_write(getattr(self.reg, "UC_X86_REG_" + reg), value)
         self.uc.reg_write(self.reg.UC_X86_REG_ESP, ESP)
-        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, 0x037F)
+        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, self.fpcw)
         self.uc.reg_write(self.reg.UC_X86_REG_FPTAG, 0xFFFF)
         self.boundaries = set(boundaries)
         self.uc.emu_start(entry, max(boundaries) + 1, timeout=1_000_000, count=1000)
@@ -60,7 +60,7 @@ class ScheduleOriginal(InputOriginal):
         if (end not in self.boundaries or
                 self.uc.reg_read(self.reg.UC_X86_REG_ESP) != ESP + stack_delta or
                 self.uc.reg_read(self.reg.UC_X86_REG_FPTAG) != 0xFFFF or
-                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != 0x037F):
+                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != self.fpcw):
             raise ValueError(f"AI boundary/stack/x87 contract failed at 0x{end:x}")
         key = f"0x{entry:x}->0x{end:x}"
         self.fragment_executions[key] = self.fragment_executions.get(key, 0) + 1
