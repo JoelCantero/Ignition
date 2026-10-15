@@ -28,6 +28,8 @@ add_library(ignition_core STATIC
   src/game/race.c
   src/game/track.c
   src/render/raster.c
+  src/render/lisa.c
+  src/render/lisa_raster.c
   src/render/hud.c
   src/render/sprite.c
   src/render/font.c
@@ -114,6 +116,12 @@ add_test(NAME pos COMMAND pos_test)
 add_executable(palette_test tests/palette.c)
 target_link_libraries(palette_test PRIVATE ignition_core)
 add_test(NAME palette COMMAND palette_test)
+
+# Lisa 2 renderer: track-only frames of the port for tests/render_original.py comparisons.
+add_executable(render_shot tests/render_shot.c)
+target_link_libraries(render_shot PRIVATE ignition_core)
+add_executable(lisa_prims tests/lisa_prims.c)
+target_link_libraries(lisa_prims PRIVATE ignition_core)
 
 add_executable(body_step_test tests/body_step.c)
 target_link_libraries(body_step_test PRIVATE ignition_core)
@@ -223,4 +231,20 @@ target_link_libraries(contact_real_assets_test PRIVATE ignition_core)
 add_test(NAME contact_real_assets COMMAND contact_real_assets_test "${GAME_DIR}")
 if(NOT MSVC)
   target_compile_options(contact_real_assets_test PRIVATE -Wall -Wextra)
+endif()
+
+# Persistence: IGN_DOS.BTZ round trip, record tables and time-trial ghosts.
+add_executable(save_btz_test tests/save_btz.c)
+target_link_libraries(save_btz_test PRIVATE ignition_core)
+if(NOT MSVC)
+  target_compile_options(save_btz_test PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME save_btz COMMAND save_btz_test "${GAME_DIR}" ${CMAKE_BINARY_DIR})
+add_test(NAME btz_tool COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/btz.py roundtrip "${GAME_DIR}/IGN_DOS.BTZ")
+add_test(NAME time_trial COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/time_trial.py
+  --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}")
+if(IGN_VERIFY_ORIGINAL)
+  add_test(NAME btz_defaults_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/btz_defaults_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:save_btz_test>)
 endif()

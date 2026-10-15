@@ -48,8 +48,8 @@
 001fef54  g_sysg2_pic          pointer to N_SYSG_2.PIC
 001fec00  g_sys_col            pointer to SYS.COL
 000492fc  race_setup_video     picks 320x200/640x480/800x600, per-player viewports, TAB -> 0xc484c  roadmap=phase3.render
-00056410  render_scene         draws layers gated by config flags [0x24c05c]+0x38..0x54  roadmap=phase3.render
-0005891c  camera_angles        camera orientation in tenths of a degree  roadmap=phase3.render
+00056410  render_scene         clip 8.8, layers [0x24c05c]+0x38 look-at, +0x3c collect, +0x40 transform, +0x50 faces, +0x54 sort -> list [0x24bffc]; src/render/lisa.c  status=verified roadmap=phase3.render
+0005891c  camera_angles        layer +0x38: camera angles toward a look-at point (tenths of a degree); not used by race views, not ported  status=identified roadmap=phase3.render
 00047f94  chase_camera_update  per-car camera [0x1fef9c]+car*0xc8: yaw smoothing, height, pitch, distance (ported)  status=ported roadmap=phase3.render
 000420cc  race_frame           section palette effects, camera selection, render_scene, HUD  roadmap=phase3.render
 0004a320  race_hud             race overlay per viewport (hud.c): times, place, dial, gear lever, turbo, signs, elimination bar and 0x4b648 second-player marker, start lights, medal, messages; medal sound 0x4bc54 (audio) and the draw-less fireworks loop 0x4bca8 not ported  status=ported roadmap=phase4.hud
@@ -75,8 +75,8 @@
 00020814  ground_query         eax=x, edx=probe height (up), ebx=z (SRF space) -> 0xebad8: type, normal (p0-p1)x(p2-p1), points (mesh + pool position, no rotation); integer face_avg_height cost  status=ported roadmap=phase1.physics
 00020c18  srf_walk_list_b      spans with dz >= 0  roadmap=phase1.physics
 00020c81  srf_walk_list_a      spans with dz < 0  roadmap=phase1.physics
-00020bbc  face_avg_height      -(v0y+v1y+v2y)/3 (idiv) + pool y  status=ported roadmap=phase1.physics
-000569ec  engine_alloc_objects 42-byte object pool -> [0x24c058]  roadmap=phase3.render
+00020bbc  face_avg_height      roadmap=phase1.physics
+000569ec  engine_alloc_objects 42-byte object pool -> [0x24c058], 256-unit cell grid [0x24c048] width [0x24c014]  status=ported roadmap=phase3.render
 0002ed00  car_update           ~2300 insns, calls ground_query; grip block 0x3070a..0x30874 verified by tests/car_original.py, not whole routine  status=partial roadmap=phase3.car-update
 0002f2be  lap_crossing         phase 3, probe 0, abs(previous +370)=count-1, +604=0; finish snapshots +39c position to +3a0; bounded lap oracle 3024 cases/4112 steps  status=ported roadmap=phase1.race
 0002f3a9  lap_time_commit      last lap +3b4, slots +3bc/+3c4/+3cc, origin +3d4 from global sample; strict shared best; messages/track record/persistence excluded  status=partial roadmap=phase1.race
@@ -110,7 +110,7 @@
 0002e234  car_vertical         gravity, jumps, landing (car+0x20); arithmetic verified until 0x2e397 or return, 252 cases/1008 steps; landing effects excluded  status=ported roadmap=phase1.physics
 0003731c  skid_effects         skid marks (700 ring [0x1feeb8], SHD row per surface 0xc34e0) and dust (effect 1)  status=ported roadmap=phase2.effects
 00039d1c  fx_sprite            effect type 1: SMOKE.TEX sprite, damped drift, grows, 8-frame anim 0xc4110  status=ported roadmap=phase2.effects
-0005dea0  emit_sprite          primitive 7: scale 4/z*size*([0x1feee8],[0x1feeec]), blend LUT [0x24bfa8] = SHD  roadmap=phase3.render
+0005dea0  emit_sprite          face type 7: z>200, bucket trunc(2.8z)>>4, scale 4/z*size*([0x1feee8],[0x1feeec]), SHD blend -> prim 7  status=verified roadmap=phase3.render
 0003a788  wreck_explode        explosion effect: hide car, 80 frames, glide 40 to section+2, respawn; repeated turbo reset 0x3a7f5..0x3a812 verified, full FX excluded  status=ported roadmap=phase2.effects
 0003c208  wreck_sink           sinking effect (car+0x358), 12 splash quads, same respawn; turbo reset 0x3c26e..0x3c28b verified  status=ported roadmap=phase2.effects
 00039fe8  fx_blast             effect type 4: sprite with float damping (BOOM)  status=ported roadmap=phase2.effects
@@ -198,171 +198,49 @@
 000bf994  t_ai_lookahead        6 i16 section offsets {1,2,3,4,6,8} (read as dword [0xbf992+2k] >> 16)
 000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty
-00010010  main                 lisa_init, video, kbd_init(350,70), timer, loop main_step; replaced by SDL main()  status=native roadmap=phase4.loop
-00010060  main_step            [0xab5e0] 0 boot / 1 game_frame 0x20d60 / 2 shutdown; advances g_timer_ms (x1000/36 of PIT units)  status=native roadmap=phase4.loop
-00010158  main_init_no_sys     dead copy of main's init half  roadmap=phase4.loop
-00010198  timer_init           PIT ch0 mode 2 + BIOS ticks, shift calibration; SDL_GetTicks in the port  status=native roadmap=phase4.loop
-00010238  timer_delta          dt in 1/36.418 s units clamped to 10, fps/uptime side effects  status=native roadmap=phase4.loop
-00010334  bios_ticks           dead: INT 1Ah  roadmap=phase4.loop
-0001034c  pit_read             latched PIT ch0 count >> g_pit_shift  status=native roadmap=phase4.loop
-00010390  anim_free_all        PLC 0xfa texture-tile animations [0xab5f0]  roadmap=phase2.world
-0001044c  anim_free_all2       byte-identical copy of 0x10390  roadmap=phase2.world
-00010508  anim_register        faces of a 0xfa mesh = frames (64x64 tiles); collects matching world faces  roadmap=phase2.world
-0001098c  anim_count_faces     roadmap=phase2.world
-00010a00  anim_step            shifts collected faces' UV/page to the next frame (collisions_pass)  roadmap=phase2.world
-00010b30  anim_collect         roadmap=phase2.world
-00010bc8  anim_count_matches   roadmap=phase2.world
-00010c5c  face_in_tile         roadmap=phase2.world
-00010cf8  uv_in_tile           roadmap=phase2.world
-00010d34  sqr_table_init       roadmap=phase3.render
-00010d80  dead_vga_copy        no stores; compiled-out body  roadmap=phase3.render
-00010e04  blend_table_avg      dead  roadmap=phase3.render
-00010ea4  blend_table_avg_fast dead  roadmap=phase3.render
-00010f4c  blend_table_lerp     dead; likely the MENU.TAB generator  roadmap=phase3.render
-00011004  color_buckets_build  roadmap=phase3.render
-00011200  rgb_avg3             dead  roadmap=phase3.render
-00011228  nearest_color_fast   roadmap=phase3.render
-00011384  rgb_avg              roadmap=phase3.render
-000113c0  rgb_lerp             roadmap=phase3.render
-00011410  nearest_color        roadmap=phase3.render
-00011494  overlay_table_build  T[s][d] = s ? s : d; called by sub_24840  roadmap=phase3.render
-000114d0  alloc_ea3c4          dead  roadmap=phase3.render
-000114e0  raster_init_wrap     dead  roadmap=phase3.render
-000114f4  draw_list_wrap       dead  roadmap=phase3.render
-00012bb8  menu_frame           fixed-step menu frame: intro CDP + fades, idle credits, iris, CD/SFX volume, gui tick; 1 stay 2 race 3 quit  status=ported roadmap=phase4.ui
-00013a5c  menu_shutdown        status=ported roadmap=phase4.ui
-00013c1c  menu_restore_video   dead copy (same code in menu_load_gfx / 0x16f70)  status=ported roadmap=phase4.ui
-00013ccc  menu_sound_init      dead copy of menu_load_gfx's sound init (no-soundcard wait not reproduced)  status=ported roadmap=phase4.ui
-00013e70  menu_play_sound      dead  status=ported roadmap=phase4.ui
-00013ec0  menu_draw_sprite     dead  status=ported roadmap=phase4.ui
-00013ee0  menu_draw_sprite_xf  dead  status=ported roadmap=phase4.ui
-00013f14  menu_present         dead  status=ported roadmap=phase4.ui
-00013f65  menu_frame_dt        dead; real entry 0x13f64  status=ported roadmap=phase4.ui
-00014000  menu_init            inlined in menu_load_gfx  status=ported roadmap=phase4.ui
-00015254  menu_msg_post        dead debug message poster; consumer ported in menu_frame  roadmap=phase4.ui
-00015344  menu_iris            iris transition through the 0x2ac28 table and MENU.TAB  status=ported roadmap=phase4.ui
-00015548  menu_format_time     '%.2d:%.2d:%.2d'  status=ported roadmap=phase4.ui
-000155d0  menu_draw_text_layer boxes + item texts / credits / dialogs / calibration texts  status=ported roadmap=phase4.ui
-00016e18  cheat_poll           dead copy of the cheat prologue of 0x160c4  status=ported roadmap=phase4.ui
-00016f18  act_quit             item callback 1  status=ported roadmap=phase4.ui
-00016f44  act_start_race       item callback 2  status=ported roadmap=phase4.ui
-00016f70  act_video_mode       item callback 3 (unreferenced by the menus)  status=ported roadmap=phase4.ui
-00017014  act_restore_settings item callback 4  status=ported roadmap=phase4.ui
-00017054  act_reset_ghosts     item callback 5: deletes GHOSTS\*.GST  status=ported roadmap=phase4.ui
-000170ac  menu_page_draw       page draw callback of every menu: sprites, text layer, PFM background, logo, blend, flags, car carousel, corners  status=ported roadmap=phase4.ui
-0001911c  menu_draw_hiscores   BEST TIMES table  status=ported roadmap=phase4.ui
-00019508  menu_car_render      one MENUCAR model; port draws with its own rasteriser (camera approximate)  status=ported roadmap=phase4.ui
-0001969c  menu_bg_anim_step    dead copy of the inlined PSQ step  status=ported roadmap=phase4.ui
-00019790  menu_load_tex_pages  dead copy (inlined in menu_load_car)  status=ported roadmap=phase4.ui
-00019840  menu_load_shd_tables dead copy (inlined in menu_load_car)  status=ported roadmap=phase4.ui
-000198bc  menu_commit_settings menu cursors -> race configuration in g_cfg 0xe9bfc  status=ported roadmap=phase4.ui
-00019ac8  menu_setup           dead copy (inlined in menu_load_gfx)  status=ported roadmap=phase4.ui
-0001a864  settings_defaults    g_cfg defaults  status=ported roadmap=phase4.ui
-0002ac28  iris_table_build     405x800 shade ramp [0x1fef4c]  status=ported roadmap=phase4.ui
-00051818  blit_lut_rect        dst = lut[src<<8|dst] over a rectangle  status=ported roadmap=phase4.ui
-00051b20  gui_start            Baltazar menu framework (src/frontend/gui.c)  status=ported roadmap=phase4.ui
-00051c94  gui_tick             25 Hz key scan, key callback, text entry, key capture, value/cursor actions  status=ported roadmap=phase4.ui
-000527c8  gui_draw_items       status=ported roadmap=phase4.ui
-00052a0c  gui_free             status=ported roadmap=phase4.ui
-00052a5c  gui_set_input_lock   status=ported roadmap=phase4.ui
-00052a9c  gui_process_keys     dead copy of the key loop inlined in gui_tick  status=ported roadmap=phase4.ui
-00053390  gui_publish_state    snapshot 0x2080ac read by the game callbacks  status=ported roadmap=phase4.ui
-000533f4  gui_key_consume      dead  status=ported roadmap=phase4.ui
-00053410  gui_sprite_put_xy    dead  status=ported roadmap=phase4.ui
-00053431  gui_dt               dead; real entry 0x53430  status=ported roadmap=phase4.ui
-000534cc  gui_navigate         transition table 0xbe514: push / pop / callback rows  status=ported roadmap=phase4.ui
-0005383c  gui_draw_element     status=ported roadmap=phase4.ui
-000539f8  gui_item_build_sprite no shipped element has sprite pixels: no-op  status=ported roadmap=phase4.ui
-000541d4  menubox_init         MenuBkg.dat + highlight remap  status=ported roadmap=phase4.ui
-00054278  menubox_clear        status=ported roadmap=phase4.ui
-000542c4  menubox_add          status=ported roadmap=phase4.ui
-0005430c  menubox_draw         status=ported roadmap=phase4.ui
-00054330  menubox_draw_one     fill, connectors to the row above, corners  status=ported roadmap=phase4.ui
-00054838  menubox_hline        status=ported roadmap=phase4.ui
-00054864  menubox_tile         bottom-up 19-row tile, styles per half  status=ported roadmap=phase4.ui
-000549b0  pfm_load             Script Player: li00..li03 chunks; port matched the original pixel for pixel in an emulator (209 frames)  status=ported roadmap=phase4.ui
-00054b44  pfm_index_frame      status=ported roadmap=phase4.ui
-00054bf0  pfm_load_texdefs     li02  status=ported roadmap=phase4.ui
-00054cd0  pfm_load_sprites     li03  status=ported roadmap=phase4.ui
-00054df8  pfm_build_frame      PFM types 7, 11, 13, 15, 17, 18, 19  status=ported roadmap=phase4.ui
-000552e0  mem_group_free_default Script Player pool  roadmap=phase4.ui
-000552f0  cdp_set_palette      status=ported roadmap=phase4.ui
-000552fc  cdp_open             status=ported roadmap=phase4.ui
-00055384  cdp_next_frame       decoder at 0xc5800 (fe = 16-bit run)  status=ported roadmap=phase4.ui
-00055cd0  kbd_typed            cheat words in the typed ring  status=ported roadmap=phase4.ui
-00060e3d  raster_draw_list     dispatcher 0xd7bd0; PFM primitive types ported (src/frontend/pfm.c), 3D types use raster.c  status=partial roadmap=phase4.ui
-000704a0  raster_pfm_sprite    type 7 -> two type-18 triangles  status=ported roadmap=phase4.ui
-00073c58  raster_tex_tri       type 17  status=ported roadmap=phase4.ui
-000744c8  raster_tex_shade_tri type 18  status=ported roadmap=phase4.ui
-00074d04  raster_shade_tri     type 19  status=ported roadmap=phase4.ui
-00028000  hud_build_sprites    sub-sprites of the panels from rect tables [0x1fef44] (0xc3618/0xc3858/0xc3a98), lights, signs, markers, medals  status=ported roadmap=phase4.hud
-00028a14  hud_select_layout    [0x1feeac] layout 0/1/2 from the runtime video table 0x1d5eb0 (port: by frame width), [0x1fef1c] text table, [0x1feeb0] = 6 + hires (MINI/SMALL)  status=partial roadmap=phase4.hud
-00028a84  hud_rebuild_sprites  same sprite tables as 0x28000, re-creating existing handles  status=identified roadmap=phase4.hud
-0004a150  wrong_way_counter    car+0x580 += frame dt while |section angle - pi/2 - heading| in (2pi/3, 4pi/3), max 120, else -= dt  status=ported roadmap=phase4.hud
-0004bdf4  format_race_time     '%.2d:%.2d:%.2d' minutes (max 99), trunc seconds, trunc hundredths into 0x207ae0  status=ported roadmap=phase4.hud
-0004be7c  hud_rev_dial         dial, needle triangle (prim 0x0f colour 0xc4, car+0x290 smoothed revs*2.7), cap, '%.3d' |v_fwd*3.6|  status=ported roadmap=phase4.hud
-0004c7c0  hud_message_add      5 slots of 0x78 B at [0x1fefb8]: text, duration +0x68, blink period +0x6c, timer +0x70, viewport +0x74  status=ported roadmap=phase4.hud
-0004c858  hud_message_tick     timer++ per frame, slot freed when timer > duration  status=ported roadmap=phase4.hud
-0004c89c  hud_message_draw     centred MINI/SMALL text while fmod(timer, 2 period) < period, (slot+1)*8|16 px above viewport 0 bottom  status=ported roadmap=phase4.hud
-00049fdc  debug_overlay        debug camera ([0xc0b4c], never set in release): X/Y/Z and X/Y VIN with IGNITION.FNT colour 0x14 (hud.c, free camera F1)  status=ported roadmap=phase4.ui
-00053d60  fnt_draw_text        FNT: map +0xc6, widths +6, offsets +0x1c6, bitmaps +0x546; texel + colour; advance width + i16 spacing  status=ported roadmap=phase4.ui
-00061220  font_system_init     30 font slots of 0x63e B at 0x24c214: unused, left, enabled, fixed cells, spacing 1  status=ported roadmap=phase4.ui
-00061399  font_parse_lft       'LFT' v100: count +6, cell width +8, height +0xa, offsets +0xc, signed widths +0x68c, bitmaps +0x84c  status=ported roadmap=phase4.ui
-000615eb  font_load            load_file + font_parse_lft, returns slot or -1  status=ported roadmap=phase4.ui
-00061653  font_free            frees the glyph sprites of a slot  status=identified roadmap=phase4.ui
-000616db  font_text_width      fixed: (cell + spacing) per glyph/space; proportional: glyph + spacing, space trunc(cell*0.35)  status=ported roadmap=phase4.ui
-00061959  font_draw_text       align +0x04 (0 left, 1 centre, 2 right), fixed cells centre glyphs, sprites at (x<<8, y<<8)  status=ported roadmap=phase4.ui
-00061eb0  gfx_install          engine vtable 0x20a068..0x20a0b4 (clip 0x62040, draw sprite 0x62184, create sprite 0x771e0)  status=identified roadmap=phase3.render
-00055958  gfx_set_clip         thunk [0x20a07c] (x0, y0, x1, y1)  status=identified roadmap=phase3.render
-00055968  gfx_draw_sprite      thunk [0x20a084] (handle, 8.8 position, optional {scale, angle})  status=identified roadmap=phase3.render
-00055970  gfx_create_sprite    thunk [0x20a088] ({?, w, h, ?, pixels, stride, hotspot x, y})  status=identified roadmap=phase3.render
-00062184  sprite_draw          8.8 position; optional {scale, angle} -> {S cos, S sin, S sin, S cos}, S = trunc(scale*65536.0f), then 0x62310 builds the page handle  status=ported roadmap=phase3.render
-000771e0  sprite_create        geputget.c: sprite header pool + texture page handle 0x68e4c (port: sprite at the origin of its own 256x256 page)  status=partial roadmap=phase3.render
-000791c9  sprite_blit          unscaled clipped copy dst = lut[src<<8 | dst] from the 256-wide page, lut = handle +0x1c ([0x257e48], level PAN in race); matrix path 0x82950  status=ported roadmap=phase3.render
-000c3618  t_hud_rects_s        36 x {x, y, w, h} sprite windows for 320x200 (0xc3858 640x480, 0xc3a98 800x600)
-000c3ce8  t_hud_text_s         8 ints: y0+ times rows, pos x0+/y1+, speed x1+/y1+ (0xc3d08, 0xc3d28)
-000c3d48  t_hud_place_s        28 ints: offsets from viewport corners (0xc3db8, 0xc3e28)
-000c3e94  t_sign_map           [difficulty*20 + kind] sign sprite; difficulty 3 swaps left/right
-000c3350  t_car_codes          3-letter player names by car model (COO, BAN, ... IGN)
-001feeac  g_hud_layout         0 S_*, 1 N_*, 2 H_* panels
-001fef1c  g_hud_text_pos       pointer to the layout's text table
-001fef20  g_hud_place          pointer to the layout's placement table
-001fefb8  g_hud_messages       5 x 0x78 message slots
-001feff4  g_ignition_fnt       IGNITION.FNT contents
-001fe9c8  g_hud_sprites        sprite handles 0x1fe9c8..0x1febdc
-001fef7c  g_plc_attributes     12 B per PLC object: (type>>12)&15, (type>>16)&255, type>>24 (sign kind)
-0024c214  g_font_slots         30 x 0x63e font slots
-00049724  race_viewports       per-player viewports: centred size factors 0xc0b80, split = player 0 right half (x0 +1), player 1 left half (x1 -1); also cameras and raster init  status=partial roadmap=phase3.render
-000729f3  raster_flat_tri      primitive 0x0f inside 0x60e3d: 16.16 edges with recip 0xc9168 (65536/(n+1)-1), inclusive spans, colour = shade[c<<8 | +0x2d]; tests/hud_original.py identical  status=verified roadmap=phase4.hud
-00060dc4  raster_init          pitch, row table 0xc8804, reciprocal table 0xc9168, primitive init callbacks 0xd7c2c  status=identified roadmap=phase3.render
-00082950  sprite_matrix        corners pos + (w*256-16, h*256-16) x 16.16 matrix (hotspot 0), two textured triangles via 0x78304; tests/hud_original.py identical  status=verified roadmap=phase3.render
-00078304  tex_triangle         affine texture-mapped triangle: sort, reject to 0x78ac0 if outside the 8.8 window, gradients 0x90a80, edges 0x90c00/0x90c40, spans 0x82862  status=verified roadmap=phase3.render
-00078ac0  tex_triangle_clip    clipped variant: edges 0x910c0/0x90fa0 (0x91270 window clip, right-side split), left clip with span 0x828b7  status=verified roadmap=phase3.render
-000782b0  tex_init             three 0x20d8-byte edge buffers [0x268ab4], [0x268a98], [0x268a9c]  status=identified roadmap=phase3.render
-00079174  tex_edge_slope       ((xa - xb) << 8) / (ya - yb), sentinels 0x80010000 / 0x7fff0000 for flat edges  status=verified roadmap=phase3.render
-0008283c  tex_span_setup       packed step = (-du/dx) << 16 | ((-dv/dx) >> 8 & 0xffff), u integer byte 0xe6e6c, page, lut  status=verified roadmap=phase3.render
-00082862  tex_span             right to left, packed u.frac/v 8.8 with carry into the u byte, left end texel from the plain edge  status=verified roadmap=phase3.render
-000828b7  tex_span_clipped     same without the left end texel (span starts at the clip x)  status=verified roadmap=phase3.render
-00090a80  tex_gradients        du/dx, dv/dx from the long edge at the middle row, widths -2..2 forced to +-4, dither 0xe6d00/0xe6d20 = k*(-d/dx >> 3) (data object)  status=verified roadmap=phase3.render
-000914d0  tex_edge_setup       per-edge 16.16 steps (dy <= 64 forced to 65 or 3), prestep 256 - (y & 0xff)  status=verified roadmap=phase3.render
-000911e0  tex_edge_walk        integer u, v, x per row  status=verified roadmap=phase3.render
-00091220  tex_edge_walk_dither 8.8 u, v with the x-fraction dither, x per row  status=verified roadmap=phase3.render
-00091270  tex_edge_clip        window clip of an edge in 8.8, saves the part beyond the right side ([0xe6e14])  status=verified roadmap=phase3.render
-# --- Persistence: IGN_DOS.BTZ, records and time-trial ghosts (src/game/save.c, ghost.c, tools/btz.py) ---
-0002293c  race_config_load     read_file_into([0xc0c64]='ign_dos.btz') -> 0x1ff158 (0x597 B), copies settings to globals and participants  status=partial roadmap=phase4.ui
-00022f38  set_track_names      [0x1fef10] -> g_level_dir, g_level_name, ghost basename 0x1ff141  status=ported roadmap=phase6.ghost
-0002adf8  ghost_load           mode 2 && [0x1fee4c]: GHOSTS\%s.GST; missing -> [0x1fee4c]=0, [0x1fee04]=3000000; other track -> [0x1fee00]=1  status=partial roadmap=phase6.ghost
-0002b430  shutdown_save        frees resources, writes 0x597 B of 0x1ff158 to ign_dos.btz  status=partial roadmap=phase4.ui
-0002ccc8  race_end_save        mode 2, !overflow, [0x1fee04]*0.01 > car+0x3a4 -> pad and write GST; mode 0 championship points/grid; calls 0x2cf60  status=partial roadmap=phase6.ghost
-0002cf60  btz_save             mode != 0: shuffle grid 0x1ff28b ncars times; +0x107=[0x1fef08], +0x10b=[0x1fefcc]; write ign_dos.btz  status=ported roadmap=phase4.ui
-00061078  write_file           (eax=name, edx=buf, ebx=size) fopen 'wb' + fwrite; 1 ok, 0x7d0/0x7e4 errors
-001ff158  g_btz                IGN_DOS.BTZ image, 0x597 B packed; layout in docs/formats.md (BTZ)
-001ff317  g_track_records      7 x 0x78: race names[5][4], race times f64[5] (+0x14), lap names (+0x3c), lap times f64[5] (+0x50)
-001ff141  g_ghost_basename     MOOSEJAW, GOLDRUSH, ... (sub_00022f38)
-001ff6eb  g_language           BTZ+0x593: 0 EN, 1 DE, 2 IT, 3 ES, 4 SV, 5 FR
-001feefc  g_game_mode          BTZ+0x8: 0 championship, 1 ¿?, 2 time trial, 3 elimination
-001fee04  g_ghost_record_cs    time to beat in centiseconds (ghost header, 3000000 without ghost)
-001fee00  g_ghost_overflow     recording over 300 s or ghost of another track: no GST written
-001fee4c  g_ghost_on           BTZ+0x10, kept only in time trial
-000bf628  t_factory_records    7 x 0x78 default record blocks (OSK 145.00 ... K L 84.00), copied by menu_load_gfx 0x126dc
-000e9bfc  g_menu_btz           menu copy of IGN_DOS.BTZ (read only if +0x000 == 30)
+# Lisa 2 engine and rasterizer (src/render/lisa.c, lisa_raster.c)
+000564d8  engine_init          sine table of every tenth of a degree (-180..630 deg, float)  status=ported roadmap=phase3.render
+00056b28  LI_CREATEOBJECT      engine object: mesh, slot, class; radius -1 = farthest vertex  status=ported roadmap=phase3.render
+00056c74  LI_PLACEOBJECT       position + angles, insert at head of the cell list  status=ported roadmap=phase3.render
+00056d24  LI_MOVEOBJECT        move; relinks only when the cell changes  status=ported roadmap=phase3.render
+00056e9c  LI_SETMESH           mesh with explicit radius  status=ported roadmap=phase3.render
+00056f8c  LI_REMOVEOBJECT      unlink from its cell  status=ported roadmap=phase3.render
+000570d8  engine_make_mips     MIP MAPPING levels of the texture slots (sets [0xc878c], [0xc879c])  status=identified roadmap=phase3.render
+00058864  mip_touch            99 frames after mip build/free: reads random mip texels (consumes rand), draws nothing  status=identified roadmap=phase3.render
+00058ebc  li_collect           layer +0x3c: cone cells 0xc5d8c/0xc5e40 or reach x reach square (+0xa4), zone [0x24bff0], sphere test  status=verified roadmap=phase3.render
+0005a2c8  li_transform         layer +0x40: camera rows float32, sx=cx-fx*x/z, z stored 4(z+near); focal>300 -> 0x5a8c8  status=verified roadmap=phase3.render
+0005a8c8  li_transform_wide    li_transform for focal > 300 (scale 256)  status=verified roadmap=phase3.render
+0005ae60  li_rotate_object     object angles +0x18..+0x1c applied before the camera (low focal)  status=verified roadmap=phase3.render
+0005b308  li_rotate_object_wide li_rotate_object for focal > 300  status=verified roadmap=phase3.render
+0005b7a8  li_cull_matrix       camera rows x16384 for the sphere test  status=verified roadmap=phase3.render
+0005b8e8  li_select_handlers   type 17/21 handlers by +0x58 PERSP. POLY, mips [0xc878c] and [0xc8794]  status=ported roadmap=phase3.render
+0005b9c4  li_sort              layer +0x54: 6000 buckets far to near -> [0x24bffc]  status=verified roadmap=phase3.render
+0005ba5c  face_point_tab       face type 1: point TAB[colour*256+light], z>200, bucket 3z>>4 -> prim 1  status=verified roadmap=phase3.render
+0005bc10  face_flat            face type 15: flat TAB[colour*256] -> prim 0xf  status=verified roadmap=phase3.render
+0005c144  face_tex_persp       face type 17 with PERSP. POLY: near road faces -> prim 0x14, else 0x11  status=verified roadmap=phase3.render
+0005cb48  li_faces             layer +0x50: face handlers by type via table 0xc86c4  status=verified roadmap=phase3.render
+0005cc58  face_tex             face type 17 (default): box reject, back faces, sum z>600, bucket sum z>>4 -> prim 0x11  status=verified roadmap=phase3.render
+0005d084  face_tex_alt         type 17 handler when [0xc8794] is set, not ported  status=identified roadmap=phase3.render
+0005d718  face_blend           face types 18/22 (keyed 0x24c004) and 19/23 (SHD); 22/23 80 buckets nearer -> prim 0x12/0x15  status=verified roadmap=phase3.render
+0005dc08  face_shade           face type 20: SHD row darkening (shadows, skids), class>=100 -76 -> prim 0x13  status=verified roadmap=phase3.render
+0005e004  emit_sprite_fixed    face type 8: fixed screen size, PAN blend [0x24bfec] -> prim 7  status=verified roadmap=phase3.render
+0005e264  face_line            face type 13: line, 8.8 colour high byte = table row -> prim 0xd  status=verified roadmap=phase3.render
+0005e358  face_decal           face type 21: as type 17, 80 buckets nearer  status=verified roadmap=phase3.render
+0005ee50  face_point_shd       face type 2: point SHD[colour*256+dst] -> prim 2  status=verified roadmap=phase3.render
+0005ef14  face_tex_mip         type 17 MIP MAPPING handler, not ported  status=identified roadmap=phase3.render
+0005f670  face_tex_mip_persp   type 17 MIP MAPPING + PERSP. POLY handler, not ported  status=identified roadmap=phase3.render
+00060210  face_decal_mip       type 21 MIP MAPPING handler, not ported  status=identified roadmap=phase3.render
+00060dc4  raster_set_size      eax=width, ebx=height: row offsets 0xc9168, clip  status=ported roadmap=phase3.render
+00060e3d  raster_draw_list     draws [0x24bffc] through primitive table 0xd7bd0; src/render/lisa_raster.c  status=verified roadmap=phase3.render
+00070400  prim_point_tab       primitive 1  status=verified roadmap=phase3.render
+00070454  prim_point_shd       primitive 2  status=verified roadmap=phase3.render
+000704a0  prim_sprite          primitive 7  status=verified roadmap=phase3.render
+00071cc7  prim_line            primitive 0xd: blended line with clipping  status=verified roadmap=phase3.render
+000729f3  prim_flat            primitive 0xf  status=verified roadmap=phase3.render
+00073c58  prim_tex             primitive 0x11: affine textured triangle  status=verified roadmap=phase3.render
+000744c8  prim_tex_blend       primitive 0x12: 0x11 through a 256x256 table  status=verified roadmap=phase3.render
+00074d04  prim_shade           primitive 0x13: flat blend through one table row  status=verified roadmap=phase3.render
+0007586c  prim_tex_persp       primitives 0x14/0x15: perspective-correct, x87 24-bit precision  status=verified roadmap=phase3.render
+000824b4  tex_spans            0x11 spans, right to left  status=verified roadmap=phase3.render
+000825b8  tex_spans_blend      0x12 spans through the table 0xe6cbc  status=verified roadmap=phase3.render
+00090000  tex_gradients        object 2: 0x11/0x12 gradients; edges 0x90200..0x90a00  status=verified roadmap=phase3.render

@@ -1,10 +1,10 @@
-functions: 1112 (unknown=372, identified=87, understood=1, port-pending=2, partial=20, ported=129, verified=14, native=5, library=482)
+functions: 1112 (unknown=362, identified=84, understood=1, port-pending=0, partial=21, ported=136, verified=21, native=5, library=482)
 library (C runtime / DOS4G) unique instructions: 20167, to exclude from game review
 unique instructions: 128832
-game instructions marked ported/verified: 38200/108665 (35.2%)
-game instructions marked partial: 12481 (excluded from ported/verified)
-game functions linked to roadmap tasks: 247/630 (39.2%)
-all functions linked to roadmap tasks (including library): 247/1112
+game instructions marked ported/verified: 42095/108665 (38.7%)
+game instructions marked partial: 12617 (excluded from ported/verified)
+game functions linked to roadmap tasks: 257/630 (40.8%)
+all functions linked to roadmap tasks (including library): 257/1112
 code bytes covered: 474981/482383 (98.5%)
 address  status      instructions  function
 00010010  native      25            main
@@ -16,9 +16,9 @@ address  status      instructions  function
 0001034c  native      25            pit_read
 00010390  identified  69            anim_free_all
 0001044c  identified  69            anim_free_all2
-00010508  identified  346           anim_register
+00010508  ported      346           texanim_build
 0001098c  identified  41            anim_count_faces
-00010a00  identified  113           anim_step
+00010a00  verified    113           texanim_step
 00010b30  identified  53            anim_collect
 00010bc8  identified  52            anim_count_matches
 00010c5c  identified  64            face_in_tile
@@ -95,7 +95,7 @@ address  status      instructions  function
 000205d4  unknown     24            sub_000205d4
 00020608  unknown     178           sub_00020608
 00020814  ported      247           ground_query
-00020bbc  identified  33            face_avg_height
+00020bbc  ported      33            face_avg_height
 00020c18  identified  45            srf_walk_list_b
 00020c81  identified  45            srf_walk_list_a
 00020cf0  unknown     7             sub_00020cf0
@@ -140,7 +140,7 @@ address  status      instructions  function
 0002a410  identified  43            reset_race_times
 0002a4ec  ported      306           sound_load
 0002a97c  unknown     143           sub_0002a97c
-0002abdc  unknown     31            sub_0002abdc
+0002abdc  ported      31            texanim_create
 0002ac28  ported      167           iris_table_build
 0002adf8  partial     442           ghost_load
 0002b430  partial     54            shutdown_save
@@ -161,19 +161,19 @@ address  status      instructions  function
 0002e6f8  identified  228           car_body_lean
 0002ea44  ported      157           car_impact_fx
 0002ed00  partial     2335          car_update
-00031858  unknown     126           sub_00031858
+00031858  ported      126           car_flatten
 000319d8  unknown     1094          sub_000319d8
-00032d8c  unknown     15            sub_00032d8c
-00032dc8  unknown     690           sub_00032dc8
-0003383c  unknown     433           sub_0003383c
+00032d8c  ported      15            car_frame_velocity
+00032dc8  verified    690           ground_list_query
+0003383c  verified    433           special_query
 00033ee8  ported      374           collect_walls
 00034430  unknown     175           sub_00034430
 00034688  unknown     21            sub_00034688
-000346cc  unknown     275           sub_000346cc
-000349e8  unknown     436           sub_000349e8
+000346cc  verified    275           contact_impulse
+000349e8  verified    436           contact_polygons
 000350cc  unknown     12            sub_000350cc
-000350f0  port-pending  841           car_ground_contact
-00035f38  unknown     140           sub_00035f38
+000350f0  ported      841           car_ground_contact
+00035f38  verified    140           reflect_velocity
 000360f0  ported      178           ambient_sound
 0003636c  ported      534           smoke_emitters
 00036ce0  ported      337           special_emitters
@@ -194,7 +194,7 @@ address  status      instructions  function
 0003ee70  ported      311           wheel_sparks
 0003f37c  ported      396           landing_dust
 0003fac0  unknown     119           sub_0003fac0
-0003fd04  port-pending  136           collisions_pass
+0003fd04  partial     136           collisions_pass
 0003fee8  ported      171           fx_add
 000400f4  ported      187           weather_zone
 000403c8  ported      718           weather_update
@@ -238,7 +238,7 @@ address  status      instructions  function
 0004e688  ported      162           turbo_start_fx
 0004e97c  ported      774           turbo_effects
 0004f874  unknown     248           sub_0004f874
-0004fcf0  unknown     210           sub_0004fcf0
+0004fcf0  ported      210           elimination_smoke
 000500f0  verified    121           car_steer
 000502c4  verified    119           car_gearbox
 00050464  ported      232           roll_sound
@@ -367,7 +367,7 @@ address  status      instructions  function
 000587fc  unknown     47            sub_000587fc
 00058864  unknown     62            sub_00058864
 0005891c  identified  222           camera_angles
-00058c1c  unknown     206           sub_00058c1c
+00058c1c  verified    206           engine_view_list
 00058ebc  unknown     567           sub_00058ebc
 000596c4  unknown     778           sub_000596c4
 0005a2c8  unknown     430           sub_0005a2c8
