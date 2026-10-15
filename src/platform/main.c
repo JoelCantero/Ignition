@@ -85,6 +85,10 @@ static int session_on, session_saved;
 static int tv_index = 3, spectated, spectate_wait;
 static IgnSkids skids;
 static IgnFx fx;
+static IgnCar *player_car;
+static IgnCollObjs colls;
+static IgnTexAnims texanims;
+static IgnMessage messages[IGN_MESSAGES];
 static const IgnTrack *hud_track;
 /* The free camera (F1) shows the debug camera overlay of sub_00049fdc. */
 static bool hud_debug;
@@ -183,16 +187,50 @@ static int session_setup(const char *data_dir, const char *level, int car_model,
     return 0;
 }
 
+/* car_update 0x2f01f / 0x30dbb: the special objects (0x12c-0x15d) under a car, before its tick. Track 5 is ICELAND. */
+static void special_tick(IgnCar *c, const IgnLevel *lv, const IgnTrack *t) {
+    if (c->wrecked) return;
+    /* cars_update_all 0x2d685: [0x24bff0] = layer (PLC type bits 12-15) of the car's section object, until 120
+     * frames after the player's finish. */
+    int layer = 0, obj = ign_track_section_object(t, c->section);
+    if (obj >= 0 && obj < lv->track.nobj && !(player_car->out && finish_clock >= 120.0))
+        layer = (int)((lv->track.objs[obj].type >> 12) & 0xf);
+    int wreck, special = ign_special_probe(lv, &fx, c, track_id == 5, layer, &wreck);
+    ign_special_apply(c, special, wreck, &fx, c->x, c->z);
+    /* car_update 0x31316: the flattened state of sub_00031858. */
+    IgnCar *all[MAX_RIVALS + 1];
+    int n = 0, index = 0;
+    all[n++] = player_car;
+    for (int i = 0; i < nrivals; i++) all[n++] = &rivals[i];
+    for (int i = 0; i < n; i++)
+        if (all[i] == c) index = i;
+    ign_car_flat_tick(c, all, n, index);
+    ign_car_flat_effects(c, &fx, c->x, c->z);
+}
+
+/* human_input 0x2c8f5: a flattened car steers the other way. */
+static IgnInput human_steer(const IgnCar *c, IgnInput in) {
+    if (c->flat > 0) {
+        bool left = in.left;
+        in.left = in.right, in.right = left;
+        in.a_steer = -in.a_steer;
+    }
+    return in;
+}
+
 static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, IgnAi *player_ai, int autopilot) {
     ghost_tick++;
     int started = ign_race_started(&race);
     int was_out = player->out;
     double best_lap = race.best_lap;
     ign_race_progress(&race, player, t);
+    /* car_update 0x2f43a: the player's lap record, 80 frames blinking every 8 (English). */
+    if (race.best_lap < best_lap) ign_message_add(messages, "LAP RECORD", 80, 8, -1);
     IgnCar *all[MAX_RIVALS + 1] = {player};
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_ai_set_cars(all, nrivals + 1);
     for (int i = 0; i < nrivals; i++) {
+        special_tick(&rivals[i], lv, t);
         if (!rivals[i].wrecked) {
             ign_car_tick(&rivals[i], lv, NULL);
             ign_race_progress(&race, &rivals[i], t);
@@ -250,10 +288,33 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
                           player->out ? finish_clock : -1.0, focus_x, focus_z);
         ign_fx_emitters(&fx, lv, focus_x, focus_z);
         ign_fx_frame(&fx, all, nrivals + 1, focus_x, focus_z);
+        /* collisions_pass 0x3fdce..0x3feda after the effect handlers. */
+        ign_texanim_frame(&texanims);
+        ign_coll_frame(&colls, lv, all, nrivals + 1, &fx, focus_x, focus_z);
+        if (race.mode == IGN_MODE_ELIMINATION && race.clock < 0)
+            for (int i = 0; i <= nrivals; i++)
+                if (!all[i]->wrecked && !all[i]->out &&
+                    ign_race_position((const IgnCar *const *)all, nrivals + 1, i) == race.remaining)
+                    ign_fx_elimination_smoke(&fx, all[i], focus_x, focus_z);
+        ign_messages_age(messages);
         ign_sound_frame(all, nrivals + 1, spectated, &race, player->out ? finish_clock : -1.0, &weather, &fx);
+        /* sub_00032d8c at the start of the next frame: the last tick's axle steps. */
+        for (int i = 0; i <= nrivals; i++) ign_car_frame_velocity(all[i]);
     }
     ign_skids_step(&skids);
-    if (started) ign_race_step(&race, all, nrivals + 1);
+    if (started) {
+        double blown[MAX_RIVALS + 1];
+        for (int i = 0; i <= nrivals; i++) blown[i] = all[i]->blow;
+        ign_race_step(&race, all, nrivals + 1);
+        /* sub_0002de30 0x2e100: "%s IS OUT" for 80 frames; the port has no driver names. */
+        for (int i = 0; i <= nrivals; i++)
+            if (blown[i] == 0.0 && all[i]->blow != 0.0) {
+                char text[100];
+                if (i == 0) snprintf(text, sizeof text, "PLAYER IS OUT");
+                else snprintf(text, sizeof text, "CPU %d IS OUT", i);
+                ign_message_add(messages, text, 80, 8, -1);
+            }
+    }
     /* car_update 0x2f37f: the player's finish restarts [0x1fb4d0] and selects the car-following camera. */
     if (player->out && !was_out) finish_clock = 0, tv_index = 3, spectate_wait = 100;
     if (session_on) session_hooks(all, nrivals + 1, t, best_lap, was_out);
@@ -384,6 +445,8 @@ static int run_game(int argc, char **argv) {
     tv_index = 3;
     spectated = spectate_wait = 0;
     session_on = session_saved = 0;
+    memset(messages, 0, sizeof messages);
+    hud_debug = false;
     const char *data_dir = getenv("IGNITION_DATA");
     if (!data_dir) data_dir = DEFAULT_DATA_DIR;
     const char *level = "USA";
@@ -542,6 +605,7 @@ static int run_game(int argc, char **argv) {
     if (want > MAX_RIVALS) want = MAX_RIVALS;
     float sx, sz, sh;
     grid_pose(&lv, &track, 0, want + 1, &sx, &sz, &sh);
+    player_car = &car;
     if (ign_car_init(&car, &lv, car_id >= 0 ? car_id : ign_first_car_id(&lv), sx, sz, sh)) {
         fprintf(stderr, "no car models in CARS.PLC\n");
         return 1;
@@ -555,6 +619,15 @@ static int run_game(int argc, char **argv) {
     ign_skids_init(&skids);
     ign_fx_init(&fx);
     ign_fx_emitters_init(&fx, &lv);
+    track_id = ign_ghost_track_id(level);
+    if (ign_texanim_init(&texanims, &lv.track, ign_texanim_period(track_id)) < 0) {
+        fprintf(stderr, "out of memory\n");
+        return 1;
+    }
+    if (ign_coll_init(&colls, &lv.track) < 0) {
+        fprintf(stderr, "Ingen info om kollisions objektet!!\n");
+        return 1;
+    }
     ign_weather_init(&weather, level);
     ign_chase_init(&cams[0], &car);
     for (int i = 0; i < nrivals; i++) ign_chase_init(&cams[i + 1], &rivals[i]);
@@ -648,9 +721,11 @@ static int run_game(int argc, char **argv) {
         }
         float t = 0;
         for (int step = 0; sim_ticks >= 0 ? step < sim_ticks : t < sim_seconds; step++, t += SIM_DT) {
+            special_tick(&car, &lv, &track);
             if (!car.wrecked) {
-                if (!autopilot && car.progress_lock != 1) player_ai.input = in;
-                ign_car_tick(&car, &lv, autopilot || car.progress_lock == 1 ? NULL : &in);
+                IgnInput steered = human_steer(&car, in);
+                if (!autopilot && car.progress_lock != 1) player_ai.input = steered;
+                ign_car_tick(&car, &lv, autopilot || car.progress_lock == 1 ? NULL : &steered);
                 if (!autopilot && car.progress_lock != 1) player_ai.turbo_request = car.turbo_key;
             }
             car_hits += tick_rivals(&lv, &track, &car, &player_ai, autopilot);
@@ -813,9 +888,10 @@ static int run_game(int argc, char **argv) {
                 .manual_gear = manual_gear,
             };
             for (accumulator += dt; accumulator >= SIM_DT; accumulator -= SIM_DT) {
-                IgnInput tick_input = in;
+                IgnInput tick_input = human_steer(&car, in);
                 tick_input.gear_shift = pending_gear_shift;
                 pending_gear_shift = 0;
+                special_tick(&car, &lv, &track);
                 if (!car.wrecked) {
                     if (car.progress_lock != 1) player_ai.input = tick_input;
                     ign_car_tick(&car, &lv, car.progress_lock == 1 ? NULL : &tick_input);
@@ -854,6 +930,7 @@ static int run_game(int argc, char **argv) {
     ign_sound_stop();
     SDL_DestroyTexture(tex);
     SDL_StopTextInput(win);
+    ign_texanim_free(&texanims); /* the menu may start another race */
     if (own_window) {
         SDL_DestroyRenderer(ren);
         SDL_DestroyWindow(win);

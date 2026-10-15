@@ -68,7 +68,7 @@ static int respawn_tests(void) {
     car.turbo_key = 1;
     RESET_CHECK(ign_car_turbo_input(&car, 1, 0) == 1);
     memcpy(&expected, &car, sizeof car);
-    RESET_CHECK(ign_car_respawn(&car, &empty, 10, 20, 0, 250) == -1);
+    RESET_CHECK(ign_car_respawn(&car, &empty, 10, 20, 0, 250, 0) == -1);
     RESET_CHECK(memcmp(&car, &expected, sizeof car) == 0);
     car.out = 0;
     car.wrecked = 1;
@@ -114,7 +114,7 @@ static int respawn_tests(void) {
     car.gear = car.forward_gear = 2;
     car.gear_ticks = 31;
     car.turbo_mode = 2;
-    RESET_CHECK(ign_car_respawn(&car, &level, 10, 20, 0, 250) == 0);
+    RESET_CHECK(ign_car_respawn(&car, &level, 10, 20, 0, 250, 0) == 0);
     RESET_CHECK(car.gear == 1 && car.forward_gear == 1 && car.gear_ticks == 0 && car.gear_delay == 30);
     RESET_CHECK(car.turbo_mode == 2 && car.turbo_wait == 29 && car.turbo_key == 1 && car.turbo_frames == 17);
     RESET_CHECK(car.out == 1 && car.race_elapsed == 10.25 && car.lap_elapsed == 4.25 && car.lap_origin == 9.5);
