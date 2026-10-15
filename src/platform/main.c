@@ -236,7 +236,7 @@ static IgnHudState hud_state(const IgnLevel *lv, const IgnCar *const *all) {
     return (IgnHudState){.cars = all, .ncars = nrivals + 1, .level = lv, .track = hud_track, .mode = race.mode,
                          .remaining = race.remaining, .difficulty = ign_get_difficulty(), .clock = race.clock,
                          .total = race.total, .best_lap = race.best_lap,
-                         .shake = cams[0].shake};
+                         .shake = cams[0].shake, .track_id = track_id};
 }
 
 /* Per-frame HUD counters, advanced from the race clock so headless runs see the same frames. */

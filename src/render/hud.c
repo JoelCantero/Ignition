@@ -84,6 +84,9 @@ static const char *const LAST_WARNING[6] = {
 static const char *const OUT_MESSAGE[6] = {
     "%s IS OUT", "%s IST AUSGESCHIEDEN", "%s \xc8 FUORI", "%s ESTA FUERA", "%s bR UTE", "%s EST ELIMINE",
 };
+static const char *const TRACK_RECORD[6] = {
+    "TRACK RECORD", "STRECHENREKORD", "RECORD DELLA PISTA", "RECORD DE PISTA", "BAN REKORD", "RECORD DU CIRCUIT",
+};
 static const char *const LAP_RECORD[6] = {
     "LAP RECORD", "RUNDENREKORD", "RECORD SUL GIRO", "RECORD DE VUELTA", "VARV REKORD", "RECORD DU TOUR",
 };
@@ -192,6 +195,14 @@ int ign_hud_init(IgnHud *hud, const char *data_dir, const char *level, int w, in
         ign_fnt_load(&hud->debug_font, path))
         goto fail;
     if (build_sprites(hud)) goto fail;
+    /* IGN_DOS.BTZ is the 0x597-byte block 0x1ff158..0x1ff6ef saved by 0x2b4f6 (sub_00061078); the race record of
+     * track t is the double at 0x1ff32b + t * 0x78. Without the file there is no TRACK RECORD message. */
+    size_t btz_size = 0;
+    uint8_t *btz = NULL;
+    if (snprintf(path, sizeof path, "%s/IGN_DOS.BTZ", data_dir) < (int)sizeof path) btz = ign_read_file(path, &btz_size);
+    if (btz && btz_size == 0x597)
+        for (int t = 0; t < 7; t++) memcpy(&hud->track_record[t], btz + 0x1d3 + t * 0x78, sizeof(double));
+    free(btz);
     return 0;
 
 fail:
@@ -336,6 +347,12 @@ static void step_frame(IgnHud *hud, const IgnHudState *st) {
         IgnHudMessage *m = &hud->msg[i];
         if (m->active == 1 && ++m->timer > m->duration) m->active = 0;
     }
+    /* car_update 0x2f40f: a lap under [0x1fb390] is announced (before TRACK RECORD) in the viewport of the player who drove it. */
+    if (st->best_lap < hud->best_lap)
+        for (int v = 0; v < nv; v++)
+            if (st->cars[v]->last_lap == st->best_lap)
+                ign_hud_message(hud, LAP_RECORD[hud->language], 0x50, 8, message_viewport(st, v));
+    hud->best_lap = st->best_lap;
     for (int i = 0; i < n; i++) {
         const IgnCar *car = st->cars[i];
         IgnHudCar *hc = &hud->car[i];
@@ -352,16 +369,15 @@ static void step_frame(IgnHud *hud, const IgnHudState *st) {
                 snprintf(text, sizeof text, OUT_MESSAGE[hud->language], car_name(car));
                 for (int v = 0; v < nv; v++) ign_hud_message(hud, text, 0x50, 8, message_viewport(st, v));
             }
+            /* car_update 0x2f50d: a player finishing the third lap under the saved race record (not in
+             * elimination). */
+            if (i < nv && car->lap == 3 && st->mode != IGN_MODE_ELIMINATION && st->track_id >= 0 &&
+                st->track_id < 7 && car->race_elapsed < hud->track_record[st->track_id])
+                ign_hud_message(hud, TRACK_RECORD[hud->language], 0x50, 8, message_viewport(st, i));
             /* car_update 0x2f38b: a player's finish restarts [0x1fb4d0] and its [0x1fed9c]. */
             if (i < nv) hud->finish_clock = 0.0, hud->finish_frames[i] = 0, hc->medal_zoom = 0;
         }
     }
-    /* car_update 0x2f40f: a lap under [0x1fb390] is announced in the viewport of the player who drove it. */
-    if (st->best_lap < hud->best_lap)
-        for (int v = 0; v < nv; v++)
-            if (st->cars[v]->last_lap == st->best_lap)
-                ign_hud_message(hud, LAP_RECORD[hud->language], 0x50, 8, message_viewport(st, v));
-    hud->best_lap = st->best_lap;
     /* sub_000420cc 0x4288d: [0x1fb4d0] runs once a player has finished. */
     for (int v = 0; v < nv; v++)
         if (st->cars[v]->out) {

@@ -54,6 +54,7 @@ typedef struct {
     int viewer;             /* player whose HUD is drawn (car index 0 or 1) */
     int players;            /* [0x1fef14] + 1: one or two viewports (0 counts as one) */
     int view_size;          /* [0x1fefdc]: window size option 0-3 (factors 0xc0b80) */
+    int track_id;           /* [0x1fef10]: 0 USA .. 6 JAPAN, picks the saved track record */
 } IgnHudState;
 
 typedef struct {
@@ -82,6 +83,7 @@ typedef struct {
     double finish_clock;  /* [0x1fb4d0]: frames since a player finished */
     int finish_frames[2]; /* [0x1fed9c]: frames since each player finished, up to 120 */
     double best_lap;      /* last [0x1fb390] seen */
+    double track_record[7]; /* 0x1ff32b + track * 0x78 from IGN_DOS.BTZ (race time, seconds); 0 when missing */
     int started;
     uint32_t rng;         /* private stand-in for sub_00051714 in the shake jitter */
 } IgnHud;

@@ -329,6 +329,11 @@ static void test_game_data(const char *dir, const char *out) {
         ign_hud_update(&hud, &st);
         st.total = 440.0;
         ign_hud_update(&hud, &st);
+        int track_record = 0;
+        for (int i = 0; i < IGN_HUD_MESSAGES; i++)
+            track_record += hud.msg[i].active && !strcmp(hud.msg[i].text, "TRACK RECORD") && hud.msg[i].viewport == -1;
+        CHECK(hud.track_record[0] > 135.0 && hud.track_record[0] < 136.0 && track_record == 1,
+              "USA record %.3f from IGN_DOS.BTZ beaten by 73.75 s", hud.track_record[0]);
         CHECK(hud.car[0].medal_zoom == 25 && hud.finish_frames[0] == 40, "finish clocks %d %d", hud.car[0].medal_zoom,
               hud.finish_frames[0]);
         memset(frame.color, 0, sizeof frame.color);
