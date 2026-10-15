@@ -31,7 +31,7 @@
 0002236c  level_prepare        progress bar, load_tri, objects, load_srf_grid  roadmap=phase2.world
 0001fee0  load_srf_grid        eax=path, edx=material table; relocates SRF offsets  roadmap=phase2.world
 00041244  pos_make_relative    converts POS positions to consecutive cyclic frame deltas  roadmap=phase2.world
-000412e8  pos_apply_frame      applies current POS delta/rotation; port in src/game/pos.c, rotation order approximate  status=partial roadmap=phase2.world
+000412e8  pos_apply_frame      applies current POS delta/rotation to move records [0x1fef94] with +0x1c == 1 (LI_PLACEOBJECT), then LI_MOVEOBJECT; port in src/game/pos.c, rotation order approximate (render only: ground/collision queries use translation)  status=partial roadmap=phase2.world
 00060f40  read_file_into       eax=path, edx=buf, ebx=size
 000240f4  load_fonts           IGNITION.FNT -> [0x1feff4]; yellow/pos/speed{_s,,_h}.lft -> [0x1fea0c..0x1fea38] (font.c/hud.c load the layout's three)  status=ported roadmap=phase4.hud
 001febf4  g_level_pos
@@ -72,10 +72,10 @@
 000ebb60  g_framebuffer
 001fec04  g_level_tab
 001fef18  g_level_shd
-00020814  ground_query         eax=x, edx=y, ebx=z (SRF space) -> best face, plane, surface type  status=ported roadmap=phase1.physics
+00020814  ground_query         eax=x, edx=probe height (up), ebx=z (SRF space) -> 0xebad8: type, normal (p0-p1)x(p2-p1), points (mesh + pool position, no rotation); integer face_avg_height cost  status=ported roadmap=phase1.physics
 00020c18  srf_walk_list_b      spans with dz >= 0  roadmap=phase1.physics
 00020c81  srf_walk_list_a      spans with dz < 0  roadmap=phase1.physics
-00020bbc  face_avg_height      roadmap=phase1.physics
+00020bbc  face_avg_height      -(v0y+v1y+v2y)/3 (idiv) + pool y  status=ported roadmap=phase1.physics
 000569ec  engine_alloc_objects 42-byte object pool -> [0x24c058]  roadmap=phase3.render
 0002ed00  car_update           ~2300 insns, calls ground_query; grip block 0x3070a..0x30874 verified by tests/car_original.py, not whole routine  status=partial roadmap=phase3.car-update
 0002f2be  lap_crossing         phase 3, probe 0, abs(previous +370)=count-1, +604=0; finish snapshots +39c position to +3a0; bounded lap oracle 3024 cases/4112 steps  status=ported roadmap=phase1.race
@@ -106,7 +106,7 @@
 0001f708  box_vs_walls         (ported: ign_body_collide)  status=ported roadmap=phase1.physics
 0001f3fc  wall_impulse         (ported)  status=ported roadmap=phase1.physics
 0001fdb4  body_corners         world corners from cuerpo+0xf0/+0x110  roadmap=phase1.physics
-0003fd04  collisions_pass      object/car collisions per frame; effect loop: 200 slots 0x1d5f10 (0x64 B), handlers by type via 0x3fcd8  status=port-pending roadmap=phase2.collisions
+0003fd04  collisions_pass      per frame: effect loop (200 slots 0x1d5f10, 0x64 B, handlers 0x3fcd8), [0x1feef0] += 1 vs 0xc4598[track] -> 0x10a00, car_ground_contact if [0x1feeb4] > 0, 0x360f0/0x3636c/0x36ce0, elimination 0x4fcf0 (mode 3), 0x4c858  status=partial roadmap=phase2.collisions
 0002e234  car_vertical         gravity, jumps, landing (car+0x20); arithmetic verified until 0x2e397 or return, 252 cases/1008 steps; landing effects excluded  status=ported roadmap=phase1.physics
 0003731c  skid_effects         skid marks (700 ring [0x1feeb8], SHD row per surface 0xc34e0) and dust (effect 1)  status=ported roadmap=phase2.effects
 00039d1c  fx_sprite            effect type 1: SMOKE.TEX sprite, damped drift, grows, 8-frame anim 0xc4110  status=ported roadmap=phase2.effects
@@ -162,14 +162,37 @@
 00036ce0  special_emitters     smoke 0x12e (+ embers 1 in 10) / geysers 0x131 every 41 frames (list 0x1fef58)  status=ported roadmap=phase2.effects
 0003636c  smoke_emitters       PLC 0x15e-0x167 and 0x130 smoke, mist and columns (list 0x1fefac, class = type - 0x15e)  status=ported roadmap=phase2.effects
 0003f37c  landing_dust         4 SMOKE puffs at the wheels on landing (car+0x278 == 1) over dusty types 0xc3558  status=ported roadmap=phase2.effects
-00041430  respawn_place        after glide: probe point (or 20 to -x), still, airborne; bounded controls reset verified: gear 1/counter 0, preserves delay/turbo/clocks; geometry/full FX excluded (respawn oracle 7422 cases/31344 steps)  status=ported roadmap=phase1.race
+00041430  respawn_place        after glide: probe point with ground_list_query 0x32dc8 (view at the point, layer of its object; or 20 to -x), still, airborne; bounded controls reset verified: gear 1/counter 0, preserves delay/turbo/clocks; geometry/full FX excluded (respawn oracle 7422 cases/31344 steps)  status=ported roadmap=phase1.race
 0004e688  turbo_start_fx       10 nitro puffs (0xc41a0) when a turbo starts  status=ported roadmap=phase1.controls
 000413fc  ease_curve           table 0xc0678[f*200]*0.005 (ease in-out)  roadmap=phase3.render
 00028f08  build_sections       route topology from PLC-origin distances; parallel branch B, class-6 merge and next-object angles (track.c)  status=partial roadmap=phase1.ai-route
-000247b0  split_plc_types      class = type & 0xfff, attributes -> [0x1fef7c]  roadmap=phase2.world
+000247b0  split_plc_types      rewrites the PLC type to its class (type & 0xfff) before world creation and level_prepare; [0x1fef7c] 12 B per object: layer (bits 12-15), byte 2, byte 3  roadmap=phase2.world
 001ff004  g_section_count
 001feff8  g_sections           24 bytes per section
-000350f0  car_ground_contact   moving-object collisions; calls ground_query  status=port-pending roadmap=phase2.collisions
+000350f0  car_ground_contact   collision objects [0x1fefc0] (0x98 B): resting vs cars (0x349e8 + 0x346cc, 60x60 box, COLL 1 above impact 10), flying: x0.99, -0.4, spin x0.98, clamp, ground_query bounce (0x35f38, 0.9/0.6/0.9, max 20) or rest below speed 2; kind 4 flashes LIGHT.TEX; port src/game/pos.c, flight/bounce fragments verified (tests/contact_original.py)  status=ported roadmap=phase2.collisions
+000349e8  contact_polygons     eax=A, edx=nA, ebx=B, ecx=nB (float x,z): edge crossings (max 8) -> mean [0x1fee9c]/[0x1feea8], farthest-pair angle [0x1fee98]; verified tests/contact_original.py  status=verified roadmap=phase2.collisions
+000346cc  contact_impulse      eax=A, edx=B (0x34 B: x, z, vx, vz, w doubles; mass, inertia, impact floats): impulse with -(1+0.5), impacts |trunc(vn)|; verified (jB0 float ties 1 ulp, x87)  status=verified roadmap=phase2.collisions
+00035f38  reflect_velocity     eax=struct (+0 normal, +0x18 velocity): reflect when moving against the normal, via two atan2 rotations; verified  status=verified roadmap=phase2.collisions
+0003383c  special_query        eax=x, edx=height, ebx=z, ecx=car: type 0x12c-0x15d (word +0x1e) of the last engine object (list [0x24c01c] after 0x58c1c) with a face over x/z, |dx|,|dz| < 600/900, sticky |dy| < 190; result 0x1ffca8; verified on supplied lists  status=verified roadmap=phase2.collisions
+00032dc8  ground_list_query    eax=x, edx=height, ebx=z, ecx=car/-1, stack probe: ground query over the engine view list: up to 8 road faces (class < 100) under the point, nearest below the probe, or a special object (0x12c-0x15d, |dy| < 190) while [0x1ff970] in [0, 0x15e); result 0x1ff970; respawn_place and car_update (lightning, 0x12d launch); verified on supplied lists  status=verified roadmap=phase2.collisions
+00058c1c  engine_view_list     view struct [0x24c05c] -> object list [0x24c01c] (+0x60 count): fixed row pattern 0xc5d8c over the 256-unit grid [0x24c048] (width [0x24c014] = 200), start shifted by 0xc5e40[yaw*0.01, pitch*0.01]; cell chains +0x26 from the head; layer filter [0x24bff0] on word +0x24; verified with view (850, 0)  status=verified roadmap=phase2.collisions
+00031858  car_flatten          copies the car's body mesh scaled x1.2 / y0.2 / z1.6 (set mesh 0x56e9c), COLL 6; car+0x558/+0x55c/+0x560; restored by car_update 0x31316 after 200 ticks with no car within 30 (pop -6, COLL 7)  status=ported roadmap=phase2.collisions
+0002abdc  texanim_create       level_prepare: sub_00010390 then sub_00010508 for every class 0xfa object  status=ported roadmap=phase2.world
+00010508  texanim_build        frames = leading textured faces (64x64 tiles, page), world faces in each tile (sub_00010bc8 count / sub_00010b30 collect / sub_00010c5c match); list [0xab5f0], count [0xab5f4]  status=ported roadmap=phase2.world
+00010a00  texanim_step         faces of frame i to the tile of frame (i + cur) mod n; prev = cur++; from collisions_pass every 0xc4598[track] frames; verified  status=verified roadmap=phase2.world
+0004c7c0  hud_message_add      eax=text, edx=frames, ebx=blink, ecx=view: first free of 5 x 0x78 B [0x1fefb8]  status=ported roadmap=phase4.ui
+0004c858  hud_messages_age     collisions_pass: age +0x70 += 1, past +0x68 the slot is freed  status=ported roadmap=phase4.ui
+0004c89c  hud_messages_draw    race_hud: shown while fmod(age, 2*blink) <= blink, centred per view  roadmap=phase4.ui
+0004fcf0  elimination_smoke    collisions_pass, mode 3: last racing car trails 2 EXSMOKE and (1 in 2) 1 DARKSMOK sprites from its rear  status=ported roadmap=phase2.effects
+001ff970  g_list_ground_result result of ground_list_query, its type gates special objects on the next call
+000c5d8c  t_view_rows          engine view pattern: row/column start, then (cells, next row shift) until -5000
+000c4598  t_texanim_period     frames per texture animation step by track: 6 20 2 4 12 9 12
+00032d8c  car_frame_velocity   car+0x640/+0x648 = (rear + front axle steps car+0x58/+0x78, +0x60/+0x80) * 0.5, once per frame  status=ported roadmap=phase2.collisions
+001fefc0  g_coll_objects       collision objects (PLC 0x96-0xc7), 0x98 B: +0 type-0x96, +4 PLC, +8 flying, +0xc pos, +0x24 vel, +0x3c ang, +0x54 spin, +0x6c contact body, +0x84 mass, +0x88 inertia, +0x8c impact, +0x90 phase, +0x94 period
+001feeb4  g_coll_count         number of collision objects
+001fef58  g_special_objects    PLC 0x12c-0x15d, 16 B: PLC, type, counter, phase (geyser +0xc)
+001fee3c  g_push_sound_wait    0x12e push sample cooldown (15 car updates)
+001fede4  g_lightning_active   set by fx_lightning 0x3bdac
 0002de30  race_elimination    mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), "%s IS OUT"; [0x1fed78]-- ; at 1 left, all finish  roadmap=phase1.race
 0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> wrap/fallback/invalid-record selection ported; route topology remains approximate  status=partial roadmap=phase1.ai-route
 000bf994  t_ai_lookahead        6 i16 section offsets {1,2,3,4,6,8} (read as dword [0xbf992+2k] >> 16)

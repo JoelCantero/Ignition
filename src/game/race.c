@@ -66,7 +66,8 @@ static void respawn(IgnCar *c, const IgnLevel *lv, const IgnTrack *t, int obj, c
     double at[4] = {to[0], to[1], to[2], to[3]};
     int s = c->section == IGN_NO_SECTION ? 0 : c->section;
     for (int k = 0; k < 8; k++) {
-        if (obj >= 0 && ign_car_respawn(c, lv, (float)at[0], (float)at[2], at[3], at[1]) == 0) {
+        if (obj >= 0 && ign_car_respawn(c, lv, (float)at[0], (float)at[2], at[3], at[1],
+                                        (int)((lv->track.objs[obj].type >> 12) & 0xf)) == 0) {
             if (t->section[obj] != IGN_NO_SECTION) c->section = t->section[obj];
             if (getenv("IGN_TRACE"))
                 fprintf(stderr, "respawn car %d section %d at %.0f %.0f h=%.0f heading %.2f\n", c->id, c->section,
