@@ -18,8 +18,9 @@ typedef struct {
 
 void ign_raster_clip(IgnRaster *r, int x0, int y0, int x1, int y1);
 
-/* Primitive 0x11 (sub_00073c58): affine textured triangle; xy and uv in 8.8, tex = one 256x256 page. */
-void ign_prim_tex(IgnRaster *r, const int32_t xy[6], const int32_t uv[6], const uint8_t *tex);
+/* Primitives 0x11 (sub_00073c58) and 0x12 (sub_000744c8): affine textured triangle; xy and uv in 8.8, tex = one
+ * 256x256 page; lut non-NULL (0x12) blends dst = lut[texel * 256 + dst]. */
+void ign_prim_tex(IgnRaster *r, const int32_t xy[6], const int32_t uv[6], const uint8_t *tex, const uint8_t *lut);
 
 /* Primitives 0x14 / 0x15 (sub_0007586c): perspective-correct textured triangle, per-vertex depth `light` (4 z);
  * lut non-NULL (0x15) blends dst = lut[texel * 256 + dst]. */
@@ -53,6 +54,8 @@ typedef struct {
     int nobj, cap;
     int *grid; /* 0x24c048: first object of each 256-unit cell */
     int gw, gh;
+    const uint8_t *keyed; /* 0x24c004: [a * 256 + b] = a ? a : b (sub_00011494) */
+    const uint8_t *shade; /* 0x24bfa8: the level SHD */
 } LisaScene;
 
 int lisa_scene_init(LisaScene *s, int width, int depth, int max_objects);
@@ -79,6 +82,7 @@ typedef struct {
     int fx, fy, near;          /* +0x80 */
     int cx, cy;                /* +0x9c */
     int reach;                 /* +0xa4: square of cells instead of the view cone when non-zero */
+    int persp;                 /* +0x58: near road faces perspective-correct (1 as set by sub_000564d8) */
     int zone;                  /* [0x24bff0] */
     int layers;
     int clip[4];               /* x0, y0, x1, y1 inclusive ([0xc4850]) */

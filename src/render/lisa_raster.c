@@ -124,8 +124,8 @@ static int32_t *x_edge_rows(const TexState *s, int32_t *out, int n, const int32_
 
 /* sub_000824b4: spans from the plain (left) edge to the uv (right) edge, drawn right to left; pixel x_r - 1 - k
  * takes the texel of step k. The packed DDA lets the v carry leak into the u fraction, as the original does. */
-static void tex_spans(const IgnRaster *r, const TexState *s, const uint8_t *tex, const int32_t *left,
-                      const UvRow *right, int rows, int y) {
+static void tex_spans(const IgnRaster *r, const TexState *s, const uint8_t *tex, const uint8_t *lut,
+                      const int32_t *left, const UvRow *right, int rows, int y) {
     for (; rows > 0; rows--, left++, right++, y++) {
         int32_t n = right->x - *left;
         if (n <= 0) continue;
@@ -133,7 +133,8 @@ static void tex_spans(const IgnRaster *r, const TexState *s, const uint8_t *tex,
         uint32_t ecx = ((uint32_t)right->u << 16) | (((uint32_t)right->v >> 8) & 0xffff);
         uint8_t bl = (uint8_t)((uint32_t)right->u >> 16), bh = (uint8_t)(ecx >> 8);
         for (int32_t k = 0; k < n; k++) {
-            dst[n - 1 - k] = tex[(bh << 8) | bl];
+            uint8_t t = tex[(bh << 8) | bl];
+            dst[n - 1 - k] = lut ? lut[(t << 8) | dst[n - 1 - k]] : t; /* sub_000825b8 blends through 0xe6cbc */
             uint32_t sum = ecx + s->step;
             unsigned carry = sum < ecx;
             ecx = sum;
@@ -315,7 +316,7 @@ static void uv_edge_clipped(const IgnRaster *r, TexState *s, UvEdge *out, int32_
     }
 }
 
-void ign_prim_tex(IgnRaster *r, const int32_t xy[6], const int32_t uv[6], const uint8_t *tex) {
+void ign_prim_tex(IgnRaster *r, const int32_t xy[6], const int32_t uv[6], const uint8_t *tex, const uint8_t *lut) {
     static XEdge xe;
     static UvEdge ue;
     TexState s;
@@ -340,18 +341,18 @@ void ign_prim_tex(IgnRaster *r, const int32_t xy[6], const int32_t uv[6], const 
         if (inside) x_edge(&s, &xe, top_mid), uv_edge(&s, &ue, top_bot);
         else x_edge_clipped(r, &s, &xe, top_mid), uv_edge_clipped(r, &s, &ue, top_bot);
         int y = xe.y, n1 = xe.n;
-        tex_spans(r, &s, tex, xe.x, ue.row, n1, y);
+        tex_spans(r, &s, tex, lut, xe.x, ue.row, n1, y);
         if (inside) x_edge(&s, &xe, mid_bot);
         else x_edge_clipped(r, &s, &xe, mid_bot);
-        tex_spans(r, &s, tex, xe.x, ue.row + n1, xe.n, y + n1);
+        tex_spans(r, &s, tex, lut, xe.x, ue.row + n1, xe.n, y + n1);
     } else {
         if (inside) uv_edge(&s, &ue, top_mid), x_edge(&s, &xe, top_bot);
         else uv_edge_clipped(r, &s, &ue, top_mid), x_edge_clipped(r, &s, &xe, top_bot);
         int y = xe.y, n1 = ue.n;
-        tex_spans(r, &s, tex, xe.x, ue.row, n1, y);
+        tex_spans(r, &s, tex, lut, xe.x, ue.row, n1, y);
         if (inside) uv_edge(&s, &ue, mid_bot);
         else uv_edge_clipped(r, &s, &ue, mid_bot);
-        tex_spans(r, &s, tex, xe.x + n1, ue.row, ue.n, y + n1);
+        tex_spans(r, &s, tex, lut, xe.x + n1, ue.row, ue.n, y + n1);
     }
 }
 
@@ -370,17 +371,20 @@ static double round24(double p, double e) {
     if (p != ((double)f + (double)g) * 0.5) return f;
     return (e > 0) == ((double)g > (double)f) ? g : f;
 }
+/* Precision control: 24-bit while set. The blended span (0x76df4) restores the saved control word, so the rows
+ * after a drawn 0x15 span run in extended precision (approximated with double) until the next half. */
+static int fpu_single;
 static double s_mul(double a, double b) {
     double p = a * b;
-    return round24(p, fma(a, b, -p));
+    return fpu_single ? round24(p, fma(a, b, -p)) : p;
 }
 static double s_add(double a, double b) {
     double s = a + b, bb = s - a;
-    return round24(s, (a - (s - bb)) + (b - bb));
+    return fpu_single ? round24(s, (a - (s - bb)) + (b - bb)) : s;
 }
 static double s_div(double a, double b) {
     double q = a / b, r = fma(-q, b, a);
-    return round24(q, (r > 0) == (b > 0) ? (r == 0 ? 0 : 1) : -1);
+    return fpu_single ? round24(q, (r > 0) == (b > 0) ? (r == 0 ? 0 : 1) : -1) : q;
 }
 static int32_t s_int(double v) { return (int32_t)lrint(v); }
 /* bits of the float v + 1.5 * 2^23 (the integer trick of the span code) */
@@ -472,6 +476,14 @@ typedef struct {
 
 static float inv_count[17]; /* 0xe66d8: 1 / n in 24-bit precision (sub_000765c3) */
 
+/* sub_00076a94 0x76d52 / 0x76e03: the blended remainder and short spans step a plain packed u << 16 | v and read
+ * u and v from the same state. */
+static void blend_tail(uint8_t *px, int n, uint32_t start, int32_t nu, int32_t nv, const uint8_t *tex,
+                       const uint8_t *lut) {
+    uint32_t step = ((uint32_t)nu << 16) | ((uint32_t)nv & 0xffff), e = start;
+    for (int k = 0; k < n; k++, e += step) px[-k] = lut[(unsigned)tex[((e >> 8) & 0xff) << 8 | (e >> 24)] << 8 | px[-k]];
+}
+
 /* Span of sub_00076658 (or the 0xe6658 blend of sub_00076a94): from the right end leftwards; perspective-correct
  * points every 16 pixels, an affine packed DDA in between. */
 static void persp_span(uint8_t *dst, int32_t count, int32_t u0, int32_t v0, int32_t ur, int32_t vr,
@@ -512,6 +524,10 @@ static void persp_span(uint8_t *dst, int32_t count, int32_t u0, int32_t v0, int3
         /* 0x7689e: the remainder, 1..16 pixels, with steps (target - start) / n. */
         int32_t ru = (int32_t)((uint32_t)tu & 0xffff) - (int32_t)(start >> 16);
         int32_t rv = (int32_t)((uint32_t)tv & 0xffff) - (int32_t)(start & 0xffff);
+        if (lut) {
+            blend_tail(px, rest, start, s_int(s_mul(ru, inv_count[rest])), s_int(s_mul(rv, inv_count[rest])), tex, lut);
+            return;
+        }
         uint32_t bu = s_magic(s_mul(ru, inv_count[rest])), bv = s_magic(s_mul(rv, inv_count[rest]));
         uint8_t ustep = (uint8_t)(bu >> 8);
         uint32_t step = (bu << 24) | (bv & 0xffff);
@@ -532,6 +548,10 @@ static void persp_span(uint8_t *dst, int32_t count, int32_t u0, int32_t v0, int3
     double w = s_div((double)length, s_add(s_mul((double)length, a_coef), b_coef));
     int32_t ru = s_int(s_mul(du, w)) + ur - u0, rv = s_int(s_mul(dv, w)) + vr - v0;
     int32_t nu = s_int(s_mul(ru, inv_count[count])), nv = s_int(s_mul(rv, inv_count[count]));
+    if (lut) {
+        blend_tail(px, count, start, nu, nv, tex, lut);
+        return;
+    }
     uint8_t ustep = (uint8_t)((uint32_t)nu >> 8);
     uint32_t step = ((uint32_t)nu << 24) | ((uint32_t)nv & 0xffff);
     uint32_t e = ((start << 8) & 0xff000000u) | (start & 0xffff);
@@ -550,12 +570,13 @@ static void persp_span(uint8_t *dst, int32_t count, int32_t u0, int32_t v0, int3
 /* sub_0007616c: one half of the triangle, row by row. */
 static void persp_rows(const IgnRaster *r, const PerspState *s, PerspHalf *h, const uint8_t *tex, const uint8_t *lut) {
     if (h->pos_s > h->limit) return;
+    fpu_single = 1;
     int row = (int)((uint32_t)(h->pos_l + s->y[0]) >> 8) - 1;
     for (;; row++) {
         double xl = s_add(s_mul(h->pos_l, s->slope_l), s->x[0]), xs = s_add(s_mul(h->pos_s, h->slope), h->x0);
         int32_t x_long = s_int(xl), x_short = s_int(xs);
         double w = s_div(h->t_l, s_add(s_mul(h->t_l, s->k_l), s->c_l));
-        int skip;
+        int skip, fpu_single_after = fpu_single;
         if (!s->long_right) skip = x_long >= r->xmax8 || r->xmin8 > x_short;
         else skip = x_long < r->xmin8 || r->xmax8 <= x_short;
         if (!skip && (x_long >> 8) - (x_short >> 8) == 0) skip = 1;
@@ -594,10 +615,12 @@ static void persp_rows(const IgnRaster *r, const PerspState *s, PerspHalf *h, co
                 int32_t u0 = s_int(s_add(s_mul(du, w0), ur)), v0 = s_int(s_add(s_mul(dv, w0), vr));
                 if (!(xpix > r->xmax8) && count <= r->stride) {
                     uint8_t *dst = r->fb + (size_t)row * r->stride + (uint32_t)xpix / 256;
+                    if (lut) fpu_single_after = 0;
                     persp_span(dst, count, u0, v0, ur, vr, du, dv, a_coef, b_coef, frac, length, tex, lut);
                 }
             }
         }
+        fpu_single = fpu_single_after;
         /* 0x76347 */
         h->pos_l += 0x100, h->pos_s += 0x100;
         h->t_l = (float)s_mul(h->pos_l, s->len_l);

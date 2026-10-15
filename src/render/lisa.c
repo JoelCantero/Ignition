@@ -20,8 +20,14 @@ static int32_t chop(double v) { return (int32_t)v; }
 static int32_t mul(int32_t a, int32_t b) { return (int32_t)((uint32_t)a * (uint32_t)b); }
 static int32_t add3(int32_t a, int32_t b, int32_t c) { return (int32_t)((uint32_t)a + (uint32_t)b + (uint32_t)c); }
 
+static uint8_t keyed_table[65536];
+
 int lisa_scene_init(LisaScene *s, int width, int depth, int max_objects) {
     memset(s, 0, sizeof *s);
+    if (!keyed_table[1])
+        for (int a = 0; a < 256; a++)
+            for (int b = 0; b < 256; b++) keyed_table[a * 256 + b] = (uint8_t)(a ? a : b);
+    s->keyed = keyed_table;
     s->gw = div_pow2(width + 0xff, CELL_SHIFT); /* engine_alloc_objects (0x569ec) */
     s->gh = div_pow2(depth + 0xff, CELL_SHIFT);
     s->grid = malloc(sizeof *s->grid * (size_t)s->gw * s->gh);
@@ -342,6 +348,59 @@ static void face_tex(Ctx *c, const LisaObject *o, const LisaVert *vb, const int3
     bucket(f, o, key);
 }
 
+/* sub_0005d718 (face types 18, 19, 22, 23 through 0x5d6d0..0x5d704): blended faces, keyed by the table of
+ * 0x24c004 (18, 22) or the level SHD (19, 23); 22 and 23 sort 80 buckets nearer. Rejected only when their box is
+ * off the clip area. Near road faces become primitive 0x15 (unless +0x58 is clear or the surface is 0x4d), the
+ * rest primitive 0x12. */
+static void face_blend(Ctx *c, const LisaObject *o, const LisaVert *vb, const int32_t *face, const uint8_t *lut,
+                       int bias) {
+    const LisaView *v = c->v;
+    LisaFrame *f = c->f;
+    const LisaVert *a = &vb[face[1]], *b = &vb[face[2]], *d = &vb[face[3]];
+    int32_t hx = a->x > b->x ? a->x : b->x, lx = a->x < b->x ? a->x : b->x;
+    int32_t hy = a->y > b->y ? a->y : b->y, ly = a->y < b->y ? a->y : b->y;
+    if (hx <= d->x) hx = d->x;
+    if (lx >= d->x) lx = d->x;
+    if (hy <= d->y) hy = d->y;
+    if (ly >= d->y) ly = d->y;
+    if (hx < v->xmin8 || lx > v->xmax8 || hy < v->ymin8 || ly > v->ymax8) return;
+    int32_t cross = ((d->y >> 4) - (b->y >> 4)) * ((a->x >> 4) - (b->x >> 4)) -
+                    ((a->y >> 4) - (b->y >> 4)) * ((d->x >> 4) - (b->x >> 4));
+    if (v->zoom <= 0) cross = ~cross;
+    int32_t zsum = a->z + b->z + d->z;
+    if (zsum <= 600 || cross <= 0) return;
+    LisaPrim *p = new_prim(f);
+    if (!p) return;
+    int32_t key = zsum >> 4;
+    int k = o->klass;
+    int road = k < 100 || k == 200 || (k >= 300 && k <= 302);
+    p->xy[0] = a->x, p->xy[1] = a->y, p->xy[2] = b->x, p->xy[3] = b->y, p->xy[4] = d->x, p->xy[5] = d->y;
+    if (key > 720 || !road || !v->persp || (face[0] >> 16) == 0x4d) {
+        p->type = 0x12;
+    } else {
+        p->type = 0x15;
+        if (key <= 480) {
+            p->light[0] = a->z, p->light[1] = b->z, p->light[2] = d->z;
+        } else {
+            /* unlike type 17 the fade factor stays in the FPU unrounded */
+            int32_t mean = zsum / 3;
+            double fade = (720 - key) * (double)0.004166666883975267f;
+            p->light[0] = mean + chop((a->z - mean) * fade);
+            p->light[1] = mean + chop((b->z - mean) * fade);
+            p->light[2] = mean + chop((d->z - mean) * fade);
+        }
+    }
+    memcpy(p->uv, face + 4, sizeof p->uv);
+    p->tex = face_page(o, (uint32_t)face[10]);
+    p->lut = lut;
+    key -= bias;
+    if (o->klass >= 100) key -= 92;
+    if (key < 0) key = 0;
+    if (key >= LISA_BUCKETS) key = LISA_BUCKETS - 1;
+    f->next[f->nprim] = f->head[key];
+    f->head[key] = f->nprim++;
+}
+
 /* Bytes taken by each face type in the mesh (handlers advance 0x24c028 by these). */
 static int face_words(int type) {
     switch (type) {
@@ -363,6 +422,10 @@ static void faces(Ctx *c) {
             int type = face[0] & 0xff;
             switch (type) {
             case 17: face_tex(c, o, vb, face); break;
+            case 18: face_blend(c, o, vb, face, c->scene->keyed, 0); break;
+            case 19: face_blend(c, o, vb, face, c->scene->shade, 0); break;
+            case 22: face_blend(c, o, vb, face, c->scene->keyed, 80); break;
+            case 23: face_blend(c, o, vb, face, c->scene->shade, 80); break;
             default: break;
             }
             face += face_words(type);
@@ -389,8 +452,10 @@ void lisa_draw(const LisaFrame *f, IgnRaster *r) {
     for (int i = 0; i < f->norder; i++) {
         const LisaPrim *p = &f->prims[f->order[i]];
         switch (p->type) {
-        case 0x11: ign_prim_tex(r, p->xy, p->uv, p->tex); break;
+        case 0x11: ign_prim_tex(r, p->xy, p->uv, p->tex, NULL); break;
+        case 0x12: ign_prim_tex(r, p->xy, p->uv, p->tex, p->lut); break;
         case 0x14: ign_prim_persp(r, p->xy, p->light, p->uv, p->tex, NULL); break;
+        case 0x15: ign_prim_persp(r, p->xy, p->light, p->uv, p->tex, p->lut); break;
         default: break;
         }
     }

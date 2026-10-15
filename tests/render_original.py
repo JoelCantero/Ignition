@@ -193,13 +193,16 @@ class RenderOriginal:
         return lines
 
     # primitive tests: records in the format of tests/lisa_prims.c
-    def setup_raster(self, width, height, tex):
+    def setup_raster(self, width, height, tex, shd=None):
         self.width, self.height = width, height
         self.call(0x60DC4, eax=width, ebx=height)
         self.tex_base = self.alloc(len(tex) + 0x10000, 0x10000)
         self.uc.mem_write(self.tex_base, tex)
         self.tex_size = len(tex)
-        self.luts = {}
+        keyed = bytes(a if a else b for a in range(256) for b in range(256))
+        self.luts = {1: self.blob(keyed, 0x10000)}
+        if shd:
+            self.luts[2] = self.blob(shd, 0x10000)
 
     def raster_records(self, prims):
         header = struct.unpack_from("<6i", prims)
@@ -211,11 +214,13 @@ class RenderOriginal:
             uv = self.blob(struct.pack("<6i", *rec[24:30]))
             page = self.tex_base + ((rec[30] << 16) % self.tex_size)
             words = rec[:24]
-            if rec[0] == 0x11:
-                words[7], words[8] = uv, page
-            elif rec[0] == 0x14:
+            lut = self.luts.get(rec[31], 0)
+            if rec[0] in (0x11, 0x12):
+                words[7], words[8], words[9] = uv, page, lut
+            elif rec[0] in (0x14, 0x15):
                 words[1] = page
                 words[11:17] = rec[24:30]
+                words[17] = lut
             else:
                 raise ValueError(f"primitive 0x{rec[0]:x} not supported")
             pointers.append(self.blob(struct.pack("<24I", *[w & 0xFFFFFFFF for w in words])))
@@ -260,7 +265,8 @@ def main():
     if args.prims:
         prims = Path(args.prims[1]).read_bytes()
         width, height = struct.unpack_from("<2i", prims)
-        oracle.setup_raster(width, height, Path(args.prims[0]).read_bytes())
+        shd = Path(args.prims[0]).with_suffix(".SHD")
+        oracle.setup_raster(width, height, Path(args.prims[0]).read_bytes(), shd.read_bytes() if shd.exists() else None)
         Path(args.prims[2]).write_bytes(oracle.raster_records(prims))
         return
     oracle.load_level(args.data, args.level)

@@ -200,6 +200,7 @@ static int build_scene(const IgnLevel *lv) {
     if (scene_level) lisa_scene_free(&scene), free(scene_ids), scene_level = NULL;
     const IgnModel *m = &lv->track;
     if (lisa_scene_init(&scene, 0xc800, 0xc800, m->nobj + 64)) return -1;
+    scene.shade = lv->shd;
     scene_ids = malloc(sizeof *scene_ids * (size_t)(m->nobj ? m->nobj : 1));
     if (!scene_ids) return -1;
     for (int pass = 0; pass < 2; pass++)
@@ -242,6 +243,7 @@ static void engine_view(const IgnFrame *fb, const IgnCamera *cam, LisaView *v) {
     v->near = fb->w == 320 && fb->h == 200 ? 25 : 10;
     v->cx = fb->w / 2, v->cy = fb->h / 2;
     v->layers = LISA_LAYER_ALL;
+    v->persp = 1;
     lisa_view_clip(v, 0, 0, fb->w - 1, fb->h - 1);
 }
 
