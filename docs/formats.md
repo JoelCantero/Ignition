@@ -892,6 +892,67 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   decorados, así que solo en USA y CANADA coinciden los índices. Se reconstruye la correspondencia asignando a cada objeto
   del motor el siguiente PLC cuya malla admite todos sus desplazamientos de cara: autocoincidencia 88–98 % en todas las pistas.
 
+## Motor Lisa 2 y rasterizador (portados a `src/render/lisa*.c`, verificados píxel a píxel)
+
+Rango `0x54000–0x60000` (motor) más el rasterizador `0x60e3d` y sus rutinas (`0x70400–0x77000`, `0x824b4`, `0x825b8`,
+objeto 2 en `0x90000–0x90a7c`). Verificación: `tests/render_original.py` ejecuta con Unicorn el `render_scene` y el
+rasterizador originales sobre los datos reales del nivel (asignadores `0x6482c`/`0x56320`/`0x5629e` interceptados) y
+`tests/render_shot.c` / `tests/lisa_prims.c` producen lo mismo con el port. Resultado: cada primitiva aleatoria
+(0x11 ×2000, 0x12/0x14/0x15 ×1500, 0x13 ×1000, 0xf ×2000, puntos ×300, línea 0xd ×400 con recorte, sprite 7 ×300)
+y cada fotograma completo de pista (7 pistas, cámaras de persecución y barridos aleatorios a 320×200, 640×480 y
+800×600, objetos girados, PERSP. POLY sí/no, espejo, zonas y alcance) es idéntico byte a byte.
+
+- **Objetos del motor** (42 B, `[0x24c058]`): `+0` propio, `+4` malla, `+8` ranura de textura, `+0xc` x, y, z
+  (`float`, x/z = mundo + 25600, y hacia arriba), `+0x18` ángulos (décimas de grado), `+0x1e` clase, `+0x22` radio,
+  `+0x24` zona, `+0x26` siguiente. Rejilla de celdas de 256 unidades (`[0x24c048]`, ancho `[0x24c014]`), cada celda una
+  lista con inserción en cabeza. `LI_CREATEOBJECT 0x56b28` (radio −1 = vértice más lejano), `LI_PLACEOBJECT 0x56c74`,
+  `LI_MOVEOBJECT 0x56d24` (solo reengancha si cambia la celda), `LI_SETMESH 0x56e9c`, `LI_REMOVEOBJECT 0x56f8c`.
+  Un objeto muerto en cabeza de celda oculta toda la celda.
+- **`render_scene` `0x56410`**: recorte en 8.8 (`0xc87ec..`), luego capas por banderas de `[0x24c05c]`: `+0x38`
+  `camera_angles` (mirar a un punto), `+0x3c` recogida `0x58ebc`, `+0x40` transformación `0x5a2c8` (`0x5a8c8` si la
+  focal > 300), `+0x50` manejadores de cara `0x5cb48` (tabla `0xc86c4`), `+0x54` orden `0x5b9c4`; `+0x44..+0x4c` no se
+  consultan. Devuelve la lista `[0x24bffc]` que dibuja `0x60e3d` (tabla `0xd7bd0`). Tras crear mips o liberar el motor,
+  `[0xc879c]` hace que 99 fotogramas llamen a `0x58864`, que solo lee téxeles al azar de los mips (consume `rand`).
+- **Recogida** `0x58ebc`: patrón de celdas en cono `0xc5d8c` desplazado por `0xc5e40` según el rumbo y el cabeceo en
+  pasos de 10° (`src/render/lisa_cone.inc`); con alcance `+0xa4` ≠ 0 un cuadrado de `n×n` celdas adelantado n/3 en la
+  dirección de la vista. Zona `[0x24bff0]` ≠ 0: se saltan objetos de otra zona ≠ 0. Después, esfera contra la vista con
+  la matriz `0x5b7a8` (filas ×16384): solo rechaza por detrás y en vertical.
+- **Alcance `+0xa4`**: `sub_0002489c` (`0x25ff1`) pone 25 en CARIB y 0 en el resto; `race_frame` (`0x42130`) lo cambia
+  por el tramo con signo del coche visto: CANADA 0x24<s<0x2e → 30, 0x7c<s<0x8c → 35; USA −0x7c<s<−0x71 → 30; BRAZIL
+  0<s<0x1e → 25, 0xbb<s<0xc5 → 30; AUSTRIA 6<s<0xe → 35; ICELAND 0x1b<s<0x46 → 30; si no, 0 (JAPAN siempre 0).
+- **Zona `[0x24bff0]`** (`race_frame` `0x430b6`): bits 12–15 del tipo PLC del objeto del tramo del coche visto; 0 a
+  los 120 fotogramas de terminar.
+- **Proyección**: `sx = cx − fx·x′/z` (eje x reflejado respecto al port anterior, que salía en espejo),
+  `sy = cy − fy·y′/z`, en 8.8; z se guarda como `4(z + near)` (near 25 a 320×200, 10 en las otras). Filas de cámara en
+  `float` truncadas; la variante focal > 300 escala por 256 y desplaza 2. Dificultad ≥ 3 → zoom −1 (espejo: invierte
+  el signo del producto de caras ocultas).
+- **Tipos de cara** (palabras de malla; `flags & 0xff` = tipo, `flags >> 16` = superficie): 1/2 puntos (3 palabras),
+  7/8 sprites (9), 12 (4), 13 línea (6), 15 plano y 20 sombra (5), el resto 11. `0x11` = 17 texturizada,
+  `0x13` = 19 mezclada por SHD, `0x15` = 21 calcomanía: los bits bajos de MSH son el tipo de cara.
+  - 17 (`0x5cc58` con `+0x58` = 0, `0x5c144` con PERSP. POLY; mips `0x5ef14`/`0x5f670`, alternativa `0x5d084`): rechazo
+    por caja, caras ocultas con el producto en 1/16 de píxel, `Σz ≤ 600` fuera, cubeta `Σz>>4`. Con PERSP. POLY, las
+    cercanas (cubeta ≤ 720) de clases de carretera (< 100, 200, 300–302) → primitiva 0x14 con peso 4z por vértice,
+    fundido hacia la media entre las cubetas 480 y 720; el resto → 0x11 afín.
+  - 21 (`0x5e358`, mips `0x60210`): como 17 pero 80 cubetas más cerca.
+  - 18/22 → mezcla con la tabla con clave `[0x24c004]` (`T[a·256+b] = a ? a : b`, `sub_11494`: el téxel 0 es
+    transparente); 19/23 → SHD `[0x24bfa8]` (`dst = SHD[téxel·256 + dst]`); 22/23 80 cubetas más cerca. Primitiva 0x15
+    (perspectiva) en las mismas condiciones que 0x14 salvo superficie 0x4d; si no, 0x12.
+  - 20 (`0x5dc08`, palabras tipo, v0, v1, v2, fila): primitiva 0x13, `dst = SHD[fila·256 + dst]` (sombras: fila 0x28;
+    derrapes: fila por superficie `0xc34e0`; 0 = identidad).
+  - 7/8 sprites: z > 200, cubeta `trunc(2.8 z)>>4`; 7 escala `4/z·tamaño·([0x1feee8], [0x1feeec])`
+    (`trunc(W·65535·0.003125)`, `trunc(H·65535·0.005)`) y mezcla por SHD; 8 tamaño fijo `fy·(0.003952569, 0.004820206)`
+    en píxeles enteros y mezcla por **PAN** (`[0x24bfec]`): PAN es la tabla de mezcla de esos sprites, no de sombreado.
+  - 1 punto `TAB[color·256 + luz]`, 2 punto `SHD[color·256 + dst]` (z > 200, cubeta `3z>>4`); 15 plano `TAB[color·256]`;
+    13 línea con color 8.8 cuyo byte alto es la fila de la tabla de la cara, cubeta `(z0+2z1)>>4`, fuera si `z0+z1 ≤ 400`.
+- **TAB** (`[0xc484c]`): solo la usan los puntos de tipo 1 y los planos 0xf. Las caras texturizadas 0x11/0x14 escriben
+  el téxel tal cual (no hay nivel de sombra por cara): por eso el byte alto ≥ 64 de `flags` no es un nivel, es la superficie.
+- **Cubetas** (6000, de lejos a cerca, cada lista desde su última inserción): clase ≥ 100 −92 (clase 210, ruedas, −84;
+  tipo 20 −76), recortadas a 0..5999.
+- **Rasterizador**: 0x11/0x12 `0x73c58`/`0x744c8` (gradientes `0x90000`, bordes `0x90240..0x90a00`, tramos `0x824b4` y
+  mezcla `0x825b8`), 0x13 `0x74d04`, 0x14/0x15 `0x7586c` (x87 a 24 bits emulado exactamente; tras un tramo 0x15 se
+  restaura la precisión extendida, aproximada con `double`), 0xf `0x729f3`, 1/2 `0x70400`/`0x70454`, 7 `0x704a0`,
+  0xd `0x71cc7`.
+
 ## Pendiente / desviaciones
 
 - Suelo del coche (`car_update` 0x2eea4–0x30d98, portado): una consulta por esquina de la caja de la carrocería ×1,1

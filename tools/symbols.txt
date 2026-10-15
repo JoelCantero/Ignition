@@ -48,8 +48,8 @@
 001fef54  g_sysg2_pic          pointer to N_SYSG_2.PIC
 001fec00  g_sys_col            pointer to SYS.COL
 000492fc  race_setup_video     picks 320x200/640x480/800x600, per-player viewports, TAB -> 0xc484c  roadmap=phase3.render
-00056410  render_scene         draws layers gated by config flags [0x24c05c]+0x38..0x54  roadmap=phase3.render
-0005891c  camera_angles        camera orientation in tenths of a degree  roadmap=phase3.render
+00056410  render_scene         clip 8.8, layers [0x24c05c]+0x38 look-at, +0x3c collect, +0x40 transform, +0x50 faces, +0x54 sort -> list [0x24bffc]; src/render/lisa.c  status=verified roadmap=phase3.render
+0005891c  camera_angles        layer +0x38: camera angles toward a look-at point (tenths of a degree); not used by race views, not ported  status=identified roadmap=phase3.render
 00047f94  chase_camera_update  per-car camera [0x1fef9c]+car*0xc8: yaw smoothing, height, pitch, distance (ported)  status=ported roadmap=phase3.render
 000420cc  race_frame           section palette effects, camera selection, render_scene, HUD  roadmap=phase3.render
 0004a320  race_hud             original HUD routine; partial H_PAN1/LFT port in src/render/hud.c  status=partial roadmap=phase4.hud
@@ -76,7 +76,7 @@
 00020c18  srf_walk_list_b      spans with dz >= 0  roadmap=phase1.physics
 00020c81  srf_walk_list_a      spans with dz < 0  roadmap=phase1.physics
 00020bbc  face_avg_height      roadmap=phase1.physics
-000569ec  engine_alloc_objects 42-byte object pool -> [0x24c058]  roadmap=phase3.render
+000569ec  engine_alloc_objects 42-byte object pool -> [0x24c058], 256-unit cell grid [0x24c048] width [0x24c014]  status=ported roadmap=phase3.render
 0002ed00  car_update           ~2300 insns, calls ground_query; grip block 0x3070a..0x30874 verified by tests/car_original.py, not whole routine  status=partial roadmap=phase3.car-update
 0002f2be  lap_crossing         phase 3, probe 0, abs(previous +370)=count-1, +604=0; finish snapshots +39c position to +3a0; bounded lap oracle 3024 cases/4112 steps  status=ported roadmap=phase1.race
 0002f3a9  lap_time_commit      last lap +3b4, slots +3bc/+3c4/+3cc, origin +3d4 from global sample; strict shared best; messages/track record/persistence excluded  status=partial roadmap=phase1.race
@@ -110,7 +110,7 @@
 0002e234  car_vertical         gravity, jumps, landing (car+0x20); arithmetic verified until 0x2e397 or return, 252 cases/1008 steps; landing effects excluded  status=ported roadmap=phase1.physics
 0003731c  skid_effects         skid marks (700 ring [0x1feeb8], SHD row per surface 0xc34e0) and dust (effect 1)  status=ported roadmap=phase2.effects
 00039d1c  fx_sprite            effect type 1: SMOKE.TEX sprite, damped drift, grows, 8-frame anim 0xc4110  status=ported roadmap=phase2.effects
-0005dea0  emit_sprite          primitive 7: scale 4/z*size*([0x1feee8],[0x1feeec]), blend LUT [0x24bfa8] = SHD  roadmap=phase3.render
+0005dea0  emit_sprite          face type 7: z>200, bucket trunc(2.8z)>>4, scale 4/z*size*([0x1feee8],[0x1feeec]), SHD blend -> prim 7  status=verified roadmap=phase3.render
 0003a788  wreck_explode        explosion effect: hide car, 80 frames, glide 40 to section+2, respawn; repeated turbo reset 0x3a7f5..0x3a812 verified, full FX excluded  status=ported roadmap=phase2.effects
 0003c208  wreck_sink           sinking effect (car+0x358), 12 splash quads, same respawn; turbo reset 0x3c26e..0x3c28b verified  status=ported roadmap=phase2.effects
 00039fe8  fx_blast             effect type 4: sprite with float damping (BOOM)  status=ported roadmap=phase2.effects
@@ -151,3 +151,49 @@
 0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> wrap/fallback/invalid-record selection ported; route topology remains approximate  status=partial roadmap=phase1.ai-route
 000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty
+# Lisa 2 engine and rasterizer (src/render/lisa.c, lisa_raster.c)
+000564d8  engine_init          sine table of every tenth of a degree (-180..630 deg, float)  status=ported roadmap=phase3.render
+00056b28  LI_CREATEOBJECT      engine object: mesh, slot, class; radius -1 = farthest vertex  status=ported roadmap=phase3.render
+00056c74  LI_PLACEOBJECT       position + angles, insert at head of the cell list  status=ported roadmap=phase3.render
+00056d24  LI_MOVEOBJECT        move; relinks only when the cell changes  status=ported roadmap=phase3.render
+00056e9c  LI_SETMESH           mesh with explicit radius  status=ported roadmap=phase3.render
+00056f8c  LI_REMOVEOBJECT      unlink from its cell  status=ported roadmap=phase3.render
+000570d8  engine_make_mips     MIP MAPPING levels of the texture slots (sets [0xc878c], [0xc879c])  status=identified roadmap=phase3.render
+00058864  mip_touch            99 frames after mip build/free: reads random mip texels (consumes rand), draws nothing  status=identified roadmap=phase3.render
+00058ebc  li_collect           layer +0x3c: cone cells 0xc5d8c/0xc5e40 or reach x reach square (+0xa4), zone [0x24bff0], sphere test  status=verified roadmap=phase3.render
+0005a2c8  li_transform         layer +0x40: camera rows float32, sx=cx-fx*x/z, z stored 4(z+near); focal>300 -> 0x5a8c8  status=verified roadmap=phase3.render
+0005a8c8  li_transform_wide    li_transform for focal > 300 (scale 256)  status=verified roadmap=phase3.render
+0005ae60  li_rotate_object     object angles +0x18..+0x1c applied before the camera (low focal)  status=verified roadmap=phase3.render
+0005b308  li_rotate_object_wide li_rotate_object for focal > 300  status=verified roadmap=phase3.render
+0005b7a8  li_cull_matrix       camera rows x16384 for the sphere test  status=verified roadmap=phase3.render
+0005b8e8  li_select_handlers   type 17/21 handlers by +0x58 PERSP. POLY, mips [0xc878c] and [0xc8794]  status=ported roadmap=phase3.render
+0005b9c4  li_sort              layer +0x54: 6000 buckets far to near -> [0x24bffc]  status=verified roadmap=phase3.render
+0005ba5c  face_point_tab       face type 1: point TAB[colour*256+light], z>200, bucket 3z>>4 -> prim 1  status=verified roadmap=phase3.render
+0005bc10  face_flat            face type 15: flat TAB[colour*256] -> prim 0xf  status=verified roadmap=phase3.render
+0005c144  face_tex_persp       face type 17 with PERSP. POLY: near road faces -> prim 0x14, else 0x11  status=verified roadmap=phase3.render
+0005cb48  li_faces             layer +0x50: face handlers by type via table 0xc86c4  status=verified roadmap=phase3.render
+0005cc58  face_tex             face type 17 (default): box reject, back faces, sum z>600, bucket sum z>>4 -> prim 0x11  status=verified roadmap=phase3.render
+0005d084  face_tex_alt         type 17 handler when [0xc8794] is set, not ported  status=identified roadmap=phase3.render
+0005d718  face_blend           face types 18/22 (keyed 0x24c004) and 19/23 (SHD); 22/23 80 buckets nearer -> prim 0x12/0x15  status=verified roadmap=phase3.render
+0005dc08  face_shade           face type 20: SHD row darkening (shadows, skids), class>=100 -76 -> prim 0x13  status=verified roadmap=phase3.render
+0005e004  emit_sprite_fixed    face type 8: fixed screen size, PAN blend [0x24bfec] -> prim 7  status=verified roadmap=phase3.render
+0005e264  face_line            face type 13: line, 8.8 colour high byte = table row -> prim 0xd  status=verified roadmap=phase3.render
+0005e358  face_decal           face type 21: as type 17, 80 buckets nearer  status=verified roadmap=phase3.render
+0005ee50  face_point_shd       face type 2: point SHD[colour*256+dst] -> prim 2  status=verified roadmap=phase3.render
+0005ef14  face_tex_mip         type 17 MIP MAPPING handler, not ported  status=identified roadmap=phase3.render
+0005f670  face_tex_mip_persp   type 17 MIP MAPPING + PERSP. POLY handler, not ported  status=identified roadmap=phase3.render
+00060210  face_decal_mip       type 21 MIP MAPPING handler, not ported  status=identified roadmap=phase3.render
+00060dc4  raster_set_size      eax=width, ebx=height: row offsets 0xc9168, clip  status=ported roadmap=phase3.render
+00060e3d  raster_draw_list     draws [0x24bffc] through primitive table 0xd7bd0; src/render/lisa_raster.c  status=verified roadmap=phase3.render
+00070400  prim_point_tab       primitive 1  status=verified roadmap=phase3.render
+00070454  prim_point_shd       primitive 2  status=verified roadmap=phase3.render
+000704a0  prim_sprite          primitive 7  status=verified roadmap=phase3.render
+00071cc7  prim_line            primitive 0xd: blended line with clipping  status=verified roadmap=phase3.render
+000729f3  prim_flat            primitive 0xf  status=verified roadmap=phase3.render
+00073c58  prim_tex             primitive 0x11: affine textured triangle  status=verified roadmap=phase3.render
+000744c8  prim_tex_blend       primitive 0x12: 0x11 through a 256x256 table  status=verified roadmap=phase3.render
+00074d04  prim_shade           primitive 0x13: flat blend through one table row  status=verified roadmap=phase3.render
+0007586c  prim_tex_persp       primitives 0x14/0x15: perspective-correct, x87 24-bit precision  status=verified roadmap=phase3.render
+000824b4  tex_spans            0x11 spans, right to left  status=verified roadmap=phase3.render
+000825b8  tex_spans_blend      0x12 spans through the table 0xe6cbc  status=verified roadmap=phase3.render
+00090000  tex_gradients        object 2: 0x11/0x12 gradients; edges 0x90200..0x90a00  status=verified roadmap=phase3.render
