@@ -17,6 +17,7 @@
 #include "../render/camera.h"
 #include "../render/hud.h"
 #include "../render/raster.h"
+#include "music.h"
 #include "sound.h"
 
 #define DEFAULT_DATA_DIR "/Users/Shared/Epic Games/Ignition/ignition"
@@ -300,6 +301,8 @@ int main(int argc, char **argv) {
     IgnCamera cam = {0};
     int fixed_cam = 0;
     const char *ghost_out = NULL, *ghost_in = NULL;
+    /* [0x1ff253] music volume 0..10 and [0x1ff24f] track setting (0 level, -1 random, n fixed). */
+    int music_on = 1, music_volume = 10, music_mode = IGN_MUSIC_BY_LEVEL;
     ign_frame_init(&frame, 640, 480);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--shot") && i + 1 < argc)
@@ -315,6 +318,13 @@ int main(int argc, char **argv) {
             frame.perspective = 1;
         } else if (!strcmp(argv[i], "--countdown")) {
             countdown = 1;
+        } else if (!strcmp(argv[i], "--no-music")) {
+            music_on = 0;
+        } else if (!strcmp(argv[i], "--music-volume") && i + 1 < argc) {
+            music_volume = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--music-track") && i + 1 < argc) {
+            i++;
+            music_mode = !strcmp(argv[i], "random") ? IGN_MUSIC_RANDOM : atoi(argv[i]);
         } else if (!strcmp(argv[i], "--rear")) {
             rear_view = 1;
         } else if (!strcmp(argv[i], "--record-ghost") && i + 1 < argc)
@@ -617,6 +627,12 @@ int main(int argc, char **argv) {
         for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
         if (ign_sound_start(data_dir, level, &lv, all, nrivals + 1, &weather))
             fprintf(stderr, "audio: %s\n", SDL_GetError());
+        /* level_prepare 0x2249c: the level's CD track at [0x1ff253] x 10 x 2.55 (sub_0002a4ec 0x2a4f5); the race loop
+         * 0x21311 restarts it whenever it stops. */
+        else if (music_on && music_volume > 0) {
+            ign_music_set_volume((int)(music_volume * 25.5));
+            ign_music_play(data_dir, ign_music_track(level, music_mode), 1);
+        }
     }
 
     bool free_cam = false;
@@ -709,6 +725,7 @@ int main(int argc, char **argv) {
         SDL_RenderPresent(ren);
     }
 
+    ign_music_stop();
     ign_sound_stop();
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
