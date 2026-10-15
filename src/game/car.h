@@ -98,6 +98,13 @@ typedef struct {
     int mark_valid[2];             /* per axle (0 rear car+0x48, 1 front car+0x68) */
     float mark_at[2][2];           /* car+0x2c4/+0x2c8: axle point of the last mark */
     float mark_prev[2][2][2][2];   /* [axle][tyre][edge] x, z of the last mark's leading edge */
+    /* cars_update_all 0x2da4a: rear (car+0x48/+0x50) and front (+0x68/+0x70) axle points and their last tick steps
+     * (+0x58/+0x60, +0x78/+0x80), world units. */
+    double axle[2][2], axle_step[2][2];
+    /* car_ground_contact operand: car+0x640/+0x648 = mean axle step at the frame start (sub_00032d8c); mass 10,
+     * inertia 4000 (cars_init 0x273b3) and the impact of the last object hit (car+0x634/+0x638/+0x63c). */
+    double contact_v[2];
+    float contact_mass, contact_inertia, contact_impact;
 } IgnCar;
 
 #define IGN_WRECK_FRAMES 80.0
@@ -186,6 +193,28 @@ typedef struct {
     double x, z, impact;
 } IgnCarHit;
 int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, int *nhits);
+
+/* sub_00032d8c, once per frame before the cars move: car+0x640/+0x648 = mean of the last axle steps. */
+void ign_car_frame_velocity(IgnCar *car);
+
+/* sub_000346cc operand (0x34 bytes): +0 x, +8 z, +0x10 vx, +0x18 vz, +0x20 yaw rate (doubles), +0x28 mass,
+ * +0x2c inertia, +0x30 impact (floats). Positions in world units, velocities in units per tick. */
+typedef struct {
+    double x, z, vx, vz, w;
+    float mass, inertia, impact;
+} IgnContactBody;
+
+/* sub_000349e8: crossings of the edges of two polygons (float x, z pairs). With 1-8 crossings stores their mean
+ * (0x1fee9c/0x1feea8) and the angle from the second to the first of the two farthest apart (0x1fee98), returns 1;
+ * otherwise 0 (more than 8 crossings counts as none). */
+int ign_contact_polygons(const float (*a)[2], int na, const float (*b)[2], int nb, float *cx, float *cz,
+                         float *theta);
+/* sub_000346cc: impulse between two bodies touching at (cx, cz) along the contact line `theta`, restitution 0.5
+ * (-1.5 = -(1 + e)). Both impacts become |trunc(normal speed)|. Returns 0 if they are separating. */
+int ign_contact_impulse(IgnContactBody *a, IgnContactBody *b, float cx, float cz, float theta);
+/* car_ground_contact 0x351c9: the car's body box (car+0x2fc/+0x31c) around the car, as floats (0x207aa0). Engine
+ * coordinates (x/z + IGN_SRF_ORIGIN) when `engine`, as the original. */
+void ign_car_contact_box(const IgnCar *car, int engine, float out[4][2]);
 
 struct IgnTrack;
 /* Lap progress from the section under the car (car_update 0x2f2cc / 0x2fc1c). */

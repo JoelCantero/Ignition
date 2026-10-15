@@ -294,6 +294,142 @@ int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, 
     return count;
 }
 
+/* cars_update_all 0x2da32: rear axle car+0x5b0 behind and front axle car+0x5ac ahead of the car along car+0xf8. The
+ * integer offsets come from per-model tables of cars_init (0x27594) that are not decoded; the port truncates the
+ * wheel offsets of the CARS.PLC model. */
+static void axle_points(const IgnCar *car, double out[2][2]) {
+    double x = car->body.px * IGN_WORLD_PER_METRE, z = car->body.pz * IGN_WORLD_PER_METRE;
+    double c = cos(car->body.heading), s = sin(car->body.heading);
+    double rear = trunc(-car->rear), front = trunc(car->front);
+    out[0][0] = x - c * rear, out[0][1] = z - s * rear;
+    out[1][0] = x + front * c, out[1][1] = z + front * s;
+}
+
+static void axle_reset(IgnCar *car) {
+    axle_points(car, car->axle);
+    memset(car->axle_step, 0, sizeof car->axle_step);
+}
+
+/* 0x2da9d: the axle points' steps of this tick. */
+static void axle_update(IgnCar *car) {
+    double now[2][2];
+    axle_points(car, now);
+    for (int a = 0; a < 2; a++)
+        for (int k = 0; k < 2; k++) car->axle_step[a][k] = now[a][k] - car->axle[a][k], car->axle[a][k] = now[a][k];
+}
+
+void ign_car_frame_velocity(IgnCar *car) {
+    car->contact_v[0] = (car->axle_step[0][0] + car->axle_step[1][0]) * 0.5;
+    car->contact_v[1] = (car->axle_step[0][1] + car->axle_step[1][1]) * 0.5;
+}
+
+void ign_car_contact_box(const IgnCar *car, int engine, float out[4][2]) {
+    double c = cos(car->body.heading), s = sin(car->body.heading);
+    double x = car->body.px * IGN_WORLD_PER_METRE, z = car->body.pz * IGN_WORLD_PER_METRE;
+    if (engine) x += IGN_SRF_ORIGIN, z += IGN_SRF_ORIGIN;
+    for (int i = 0; i < 4; i++) {
+        double cx = car->corner_x[i], cz = car->corner_z[i];
+        out[i][0] = (float)(cx * c + x - cz * s);
+        out[i][1] = (float)(cz * c + z + cx * s);
+    }
+}
+
+/* Sign of an x87 comparison against 0 (NaN would give -2 in the original). */
+static int sign0(double v) {
+    return v > 0 ? 1 : v < 0 ? -1 : 0;
+}
+
+int ign_contact_polygons(const float (*a)[2], int na, const float (*b)[2], int nb, float *cx, float *cz,
+                         float *theta) {
+    float hx[8], hz[8];
+    int n = 0;
+    for (int i = 0; i < na; i++) {
+        const float *p0 = a[i], *p1 = a[i + 1 < na ? i + 1 : 0];
+        float ex = p0[0] - p1[0], ez = p0[1] - p1[1];
+        for (int j = 0; j < nb; j++) {
+            const float *q0 = b[j], *q1 = b[j + 1 < nb ? j + 1 : 0];
+            /* 0x34aa0: q0 and q1 on the same side of edge p (signs of float32 products). */
+            float px1 = p0[0] - q1[0], pz1 = p0[1] - q1[1];
+            int s0 = sign0(((double)p0[1] - q0[1]) * ex - ((double)p0[0] - q0[0]) * ez);
+            int s1 = sign0((double)ex * pz1 - (double)px1 * ez);
+            if (s0 == s1) continue;
+            /* 0x34c3c: p0 and p1 on the same side of edge q. */
+            float fx = q0[0] - q1[0], fz = q0[1] - q1[1];
+            float qx1 = q0[0] - p1[0], qz1 = q0[1] - p1[1];
+            int s2 = sign0((double)fx * ((double)q0[1] - p0[1]) - ((double)q0[0] - p0[0]) * fz);
+            int s3 = sign0((double)fx * qz1 - (double)qx1 * fz);
+            if (s2 == s3) continue;
+            /* 0x34db1: crossing point (float32 denominators; parallel edges are skipped). */
+            float exfz = ex * fz, ezfx = ez * fx;
+            float den = exfz - ezfx;
+            if (den == 0) continue;
+            float ix = (float)((((double)p0[1] - q0[1]) * ((double)ex * fx) - (double)fx * ((double)p0[0] * ez) +
+                                (double)ex * ((double)q0[0] * fz)) / den);
+            den = ezfx - exfz;
+            if (den == 0) continue;
+            float iz = (float)((((double)p0[0] - q0[0]) * ((double)ez * fz) - (double)fz * ((double)p0[1] * ex) +
+                                (double)ez * ((double)q0[1] * fx)) / den);
+            if (n >= 8) return 0;
+            hx[n] = ix, hz[n] = iz, n++;
+        }
+    }
+    if (n < 1) return 0;
+    double sx = (float)0, sz = (float)0;
+    for (int k = 0; k < n; k++) sx += hx[k], sz += hz[k];
+    double inv = 1.0 / n;
+    *cx = (float)((float)sx * inv);
+    *cz = (float)(inv * (float)sz);
+    /* 0x34fd1: the farthest pair (first strict maximum of the float32 squared distance). */
+    float best = 0;
+    int bi = 0, bj = 0;
+    for (int i = 0; i <= n - 2; i++)
+        for (int j = i; j <= n - 1; j++) {
+            float d = (float)(pow((double)hx[i] - hx[j], 2.0) + pow((double)hz[i] - hz[j], 2.0));
+            if (d > best) best = d, bi = i, bj = j;
+        }
+    *theta = (float)atan2((double)hz[bi] - hz[bj], (double)hx[bi] - hx[bj]);
+    return 1;
+}
+
+int ign_contact_impulse(IgnContactBody *a, IgnContactBody *b, float cx, float cz, float theta) {
+    /* 0x346d8: lever arm angle/length of A and its side of the contact line. */
+    double dxa = (double)cx - a->x, dza = (double)cz - a->z;
+    float aa = (float)atan2(dza, dxa);
+    float ra = (float)sqrt(dxa * dxa + dza * dza);
+    double t = theta;
+    int side = sign0((float)(dza * cos(t) - dxa * sin(t)));
+    double dxb = (double)cx - b->x, dzb = (double)cz - b->z;
+    float ab = (float)atan2(dzb, dxb);
+    float rb = (float)sqrt(dxb * dxb + dzb * dzb);
+    /* 0x34775: contact point velocities and their relative normal speed; separating bodies are left alone. */
+    float uax = (float)(a->vx - sin((double)aa) * (ra * a->w)), uaz = (float)(cos((double)aa) * (ra * a->w) + a->vz);
+    float ubx = (float)(b->vx - sin((double)ab) * (rb * b->w)), ubz = (float)(cos((double)ab) * (rb * b->w) + b->vz);
+    float un = (float)(((double)uaz - ubz) * cos(t) - ((double)uax - ubx) * sin(t));
+    if (sign0(un) != side) return 0;
+    double st = sin(t), ct = cos(t);
+    float j0 = (float)(((double)ubx * st - (double)ubz * ct) - ((double)uax * st - (double)uaz * ct));
+    int32_t imp = (int32_t)trunc(j0);
+    a->impact = b->impact = (float)(imp < 0 ? -(int64_t)imp : imp);
+    /* 0x348a5: k = cos(theta - a) * r * m / I, impulses split by mass with -(1 + 0.5). */
+    float ka = (float)(cos((double)theta - aa) * ra * a->mass / a->inertia);
+    float kb = (float)(cos((double)theta - ab) * rb * b->mass / b->inertia);
+    double inv = 1.0 / ((double)a->mass + b->mass);
+    double j0e = (double)j0 * -1.5;
+    double ja0 = b->mass * inv * j0e;
+    float jb0 = (float)(inv * a->mass * j0e);
+    double ca = sin((double)aa) * st + cos((double)aa) * ct;
+    float ja = (float)(ja0 / (ca * (ra * ka) + 1.0));
+    double cb = sin((double)ab) * st + cos((double)ab) * ct;
+    double jb = jb0 / (cb * (kb * rb) + 1.0);
+    a->w += (double)ja * ka;
+    a->vx -= (double)ja * st;
+    a->vz += (double)ja * ct;
+    b->w -= kb * jb;
+    b->vx += jb * st;
+    b->vz -= jb * ct;
+    return 1;
+}
+
 int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, float heading) {
     memset(car, 0, sizeof *car);
     car->id = id;
@@ -388,6 +524,10 @@ int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, floa
     car->height = car->ground + VERT_REST;
     car->ground_prev = car->ground;
     car->wall_x = car->wall_z = INFINITY;
+    /* cars_init 0x273b3: the car as a car_ground_contact body. */
+    car->contact_mass = 10.0f;
+    car->contact_inertia = 4000.0f;
+    axle_reset(car);
     place(car);
     return 0;
 }
@@ -402,6 +542,7 @@ void ign_car_set_pose(IgnCar *car, const IgnLevel *lv, float x, float z, double 
     car->z = z;
     car->heading = (float)(HALF_PI - heading);
     car->height = height;
+    axle_reset(car);
     place(car);
 }
 
@@ -798,6 +939,7 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     car->x = (float)(b->px * IGN_WORLD_PER_METRE);
     car->z = (float)(b->pz * IGN_WORLD_PER_METRE);
     car->heading = (float)(HALF_PI - b->heading);
+    axle_update(car);
 
     /* cars_update_all 0x2d229: car_vertical runs after body_step with the ground car_update found before it. */
     double drop;
