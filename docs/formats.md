@@ -116,7 +116,7 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   divide la puerta en 2 registros (1 = mitad central→derecha y luego izquierda→central; 2 = izquierda→central y luego central→derecha).
   Las coordenadas X/Z de estos registros son vértice + posición PLC + `0x6400`; Y es vértice + posición PLC sin ese origen
   (`0x1d30b..0x1d392`). `track.c` extrae estas coordenadas y subdivisiones. `track_real_assets` verifica en las siete
-  pistas que los registros TRI conservan la identidad engine→PLC y se asignan a una topología de ruta válida; esto es
+  pistas que los registros TRI conservan el índice PLC de la sección y se asignan a una topología de ruta válida; esto es
   una prueba estructural del port, no una comparación runtime exhaustiva con las tablas del original ni equivalencia del
   selector completo de carril.
 - **GST** (fantasma, `GHOSTS\<nombre>.GST`; lector `0x2adf8`, grabador `0x51204`, escritor `0x2ccc8`; portado en `ghost.c`):
@@ -137,16 +137,21 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 - Parámetros en `0xbfb30` (0x48 B = 9 `double` por coche), iguales para todos:
   `{0.8, 0.4, 0.6, 0.75, 0.5, 5, 0.6, 0.6, 0.9}` ↔ campos de `CARS/TEST.AIS` (acc, carebed, caresight, careother,
   maintain, aggr, sight, curveinflu, slopeinflu). `TEST.AIS` no se lee en el juego.
-- **Desviación**: `src/game/ai.c` es una aproximación propia (sigue las puertas TRI, frena según la curvatura en los
-  próximos 5+ tramos, marcha atrás si no avanza 150 u en 1,5 s). La ley de control original sigue pendiente.
+- **Desviación**: `src/game/ai.c` sigue siendo parcial: usa los registros TRI y sus ángulos float32, pero el objetivo
+  y parte de la ley de control conservan aproximaciones. El atasco ya usa el contador original por turnos, no una
+  distancia o espera inventada; faltan el recorte del objetivo por los puntos interiores, pendiente y controlador completo.
 - **Carril (`t_ai_lanes`, `0xbf9a0`)**: portadas las cuatro filas por configuración y la permutación de pistas
   `{1,2,3,6,4,0,5}`. En cada fila coincidente se escribe `selector` en `+0x66`, se consume un `rand()` y se guarda
   `r = (rand() & 0x7fff) / 32768` en `+0x6c`; la elección `+0x64` es 0 si `chance=0`, 1 si `chance=100`, o
   `(s20 * 0.7 + 0.3) * r * chance * 0.01 > 0.125`. Las filas repetidas (incluidas las de sección 2) se
   procesan y consumen RNG por separado. En el port, `ign_fx_rand15` usa el LCG `seed = seed * 1103515245 + 12345`
   (`rand`, `0x64774`), compartido con el estado de `IgnFx`.
-- `load_tri` se integra al arrancar: registros geométricos extraídos por objeto engine→PLC, incluidas subdivisiones TRI
-  de tipo 1/2. `ign_build_track` replica ahora las reglas observadas de `build_sections` para buscar vecinos por origen
+- `load_tri` se integra al arrancar: las secciones contienen índices **PLC**, no índices del pool del motor.
+  `0x1d246..0x1d261` multiplica directamente ese índice por 20 para acceder al PLC; no aplica `engine_to_plc`.
+  Hay dos slots canónicos: un principal TRI1/2 ocupa ambos y omite B; con principal normal, B ocupa el segundo
+  **sin dividirse**, aunque su propio tipo TRI sea 1/2. Los dos globals `[0xeb7c4]`/`[0xeb7e0]` reciben el mismo
+  puntero (`0x1d0b3/0x1d0b8`), no son dos tablas independientes de mitades de A y B.
+  `ign_build_track` replica las reglas observadas de `build_sections` para buscar vecinos por origen
   PLC (distancia euclídea con ΔY×2), contar avances excluyendo el merge de clase 6, conservar el merge alcanzado por B
   y mapear el objeto de bifurcación en paralelo en ambas rutas. También conserva los objetos siguientes explícitos para
   calcular los ángulos de ambas ramas. La prueba `track_topology` cubre selección por origen frente a centroide,
@@ -158,13 +163,57 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   según el signo del paso. En CANADA (`track_id=0`), las secciones `0xab..0xad` fuerzan el avance en ese caso.
   `ai.c` usa el helper al consultar los registros/puertas de lookahead. La prueba `track_route_selection` cubre fallback,
   aceptación/avance, wrap y excepción de CANADA. El enlace de ramas y los objetos siguientes conservan la topología
-  observada; `track_real_assets` valida la estructura generada y el mapeo engine→PLC de TRI para las siete pistas, pero
+  observada; `track_real_assets` valida la estructura generada y los índices PLC de TRI para las siete pistas, pero
   no coteja la tabla runtime original ni la correspondencia exacta de cada registro dividido con los carriles. Por tanto,
   esto no acredita aún la selección de ruta completa equivalente.
-- Al construir puertas, el índice de objeto del motor se traduce a índice PLC mediante
-  `surface.engine_to_plc` antes de leer el bloque TRI (`4 + plc_index * 500`). No se presupone que ambos índices
-  coincidan; los índices ausentes o bloques fuera de rango usan el centro del objeto como fallback. La prueba
-  `track_gates` usa un mapeo no idéntico para verificar esta correspondencia.
+- **Discrepancia pendiente fuera del cargador IA**: `object_gate`/`ign_track_gates` todavía aplican
+  `surface.engine_to_plc` a los índices de sección, con centroide como fallback. Se conserva ese comportamiento
+  anterior para las puertas usadas por progreso/reaparición; `track_gates` caracteriza esa implementación,
+  **no demuestra su fidelidad**. El cargador IA ya no hace esa segunda conversión errónea. El mapeo
+  engine→PLC sigue siendo necesario donde la entrada realmente sea un índice del pool del motor (p. ej. SRF).
+
+### Geometría derivada de `load_tri` y mezcla de rumbo: verificación por fragmentos
+
+El registro original mide `0x4b` bytes: invalidez `+0`, tipo PLC `+1`, bordes L/R xyz i32
+`+0x02..+0x16`, cuatro puntos interiores L/R xz i32 `+0x1a..+0x26`, tres rumbos float32
+`+0x2a/+0x2e/+0x32`, tres pendientes float32 `+0x36/+0x3a/+0x3e`, dos ángulos transversales
+float32 `+0x42/+0x46` y tipo TRI `+0x4a`. El sucesor se resuelve con `ai_find_section`,
+incluyendo su slot y el ID real de pista.
+
+Los rumbos son `atan2(Δz, Δx)`; las pendientes son **`atan2(Δy, Δx)`**, no la pendiente
+respecto a la distancia horizontal. El centro entero de cada componente es
+`a + trunc((b-a)/2)`, también para diferencias negativas impares. Los ángulos transversales
+se calculan con las restas directas L→R y R→L, idénticas en ambos slots. Los interiores
+son `trunc(borde + 18*cos/sin(ángulo_float32))`; la suma/trigonometría x87 puede quedar
+justo por debajo de un entero aunque binary64 redondee al entero. El port conserva ese
+residuo antes de truncar, en lugar de usar una conversión directa tras sumar en double.
+
+`tests/ai_geometry_original.py` ejecuta los dos fragmentos sin parchear
+`0x1d80a→0x1da25` y `0x1da75→0x1dc8f`, con los helpers reales `atan2` y `__CHP`.
+Compara bits de los ocho float32 y los cuatro enteros: **4 920 comparaciones exactas**,
+902 fixtures sintéticos y 1 558 registros reales, cada uno contra ambos fragmentos.
+Los registros reales proceden del constructor del port: se verifica su geometría derivada,
+**no** la selección completa de registros ejecutando todo el cargador DOS. Se comprueban
+frontera de ejecución, escrituras permitidas, entradas intactas, pila y estado x87.
+Los sintéticos incluyen coordenadas ±100 000; no se acredita todo el dominio i32.
+
+`ign_ai_drive` consume el rumbo central almacenado, el centro entero y la puerta completa
+reconstruida para su ratio lateral, incluso al resolver hacia una sección dividida.
+`ai_route_choice` prueba esos consumidores y las transiciones split/normal; son pruebas
+del port, no un oracle de todo `ai_drive`.
+
+El fragmento `0x1be03→0x1bf60` mezcla rumbo con dirección del movimiento:
+`travel = wrap(heading + 0.15*wrap(motion-heading))`, con constantes originales
+π=`3.1415926535898` y 2π=`6.2831853071796`. Si la separación sin envolver supera π,
+se sustituye por `2π-separación`; si supera `0.78539816339745`, devuelve el rumbo
+original **sin wrap posterior**. En reposo la dirección de movimiento es cero.
+Se conserva la comparación x87 anterior a recargar el valor binary64 en el límite −π.
+**1 184 casos** (umbrales y vecinos binary64, más 500 aleatorios), tolerancia absoluta
+`2e-15`; no se afirma igualdad bit a bit de todos los double.
+
+Pendientes de la IA completa: recorte del objetivo `0x1b59d..0x1b631` usando los interiores
+ya calculados, término de pendiente Y, giro por solape, ganancias control 5/8, signo de
+esquiva según el lateral del rival y cotejo integral de selección de carril y controlador.
 
 ## Fin de carrera y eliminación (portado a `src/game/race.c`)
 
@@ -564,14 +613,15 @@ esa aproximación se descartó hasta reconstruir la selección de registros/carr
   Reversa en `43.2<contador<97.19999999999997`, sin giro antes de `53.99999999999999`;
   `97.19999999999997<contador<108` anula la dirección. Se conserva la anulación en el aire.
   El port ya no añade edad/espera artificial. El error original mezcla rumbo y velocidad con factor 0.15 y
-  usa el ángulo TRI `record+0x2e`; el port aún reconstruye geométricamente ese ángulo. El oracle suministra
-  el error, por lo que no verifica esa geometría.
+  usa el ángulo TRI `record+0x2e`, ya calculado y consumido por el port. El oracle de atasco suministra
+  el error; la geometría y mezcla se verifican por separado, sin probar el controlador completo.
 - Turbo: si `car+0x534/538` == 100.0 (turbo lleno), sin `car+0x270`, `+0x20·[0xa7bb8]+[0xa7bc0] > curva` y la curva lejana > 3, se
   llama a `car_input` con turbo = 1 (`0x1cb12`), salvo exclusiones por pista/sección.
 - Salida: `car_input(coche, ecx=turbo, edx=freno/atrás, ebx=dirección, …)` en `0x1cbf9`; al final `+0x58 = trunc(acelerador)`.
-- Pendiente de portar: búsqueda de carril (`0x1decc`, tablas `[0xeb7c4]/[0xeb7e0]`), velocidad objetivo por curvatura (bucle
-  de 6 secciones `0xbf992`, `t_surface_grip`), registro por sección con ángulos `+0x2a..+0x46` calculados en `load_tri`
-  (`atan2` entre bordes de secciones consecutivas, y puntos de carril `+0x1a..+0x26` = borde + `cos/sin·[0xa7c18]`).
+- Pendiente de completar y verificar en conjunto: búsqueda de carril (`0x1decc`) y consumo de los dos slots,
+  velocidad objetivo por curvatura (bucle de 6 secciones `0xbf992`, `t_surface_grip`), pendiente, recorte del
+  objetivo y esquiva. Los ángulos `+0x2a..+0x46` y puntos interiores `+0x1a..+0x26` ya se calculan; estos últimos
+  todavía no se aplican al objetivo. Véase el contrato geométrico anterior.
 
 ## Planificador de IA y replay de controles (`cars_update_all`, parcial)
 

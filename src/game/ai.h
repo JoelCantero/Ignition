@@ -37,6 +37,8 @@ void ign_ai_set_cars(IgnCar *const *cars, int n);
 void ign_ai_update_route_choice(IgnAi *ai, int section, IgnFx *fx);
 /* 0x1c630..0x1c777: one decision, finite road-angle error, total car count (including inactive cars). */
 void ign_ai_stuck_step(IgnAi *ai, const IgnCar *car, double road_error, int ncars);
+/* 0x1be03..0x1bf60: original road/velocity heading blend, including angular wrap. */
+double ign_ai_travel(double heading, double motion);
 /* sub_0001aea0: steering, throttle/brake and turbo as a car_input call. */
 void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, IgnInput *in);
 /* Call after physics/collisions; no RNG or control mutation outside an eligible control turn. */

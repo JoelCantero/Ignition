@@ -101,6 +101,11 @@ endif()
 option(IGN_VERIFY_ORIGINAL "Compare physics and car kernels with original LE bytes (requires Python unicorn)" OFF)
 if(IGN_VERIFY_ORIGINAL)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME ai_geometry_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_geometry_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:track_ai_records_test>
+            --assets-runner $<TARGET_FILE:track_real_assets_test> --data "${GAME_DIR}"
+            --report ${CMAKE_BINARY_DIR}/ai-geometry-original-report.json)
   add_test(NAME ai_schedule_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_schedule_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:ai_schedule_test>

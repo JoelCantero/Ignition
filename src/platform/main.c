@@ -422,7 +422,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     ign_track_gates(&track, &lv);
-    if (ign_track_ai_records(&track, &lv))
+    if (ign_track_ai_records(&track, &lv, ign_ghost_track_id(level)))
         fprintf(stderr, "warning: cannot build TRI AI records; using track-gate fallback\n");
     ign_ai_set_track(level);
     IgnCar car;

@@ -40,7 +40,7 @@ IA fiel, el sombreado original, los menús, la música y el multijugador.
 | Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 488 clasificadas como runtime) |
 | Instrucciones únicas desensambladas | **128 832** (20 323 de runtime/libc/DOS/4G) |
 | Código del juego marcado como portado/verificado | **17 334 de 108 509 instrucciones (16,0 %)**; **45 de 624 funciones (7,2 %)** |
-| Código del juego marcado como parcial | **9 537 instrucciones en 12 funciones**; excluido del numerador portado |
+| Código del juego marcado como parcial | **10 616 instrucciones en 13 funciones**; excluido del numerador portado |
 | Funciones de juego vinculadas explícitamente a una tarea del roadmap | **95 de 624 (15,2 %)**; runtime excluido y `unmapped` no significa fuera de alcance |
 | Formatos de datos propios descifrados | 10 de 21 (TRI, POS y TAB solo en parte) |
 | Código del port | ≈ 4 865 líneas de C (`src/`) |
@@ -434,8 +434,19 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Pose: dirección visual, inclinación | `0x48a14`, `0x40ec8`, `0x2e6f8` | `car.c`, `raster.c` | fiel |
 | Sombra del coche | `0x48a14` | `raster.c` | geometría fiel; sombreado aproximado |
 | Truco BANARNE | `cheat_check` `0x160c4` | `main.c` | fiel |
-| IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, registros `load_tri` con mapeo engine→PLC, selector `ai_find_section` y reglas observadas de topología/ramas implementados; la estructura de rutas y registros TRI pasa `track_real_assets` en las 7 pistas, pero falta una comparación independiente con la tabla runtime original y la asignación exacta de registros divididos a carriles; pendiente (Y), giro por solape y frenada de curva (heurística) |
+| IA de rivales | `ai_drive` `0x1aea0`, `load_tri` `0x1ce30` | `ai.c`, `track.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, índices PLC directos, dos slots canónicos, selector y topología implementados; ángulos float32/interiores verificados por fragmentos (4 920 comparaciones exactas) y mezcla de rumbo (1 184 casos); faltan recorte del objetivo, pendiente Y, giro por solape, esquiva y cotejo integral de carriles/controlador |
 | Render 3D | motor Lisa 2 | `raster.c` | propio: z-buffer, sin sombreado TAB |
+
+Geometría IA: `tests/ai_geometry_original.py` compara ambos fragmentos LE con `atan2`/`__CHP`
+reales, para 902 fixtures sintéticos y 1 558 registros de las siete pistas; compara bits float32
+y coordenadas enteras. No ejecuta todo el cargador ni el controlador DOS. Los controles humanos
+recto/turbo conservan **14/14** trazas de 576 ticks, 112 campos, estado e imagen idénticos al
+build anterior al bloque. El smoke repetido de 200 s con siete rivales pasa **7/7** en ejecución
+y determinismo, pero persisten atascos: no demuestra carreras completas ni IA terminada.
+Se conserva la referencia histórica sin regenerar.
+Las 12 pruebas focalizadas pasan, incluido el replay de 21 escenarios. Contra la referencia
+histórica permanecen **1/23**: 22 diferencias de estado, 22 de imagen y ninguna de ejecución.
+Véanse [alcance geométrico y límites](docs/formats.md#geometría-derivada-de-load_tri-y-mezcla-de-rumbo-verificación-por-fragmentos).
 
 ---
 
@@ -447,10 +458,10 @@ instrucciones está en `docs/function-coverage.txt`):
 | Estado | Funciones | Interpretación |
 |---|---:|---|
 | `unknown` | 519 | Sin identificación fiable; requiere análisis |
-| `identified` | 46 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
+| `identified` | 45 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
 | `understood` | 0 | Comportamiento entendido, todavía no implementado |
 | `port-pending` | 2 | Pendiente explícita y priorizada: `car_ground_contact`, `collisions_pass` |
-| `partial` | 12 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
+| `partial` | 13 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
 | `ported` | 40 | Implementada en el port, sin afirmar verificación completa |
 | `verified` | 5 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
 | `native` | 0 | Sustitución nativa explícita; no se asigna por inferencia |
@@ -588,7 +599,11 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 
 ## Desviaciones conocidas respecto al original
 
-1. **IA**: port parcial de `0x1aea0` (`ai.c`): puertas reconstruidas al vuelo (con mapeo engine→PLC; sin asumir índices idénticos), sin tablas de carril `0xbf9a0`, acelerador (`0x1b9a2`) aproximado y frenada por curvatura propia.
+1. **IA**: port parcial de `0x1aea0` (`ai.c`): tablas de carril, dos slots TRI por sección PLC, ángulos float32
+   y mezcla de rumbo implementados; acelerador/controlador y frenada por curvatura aún incompletos.
+   Los interiores se calculan pero falta aplicarlos al recorte del objetivo. Las puertas antiguas
+   `ign_track_gates` usadas por progreso/reaparición aún hacen una segunda conversión engine→PLC
+   incorrecta para secciones; se conserva su comportamiento en este bloque y se documenta como deuda separada.
 2. **Render**: z-buffer propio en lugar del orden del pintor del motor Lisa 2 (el original no usa profundidad por
    píxel). Texturas afines como el original (`--persp` activa la corrección de perspectiva, la opción PERSP. POLY).
    Sin TAB: el motor la pasa al rasterizador (`[0xc484c]`) pero las caras texturizadas se dibujan sin sombrear (en
@@ -697,7 +712,11 @@ implementado.
 
 ### Fase 1 — Carrera completa de un jugador (jugabilidad)
 
-- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: núcleo de dirección/atasco/turbo/límites y álgebra exacta, elección de carril, registros `load_tri`, selector `0x1decc` y reglas observadas de `build_sections`; estructura validada sobre assets de las 7 pistas, aún sin comparación runtime independiente con el original; pendiente asignación exacta de registros divididos, pendiente (Y) y giro por solape) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
+- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: contador de atasco/turnos, tablas de carril/RNG,
+      registros PLC y dos slots `load_tri`, selector `0x1decc` y topología observada; geometría derivada con
+      4 920 comparaciones exactas contra fragmentos originales y mezcla de rumbo con 1 184 casos.
+      No acredita cargador/controlador completo. Pendientes: recorte por interiores, asignación final de carriles,
+      pendiente Y, giro por solape, ganancias y esquiva) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
       byte `+0x6d` de TRI), consulta de puertas `0x1decc`, velocidad objetivo por curvatura y pendiente
       (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
       Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.

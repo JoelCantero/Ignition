@@ -108,6 +108,7 @@ void ign_ai_stuck_step(IgnAi *ai, const IgnCar *car, double road_error, int ncar
 
 typedef struct {
     double lx, lz, rx, rz;
+    int integer_points;
 } Edge;
 
 static int section_index(const IgnTrack *t, int s) {
@@ -116,25 +117,45 @@ static int section_index(const IgnTrack *t, int s) {
     return s;
 }
 
-static Edge edge_at(const IgnTrack *t, int s, int path, int lane) {
+static const IgnAiRouteRecord *record_at(const IgnTrack *t, int s, int path, int lane,
+                                        int *out_section, int *out_path) {
     int resolved_section = s, record_path = path, object = -1;
-    if (!ign_track_find_section(t, s, path, 1, track_id,
+    if (t->ai_record_count && t->ai_record_count[section_index(t, s)][0] > 1)
+        record_path = lane;
+    if (!ign_track_find_section(t, s, record_path, 1, track_id,
                                 &resolved_section, &record_path, &object))
         resolved_section = section_index(t, s), record_path = 0;
     (void)object;
-    if (t->ai_records && t->ai_record_count) {
-        int count = t->ai_record_count[resolved_section][record_path];
-        int record_index = count > 1 && lane ? 1 : 0;
-        if (count > record_index) {
-            const IgnAiRouteRecord *record =
-                &t->ai_records[resolved_section][record_path][record_index];
-            if (record->valid)
-                return (Edge){record->point[0] - IGN_SRF_ORIGIN, record->point[2] - IGN_SRF_ORIGIN,
-                              record->point[3] - IGN_SRF_ORIGIN, record->point[5] - IGN_SRF_ORIGIN};
-        }
-    }
+    if (out_section) *out_section = resolved_section;
+    if (out_path) *out_path = record_path;
+    const IgnAiRouteRecord *record = ign_track_ai_record(t, resolved_section, record_path);
+    return record && record->valid ? record : NULL;
+}
+
+static Edge edge_at(const IgnTrack *t, int s, int path, int lane) {
+    int resolved_section, record_path;
+    const IgnAiRouteRecord *record = record_at(t, s, path, lane, &resolved_section, &record_path);
+    if (record)
+        return (Edge){record->point[0] - IGN_SRF_ORIGIN, record->point[2] - IGN_SRF_ORIGIN,
+                      record->point[3] - IGN_SRF_ORIGIN, record->point[5] - IGN_SRF_ORIGIN, 1};
     const float *g = record_path ? t->gate_b[resolved_section] : t->gate[resolved_section];
-    return (Edge){g[0], g[1], g[2], g[3]};
+    return (Edge){g[0], g[1], g[2], g[3], 0};
+}
+
+/* Recover the complete gate for the side ratio, independently of the selected lane. */
+static Edge full_edge(const IgnTrack *t, int s, int path) {
+    int resolved;
+    record_at(t, s, path, 0, &resolved, NULL);
+    Edge edge = edge_at(t, resolved, path, 0);
+    const IgnAiRouteRecord *first = ign_track_ai_record(t, resolved, 0);
+    const IgnAiRouteRecord *second = ign_track_ai_record(t, resolved, 1);
+    if (first && second && first->object == second->object &&
+        (first->tri_type == 1 || first->tri_type == 2)) {
+        Edge other = edge_at(t, resolved, path, 1);
+        if (first->tri_type == 1) edge.lx = other.lx, edge.lz = other.lz;
+        else edge.rx = other.rx, edge.rz = other.rz;
+    }
+    return edge;
 }
 
 static int selected_path(const IgnTrack *t, const IgnAi *ai, int s, int active_branch) {
@@ -150,16 +171,41 @@ static Edge selected_edge(const IgnTrack *t, const IgnAi *ai, int s, int active_
 }
 
 static void mid_of(Edge e, double *x, double *z) {
-    *x = (e.lx + e.rx) * 0.5;
-    *z = (e.lz + e.rz) * 0.5;
+    *x = e.integer_points ? e.lx + trunc((e.rx - e.lx) * 0.5) : (e.lx + e.rx) * 0.5;
+    *z = e.integer_points ? e.lz + trunc((e.rz - e.lz) * 0.5) : (e.lz + e.rz) * 0.5;
 }
 
 /* Record angle +0x2e: direction of the road centre line from section s to the next one. */
 static double road_angle(const IgnTrack *t, const IgnAi *ai, int s, int bb) {
+    const IgnAiRouteRecord *record =
+        record_at(t, s, selected_path(t, ai, s, bb), ai->route_choice, NULL, NULL);
+    if (record && record->geometry_valid) return record->heading[1];
     double ax, az, bx, bz;
     mid_of(selected_edge(t, ai, s, bb), &ax, &az);
     mid_of(selected_edge(t, ai, s + 1, bb), &bx, &bz);
     return atan2(bz - az, bx - ax);
+}
+
+static double original_wrap(double angle) {
+    if (angle < -3.1415926535898) angle += 6.2831853071796;
+    if (angle > 3.1415926535898) angle -= 6.2831853071796;
+    return angle;
+}
+
+double ign_ai_travel(double heading, double motion) {
+    double delta = original_wrap(motion - heading);
+    double product = 0.15 * delta;
+    double travel = heading + product;
+    double tail = travel - heading;
+    double residual = (heading - (travel - tail)) + (product - tail) +
+                      fma(0.15, delta, -product);
+    /* 0x1be84 stores binary64, but the first comparison still sees the x87 sum. */
+    if (travel < -3.1415926535898 || (travel == -3.1415926535898 && residual < 0))
+        travel += 6.2831853071796;
+    if (travel > 3.1415926535898) travel -= 6.2831853071796;
+    double separation = fabs(heading - motion);
+    if (separation > 3.1415926535898) separation = 6.2831853071796 - separation;
+    return separation > 0.78539816339745 ? heading : travel;
 }
 
 void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, IgnInput *in) {
@@ -176,7 +222,7 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, Ig
     double cx = car->x, cz = car->z;
 
     /* +0x58: distance to the left edges over distance to the right edges, folded to |ratio| >= 1. */
-    Edge e0 = edge_at(t, s, bb, ai->route_choice), e1 = edge_at(t, s + 1, bb, ai->route_choice);
+    Edge e0 = full_edge(t, s, bb), e1 = full_edge(t, s + 1, bb);
     double dl = hypot(cx - e0.lx, cz - e0.lz) + hypot(cx - e1.lx, cz - e1.lz);
     double dr = hypot(cx - e0.rx, cz - e0.rz) + hypot(cx - e1.rx, cz - e1.rz);
     double ratio = dr > 0 ? dl / dr : 1;
@@ -232,9 +278,8 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, Ig
 
     /* Steering (0x1c07a...): aim at the lookahead mid-point from the blended travel direction. */
     double h = b->heading;
-    double dirt = (car->step_x != 0 || car->step_z != 0) ? atan2(car->step_z, car->step_x) : h;
-    double travel = h + 0.15 * wrap(dirt - h);
-    if (fabs(h - dirt) > 0.7854) travel = h;
+    double dirt = (car->step_x != 0 || car->step_z != 0) ? atan2(car->step_z, car->step_x) : 0;
+    double travel = ign_ai_travel(h, dirt);
     double aim = atan2(lz - cz, lx - cx);
     double c0 = wrap(aim - travel);
     double e40 = first;

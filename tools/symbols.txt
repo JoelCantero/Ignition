@@ -19,8 +19,8 @@
 000230f4  load_plc             LEVELS\..PLC + CARS\CARS.PLC  roadmap=phase2.world
 0002322c  load_msh             LEVELS\..MSH + CARS\CARS.MSH  roadmap=phase2.world
 00023368  load_tex             LEVELS\..TEX + CARS.TEX  roadmap=phase2.world
-0001ce30  load_tri             reads TRI (500 B/object), computes edge angles  roadmap=phase1.ai-route
-0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car  status=partial roadmap=phase1.ai-route
+0001ce30  load_tri             direct PLC sections, two canonical slots, float32 angles and integer insets; bounded geometry oracle tests/ai_geometry_original.py, full loader excluded  status=partial roadmap=phase1.ai-route
+0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car; stored TRI heading and original travel blend, full controller excluded  status=partial roadmap=phase1.ai-route
 00026458  cars_init            allocs cars/bodies, torque splines, start grid (slots 0xc33d0); bounded turbo initialization 0x27451..0x27497 verified, full init excluded  roadmap=phase1.car
 00048a14  car_place_objects    per frame: body/wheels/shadow/name engine objects, front wheel steer  roadmap=phase3.render
 00040ec8  cars_body_sway       body tilt car+0x584/+0x58c = ground tilt + lean, smoothed 0.25  roadmap=phase1.car
