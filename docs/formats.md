@@ -1000,7 +1000,7 @@ la carrera son probablemente suyas.
 | `+0x004` | `i32` | `[0x1fef14]` jugadores humanos − 1 (`[0x1feea0]` = valor + 1) |
 | `+0x008` | `i32` | modo `[0x1feefc]` (salto `0x2292c`): 0 campeonato, 1 ¿carrera suelta?, 2 contrarreloj, 3 eliminación |
 | `+0x00c` | `i32` | `[0x1fedd8]` ¿clase/dificultad?: fila de la tabla de pistas del campeonato `0xc45b4` (7 `i32`), orden de teclas |
-| `+0x010` | `i32` | `[0x1fee4c]` fantasma activado; se fuerza a 0 fuera de contrarreloj o con más de un coche no humano |
+| `+0x010` | `i32` | `[0x1fee4c]` fantasma activado; se fuerza a 0 fuera de contrarreloj o si más de un participante tiene `+0x04 ≠ 1` (¿más de un humano?) |
 | `+0x014` | `i32` | `[0x1fed64]` (1 en campeonato) |
 | `+0x01c` | `i32[9]` | participante `+0x00` (modelo de coche) |
 | `+0x048` | `i32[9]` | participante `+0x0c` |
@@ -1015,7 +1015,7 @@ la carrera son probablemente suyas.
 | `+0x133` | `i32[8]` | orden de salida `0xc33d0`; en campeonato `0x2ccc8` escribe `6 − puesto`; fuera de él `0x2cf60` hace `ncoches` intercambios con dos índices `floor(rand01 × ncoches)` |
 | `+0x153` | `i32` | coches en carrera `[0x1fefe4]` |
 | `+0x15b` | `i32` | `[0x1fee48]` |
-| `+0x15f` | `i32[8]` | participante `+0x04` (1 = ¿ordenador?; si hay más de un 0... véase `+0x010`) |
+| `+0x15f` | `i32[8]` | participante `+0x04` (1 = ¿ordenador?) |
 | `+0x17f` | `u8[2][8]` | teclas de los humanos → participante `+0x1c..+0x23` (las dos primeras se cruzan si `+0x00c ≥ 3`) |
 | `+0x197` | `i32` | `[0x1febe0]` |
 | `+0x1bf` | 7 × `0x78` | **récords por pista** (`g_track_records` = `0x1ff317`), índice = id de pista del GST (0 CANADA … 6 JAPAN) |
@@ -1036,7 +1036,7 @@ Contrarreloj (`[0x1feefc] == 2` y `[0x1fee4c] == 1`): `ghost_load` `0x2adf8` lee
 `[0x1fee4c] = 0` y `[0x1fee04] = 3 000 000`; si no, `[0x1fee04]` = tiempo de la cabecera (antes de mirar la
 pista), `[0x1fed84]` = modelo, nombre a `0x1fb4b8`, y si la pista de la cabecera no es `[0x1fef10]` no copia
 las muestras y pone `[0x1fee00] = 1` (por tanto no se guardará). Al terminar, `0x2ccc8` graba el fantasma solo si
-`[0x1fee00] == 0` y `[0x1fee04] × 0.01 > car+0x3a4`. Sin la opción de fantasma, `[0x1fee04]` queda a 0 y nunca se
+`[0x1fee00] == 0` y `[0x1fee04] × 0.01 > car+0x3a4`. Sin la opción de fantasma, `[0x1fee04]` no tiene otro escritor (BSS a 0 ¿?) y nunca se
 graba.
 
 **Port**: `IgnBtz` conserva la imagen como bytes; los campos se leen por offset, así que los desconocidos sobreviven.
