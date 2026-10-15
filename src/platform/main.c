@@ -627,12 +627,8 @@ int main(int argc, char **argv) {
         for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
         if (ign_sound_start(data_dir, level, &lv, all, nrivals + 1, &weather))
             fprintf(stderr, "audio: %s\n", SDL_GetError());
-        /* level_prepare 0x2249c: the level's CD track at [0x1ff253] x 10 x 2.55 (sub_0002a4ec 0x2a4f5); the race loop
-         * 0x21311 restarts it whenever it stops. */
-        else if (music_on && music_volume > 0) {
-            ign_music_set_volume((int)(music_volume * 25.5));
-            ign_music_play(data_dir, ign_music_track(level, music_mode), 1);
-        }
+        else if (music_on)
+            ign_music_start(data_dir, level, music_mode, music_volume);
     }
 
     bool free_cam = false;
@@ -656,6 +652,9 @@ int main(int argc, char **argv) {
                 else if (!free_cam && ev.key.key == SDLK_E) pending_gear_shift = 1;
                 /* sub_0002b9e4 0x2c017: TAB (scancode 0x0f) steps the post-race camera 0, 1, 2, 3. */
                 else if (ev.key.key == SDLK_TAB) tv_index = (tv_index + 1) % 4;
+                /* sub_0002b9e4 0x2c1cb/0x2c29a: left/right on the pause menu's music line; F5/F6 here (deviation). */
+                else if (ev.key.key == SDLK_F5) ign_music_step(-1);
+                else if (ev.key.key == SDLK_F6) ign_music_step(1);
             }
             /* Cheat words are typed during play (0x160c4); BANARNE toggles 3x tall bodies. */
             if (ev.type == SDL_EVENT_TEXT_INPUT) {
@@ -715,6 +714,7 @@ int main(int argc, char **argv) {
             SDL_SetWindowTitle(win, title);
         }
 
+        ign_music_poll(now / 1000.0, car.out ? car.finish_position : 0);
         draw(&lv, &car, &cam);
         IgnPalette shown;
         ign_fx_palette(&fx, &lv.palette, &shown);
