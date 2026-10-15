@@ -354,3 +354,300 @@ void ign_prim_tex(IgnRaster *r, const int32_t xy[6], const int32_t uv[6], const 
         tex_spans(r, &s, tex, xe.x + n1, ue.row, ue.n, y + n1);
     }
 }
+
+/* ---- perspective textured triangle, primitives 0x14 and 0x15 (sub_0007586c) ----
+ * The setup (sub_00075090, sub_000755ec) runs with the default x87 control word (approximated here with double
+ * arithmetic); the row and span code (sub_0007616c on) switches the FPU to 24-bit precision, emulated exactly:
+ * every arithmetic result is the exact value rounded once to float. fistp rounds to nearest even. */
+
+#include <math.h>
+
+/* Round p + e (e the error of p, |e| <= ulp(p) / 2) once to float. */
+static double round24(double p, double e) {
+    float f = (float)p;
+    if (e == 0 || (double)f == p) return f;
+    float g = nextafterf(f, p > (double)f ? INFINITY : -INFINITY);
+    if (p != ((double)f + (double)g) * 0.5) return f;
+    return (e > 0) == ((double)g > (double)f) ? g : f;
+}
+static double s_mul(double a, double b) {
+    double p = a * b;
+    return round24(p, fma(a, b, -p));
+}
+static double s_add(double a, double b) {
+    double s = a + b, bb = s - a;
+    return round24(s, (a - (s - bb)) + (b - bb));
+}
+static double s_div(double a, double b) {
+    double q = a / b, r = fma(-q, b, a);
+    return round24(q, (r > 0) == (b > 0) ? (r == 0 ? 0 : 1) : -1);
+}
+static int32_t s_int(double v) { return (int32_t)lrint(v); }
+/* bits of the float v + 1.5 * 2^23 (the integer trick of the span code) */
+static uint32_t s_magic(double v) {
+    float f = (float)s_add(v, 12582912.0);
+    uint32_t u;
+    memcpy(&u, &f, 4);
+    return u;
+}
+
+typedef struct {
+    int32_t x[3], y[3], l[3], u[3], v[3]; /* top, middle, bottom (0x260c58...) */
+    int long_right;                       /* 0xe6650 */
+    /* long edge (top -> bottom) */
+    float slope_l, k_l, c_l, len_l;       /* 0xe6620, 0xe662c, 0xe6628, 0xe65f4 */
+    int32_t du_l, dv_l, dl_l;             /* 0xe6638, 0xe663c, 0xe6648 */
+    /* short edges */
+    float slope_tm, k_tm, c_tm, len_tm;   /* 0xe6624, 0xe6634, 0xe6630, 0xe6600 */
+    float slope_mb, k_mb, c_mb, len_mb;   /* 0x260c44, 0x260c3c, 0x260c4c, 0x260c20 */
+    int32_t du_tm, dv_tm, dl_tm, du_mb, dv_mb, dl_mb;
+} PerspState;
+
+/* sub_00075440: vertices by y (first minimum and first maximum win); the middle one by elimination. */
+static int persp_sort(PerspState *s, const int32_t xy[6], const int32_t light[3], const int32_t uv[6]) {
+    int lo = 0, hi = 0;
+    for (int k = 1; k < 3; k++) {
+        if (xy[k * 2 + 1] < xy[lo * 2 + 1]) lo = k;
+        if (xy[k * 2 + 1] > xy[hi * 2 + 1]) hi = k;
+    }
+    int mid = lo == hi ? -1 : 3 - lo - hi;
+    if (mid < 0) return -1; /* all on one row: the original reads before the record; nothing is drawn */
+    const int order[3] = {lo, mid, hi};
+    for (int i = 0; i < 3; i++) {
+        int k = order[i];
+        s->x[i] = xy[k * 2], s->y[i] = xy[k * 2 + 1], s->l[i] = light[k], s->u[i] = uv[k * 2], s->v[i] = uv[k * 2 + 1];
+    }
+    return 0;
+}
+
+static int32_t iabs(int32_t v) { return v < 0 ? -v : v; }
+static int32_t longest(int32_t dx, int32_t dy) { return iabs(dx) > iabs(dy) ? iabs(dx) : iabs(dy); }
+
+/* sub_00075090: perspective terms; the weight along an edge of length n (in 8.8 rows) is t / (t * k + c) with
+ * t = row offset * n / dy, k = -(l1 - l0) / l0, c = l1 / l0 * n. */
+static void persp_setup(PerspState *s) {
+    double inv_top = 1.0 / s->l[0];
+    int32_t len_tb = longest(s->x[2] - s->x[0], s->y[2] - s->y[0]);
+    int32_t len_tm = longest(s->x[1] - s->x[0], s->y[1] - s->y[0]);
+    int32_t len_mb = longest(s->x[2] - s->x[1], s->y[2] - s->y[1]);
+    s->du_l = s->u[2] - s->u[0], s->dv_l = s->v[2] - s->v[0], s->dl_l = s->l[2] - s->l[0];
+    s->du_tm = s->u[1] - s->u[0], s->dv_tm = s->v[1] - s->v[0], s->dl_tm = s->l[1] - s->l[0];
+    s->du_mb = s->u[2] - s->u[1], s->dv_mb = s->v[2] - s->v[1], s->dl_mb = s->l[2] - s->l[1];
+    double inv_mid = 1.0 / s->l[1];
+    s->c_l = (float)(s->l[2] * inv_top * (double)len_tb);
+    s->c_tm = (float)(s->l[1] * inv_top * len_tm);
+    s->k_l = (float)(-s->dl_l * inv_top);
+    s->k_tm = (float)(-s->dl_tm * inv_top);
+    s->c_mb = (float)(s->l[2] * inv_mid * len_mb);
+    s->k_mb = (float)(-s->dl_mb * inv_mid);
+    s->slope_l = s->slope_tm = s->slope_mb = 0;
+    s->len_l = s->len_tm = s->len_mb = 0;
+    if (s->y[2] - s->y[0]) {
+        double inv = 1.0 / (s->y[2] - s->y[0]);
+        s->slope_l = (float)((s->x[2] - s->x[0]) * inv);
+        s->len_l = (float)(inv * (double)len_tb);
+    }
+    if (s->y[1] - s->y[0]) {
+        double inv = 1.0 / (s->y[1] - s->y[0]);
+        s->slope_tm = (float)((s->x[1] - s->x[0]) * inv);
+        s->len_tm = (float)(inv * len_tm);
+    }
+    if (s->y[2] - s->y[1]) {
+        double inv = 1.0 / (s->y[2] - s->y[1]);
+        s->slope_mb = (float)((s->x[2] - s->x[1]) * inv);
+        s->len_mb = (float)(inv * len_mb);
+    }
+    s->long_right = !(s->slope_l < s->slope_tm);
+    if (s->y[1] - s->y[0] == 0) s->long_right = s->x[0] > s->x[1];
+}
+
+typedef struct {
+    int32_t x0, y0, l0, u0, v0;          /* short edge start (0xe6604...) */
+    float slope, k, c;                    /* short edge */
+    int32_t du, dv, dl;
+    float len;                            /* 0xe6600 */
+    int32_t pos_l, pos_s, limit;          /* 0xe65ec, 0xe65f8, 0xe65e8 */
+    float t_l, t_s;                       /* 0xe65f0, 0xe65fc */
+} PerspHalf;
+
+static float inv_count[17]; /* 0xe66d8: 1 / n in 24-bit precision (sub_000765c3) */
+
+/* Span of sub_00076658 (or the 0xe6658 blend of sub_00076a94): from the right end leftwards; perspective-correct
+ * points every 16 pixels, an affine packed DDA in between. */
+static void persp_span(uint8_t *dst, int32_t count, int32_t u0, int32_t v0, int32_t ur, int32_t vr,
+                       int32_t du, int32_t dv, float a_coef, float b_coef, int32_t frac, int32_t length,
+                       const uint8_t *tex, const uint8_t *lut) {
+    uint8_t *px = dst; /* rightmost pixel */
+#define PUT(p, t) (*(p) = lut ? lut[((unsigned)(t) << 8) | *(p)] : (t))
+    uint32_t start = ((uint32_t)u0 << 16) | ((uint32_t)v0 & 0xffff); /* 0xe667c */
+    int32_t tu, tv;    /* target u, v (32-bit, the low 16 bits matter) */
+    int rest;
+    if (count > 16) {
+        double sc = s_add((double)frac, 4096.0);
+        double w = s_div(sc, s_add(s_mul(sc, a_coef), b_coef));
+        int chunks = (count - 1) >> 4;
+        rest = ((count - 1) & 15) + 1;
+        tu = s_int(s_mul(w, du)) + ur;
+        tv = s_int(s_mul(w, dv)) + vr;
+        int32_t tail = length - (chunks * 4096 + frac);
+        for (int left = chunks - 1; left >= 0; left--) {
+            sc = s_add(sc, left > 0 ? 4096.0 : (double)tail);
+            /* chunk from `start` to (tu, tv): steps of (target - start) >> 4 packed u << 16 | v */
+            uint32_t target = ((uint32_t)tu << 16) | ((uint32_t)tv & 0xffff);
+            int32_t su = (tu - (int32_t)(start >> 16)) >> 4, sv = ((int32_t)((uint32_t)tv & 0xffff) - (int32_t)(start & 0xffff)) >> 4;
+            uint32_t step = ((uint32_t)su << 16) | ((uint32_t)sv & 0xffff);
+            uint32_t e = (start & 0xffff0000u) | (((start & 0xffff) - (step & 0xffff)) & 0xffff);
+            for (int k = 0; k < 16; k++) {
+                uint32_t cur = e;
+                e += step;
+                unsigned t = tex[((e >> 8) & 0xff) << 8 | (cur >> 24)];
+                PUT(px - k, t);
+            }
+            px -= 16;
+            w = s_div(sc, s_add(s_mul(sc, a_coef), b_coef));
+            tu = (int32_t)s_magic(s_mul(w, du)) + ur;
+            tv = (int32_t)s_magic(s_mul(w, dv)) + vr;
+            start = target;
+        }
+        /* 0x7689e: the remainder, 1..16 pixels, with steps (target - start) / n. */
+        int32_t ru = (int32_t)((uint32_t)tu & 0xffff) - (int32_t)(start >> 16);
+        int32_t rv = (int32_t)((uint32_t)tv & 0xffff) - (int32_t)(start & 0xffff);
+        uint32_t bu = s_magic(s_mul(ru, inv_count[rest])), bv = s_magic(s_mul(rv, inv_count[rest]));
+        uint8_t ustep = (uint8_t)(bu >> 8);
+        uint32_t step = (bu << 24) | (bv & 0xffff);
+        uint32_t e = (start << 8);
+        e = (e & 0xffff0000u) | (start & 0xffff);
+        uint8_t uint = (uint8_t)(start >> 24), vint = (uint8_t)(start >> 8);
+        for (int k = 0; k < rest; k++) {
+            PUT(px - k, tex[(vint << 8) | uint]);
+            uint32_t s2 = e + step;
+            unsigned c = s2 < e;
+            e = s2;
+            uint = (uint8_t)(uint + ustep + c);
+            vint = (uint8_t)(e >> 8);
+        }
+        return;
+    }
+    /* 0x76953: short span, one perspective point at the left end. */
+    double w = s_div((double)length, s_add(s_mul((double)length, a_coef), b_coef));
+    int32_t ru = s_int(s_mul(du, w)) + ur - u0, rv = s_int(s_mul(dv, w)) + vr - v0;
+    int32_t nu = s_int(s_mul(ru, inv_count[count])), nv = s_int(s_mul(rv, inv_count[count]));
+    uint8_t ustep = (uint8_t)((uint32_t)nu >> 8);
+    uint32_t step = ((uint32_t)nu << 24) | ((uint32_t)nv & 0xffff);
+    uint32_t e = ((start << 8) & 0xff000000u) | (start & 0xffff);
+    uint8_t uint = (uint8_t)(start >> 24), vint = (uint8_t)(start >> 8);
+    for (int k = 0; k < count; k++) {
+        PUT(px - k, tex[(vint << 8) | uint]);
+        uint32_t s2 = e + step;
+        unsigned c = s2 < e;
+        e = s2;
+        uint = (uint8_t)(uint + ustep + c);
+        vint = (uint8_t)(e >> 8);
+    }
+#undef PUT
+}
+
+/* sub_0007616c: one half of the triangle, row by row. */
+static void persp_rows(const IgnRaster *r, const PerspState *s, PerspHalf *h, const uint8_t *tex, const uint8_t *lut) {
+    if (h->pos_s > h->limit) return;
+    int row = (int)((uint32_t)(h->pos_l + s->y[0]) >> 8) - 1;
+    for (;; row++) {
+        double xl = s_add(s_mul(h->pos_l, s->slope_l), s->x[0]), xs = s_add(s_mul(h->pos_s, h->slope), h->x0);
+        int32_t x_long = s_int(xl), x_short = s_int(xs);
+        double w = s_div(h->t_l, s_add(s_mul(h->t_l, s->k_l), s->c_l));
+        int skip;
+        if (!s->long_right) skip = x_long >= r->xmax8 || r->xmin8 > x_short;
+        else skip = x_long < r->xmin8 || r->xmax8 <= x_short;
+        if (!skip && (x_long >> 8) - (x_short >> 8) == 0) skip = 1;
+        if (!skip) {
+            int32_t u_long = s_int(s_add(s_mul(s->du_l, w), s->u[0]));
+            int32_t v_long = s_int(s_add(s_mul(s->dv_l, w), s->v[0]));
+            int32_t l_long = s_int(s_add(s_mul(s->dl_l, w), s->l[0]));
+            double ws = s_div(h->t_s, s_add(s_mul(h->t_s, h->k), h->c));
+            int32_t u_short = s_int(s_add(s_mul(h->du, ws), h->u0));
+            int32_t v_short = s_int(s_add(s_mul(h->dv, ws), h->v0));
+            int32_t l_short = s_int(s_add(s_mul(h->dl, ws), h->l0));
+            /* 0x7639d: right end first */
+            int32_t xr = x_long, xlft = x_short, ur = u_long, vr = v_long, lr = l_long, ul = u_short, vl = v_short,
+                    ll = l_short;
+            if (!s->long_right) {
+                xr = x_short, xlft = x_long, ur = u_short, vr = v_short, lr = l_short;
+                ul = u_long, vl = v_long, ll = l_long;
+            }
+            int32_t width = xr - xlft;
+            double q = s_div(ll, lr);
+            int32_t du = ul - ur, dv = vl - vr;
+            int32_t xl2 = xlft;
+            if (xl2 <= r->xmin8) xl2 = r->xmin8 + 0x10;
+            int32_t length = xr - ((xl2 & ~0xff) + 0x100);
+            float b_coef = (float)s_mul(q, width);
+            float a_coef = (float)s_add(1.0, -q);
+            int32_t frac = xr & 0xff, xr2 = xr;
+            if (xr >= r->xmax8) {
+                frac = xr - (r->xmax8 & ~0xff);
+                xr2 = r->xmax8;
+            }
+            double w0 = s_div(frac, s_add(s_mul(frac, a_coef), b_coef));
+            int32_t count = (int32_t)((uint32_t)xr2 >> 8) - (int32_t)((uint32_t)xl2 >> 8);
+            if (count > 0) {
+                int32_t xpix = (xr2 & ~0xff) - 0x100;
+                int32_t u0 = s_int(s_add(s_mul(du, w0), ur)), v0 = s_int(s_add(s_mul(dv, w0), vr));
+                if (!(xpix > r->xmax8) && count <= r->stride) {
+                    uint8_t *dst = r->fb + (size_t)row * r->stride + (uint32_t)xpix / 256;
+                    persp_span(dst, count, u0, v0, ur, vr, du, dv, a_coef, b_coef, frac, length, tex, lut);
+                }
+            }
+        }
+        /* 0x76347 */
+        h->pos_l += 0x100, h->pos_s += 0x100;
+        h->t_l = (float)s_mul(h->pos_l, s->len_l);
+        h->t_s = (float)s_mul(h->pos_s, h->len);
+        if (h->pos_s > h->limit) return;
+    }
+}
+
+void ign_prim_persp(IgnRaster *r, const int32_t xy[6], const int32_t light[3], const int32_t uv[6],
+                    const uint8_t *tex, const uint8_t *lut) {
+    if (!inv_count[1])
+        for (int n = 1; n <= 16; n++) inv_count[n] = (float)(1.0 / n);
+    PerspState s;
+    if (persp_sort(&s, xy, light, uv)) return;
+    persp_setup(&s);
+    /* sub_000755ec */
+    int32_t skip_top = r->ymin8 - s.y[0], skip_bot = s.y[2] - r->ymax8;
+    if (skip_top < 0) skip_top = 0;
+    if (skip_bot < 0) skip_bot = 0;
+    int32_t h_tm = s.y[1] - s.y[0], h_mb = s.y[2] - s.y[1];
+    int rows_tm = (s.y[1] >> 8) - (s.y[0] >> 8), rows_mb = (s.y[2] >> 8) - ((s.y[1] - 1) >> 8);
+    PerspHalf h;
+    if (skip_top < h_tm && rows_tm) {
+        int32_t lim = h_tm;
+        if (skip_bot > h_mb) lim = lim - skip_bot + h_mb;
+        h.pos_s = h.pos_l = skip_top ? skip_top + 0x100 : 0x100 - (s.y[0] & 0xff);
+        h.t_s = (float)s_mul(h.pos_s, s.len_tm);
+        h.t_l = (float)s_mul(h.pos_l, s.len_l);
+        h.x0 = s.x[0], h.y0 = s.y[0], h.l0 = s.l[0], h.u0 = s.u[0], h.v0 = s.v[0];
+        h.slope = s.slope_tm, h.k = s.k_tm, h.c = s.c_tm, h.len = s.len_tm;
+        h.du = s.du_tm, h.dv = s.dv_tm, h.dl = s.dl_tm;
+        h.limit = lim - (skip_bot < h_mb ? 1 : 0);
+        persp_rows(r, &s, &h, tex, lut);
+        h_tm = lim;
+    }
+    if (skip_bot <= h_mb && rows_mb) {
+        int32_t ps = 0x100 - (s.y[1] & 0xff);
+        if (ps == 0x100) ps = 0;
+        int32_t pl = h_tm + ps;
+        if (skip_top > h_tm) {
+            ps = skip_top - h_tm + 0x100;
+            pl = skip_top + 0x100;
+        }
+        h.pos_s = ps, h.pos_l = pl;
+        h.t_l = (float)s_mul(pl, s.len_l);
+        h.t_s = (float)s_mul(ps, s.len_mb);
+        h.limit = h_mb - skip_bot;
+        h.x0 = s.x[1], h.y0 = s.y[1], h.l0 = s.l[1], h.u0 = s.u[1], h.v0 = s.v[1];
+        h.slope = s.slope_mb, h.k = s.k_mb, h.c = s.c_mb, h.len = s.len_mb;
+        h.du = s.du_mb, h.dv = s.dv_mb, h.dl = s.dl_mb;
+        persp_rows(r, &s, &h, tex, lut);
+    }
+}

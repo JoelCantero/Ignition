@@ -22,6 +22,7 @@ add_library(ignition_core STATIC
   src/game/race.c
   src/game/track.c
   src/render/raster.c
+  src/render/lisa.c
   src/render/lisa_raster.c
   src/render/hud.c
   src/render/camera.c

@@ -32,6 +32,11 @@ int main(int argc, char **argv) {
         const uint8_t *page = tex + ((size_t)rec[30] << 16) % tex_size;
         switch (rec[0]) {
         case 0x11: ign_prim_tex(&r, rec + 1, rec + 24, page); break;
+        case 0x14: {
+            const int32_t xy[6] = {rec[2], rec[3], rec[5], rec[6], rec[8], rec[9]}, l[3] = {rec[4], rec[7], rec[10]};
+            ign_prim_persp(&r, xy, l, rec + 24, page, NULL);
+            break;
+        }
         default: fprintf(stderr, "primitive 0x%x not supported\n", rec[0]); return 1;
         }
         if (each) {

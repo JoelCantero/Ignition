@@ -23,6 +23,7 @@ RETURN = 0x00E00000
 ESP = STACK + STACK_SIZE - 0x1000
 ALLOC, MALLOC, FREE = 0x6482C, 0x56320, 0x5629E
 FRAMEBUFFER = 0xEBB60
+LIST_LIMIT = 0x36B0
 TRACK_IDS = {"CANADA": 0, "USA": 1, "CARIB": 2, "BRAZIL": 3, "AUSTRIA": 4, "ICELAND": 5, "JAPAN": 6}
 
 
@@ -176,6 +177,21 @@ class RenderOriginal:
         self.call(0x60E3D, esi=0xC4840)
         return bytes(self.uc.mem_read(FRAMEBUFFER, self.width * self.height))
 
+    def primitives(self):
+        """Sorted list of the last render: one text line per primitive (type, 8.8 vertices, 0x14 light)."""
+        listing, lines = self.get(0x24BFFC, "I")[0], []
+        for i in range(LIST_LIMIT):
+            record = self.get(listing + 4 * i, "I")[0]
+            if not record:
+                break
+            words = self.get(record, "17i")
+            if words[0] == 0x14:
+                xy, light = [words[k] for k in (2, 3, 5, 6, 8, 9)], [words[k] for k in (4, 7, 10)]
+                lines.append("14 " + " ".join(map(str, xy)) + " L " + " ".join(map(str, light)))
+            else:
+                lines.append(f"{words[0]:x} " + " ".join(map(str, words[1:7])))
+        return lines
+
     # primitive tests: records in the format of tests/lisa_prims.c
     def setup_raster(self, width, height, tex):
         self.width, self.height = width, height
@@ -197,6 +213,9 @@ class RenderOriginal:
             words = rec[:24]
             if rec[0] == 0x11:
                 words[7], words[8] = uv, page
+            elif rec[0] == 0x14:
+                words[1] = page
+                words[11:17] = rec[24:30]
             else:
                 raise ValueError(f"primitive 0x{rec[0]:x} not supported")
             pointers.append(self.blob(struct.pack("<24I", *[w & 0xFFFFFFFF for w in words])))
@@ -233,6 +252,7 @@ def main():
     ap.add_argument("--reach", type=int, default=0, help="config +0xa4: square cell region instead of the cone")
     ap.add_argument("--ppm")
     ap.add_argument("--raw", help="write the 8-bit indices")
+    ap.add_argument("--list", help="write the sorted primitive list")
     ap.add_argument("--prims", nargs=3, metavar=("TEX", "PRIMS", "OUT"),
                     help="draw a tests/lisa_prims.c record file instead of a level frame")
     args = ap.parse_args()
@@ -250,6 +270,8 @@ def main():
     pixels = oracle.render(x + 25600, -y, z + 25600, pitch * tenths, yaw * tenths, zone=args.zone, reach=args.reach)
     if args.raw:
         Path(args.raw).write_bytes(pixels)
+    if args.list:
+        Path(args.list).write_text("\n".join(oracle.primitives()) + "\n")
     if args.ppm:
         write_ppm(args.ppm, pixels, oracle.width, oracle.height, read_palette(args.data, args.level))
 

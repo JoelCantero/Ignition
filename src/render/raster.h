@@ -29,7 +29,10 @@ typedef struct {
 /* Sets the resolution (clamped to IGN_MAX_W x IGN_MAX_H); every mode is shown at 4:3. */
 void ign_frame_init(IgnFrame *fb, int w, int h);
 void ign_frame_clear(IgnFrame *fb);
+/* Static and POS-animated level objects through the Lisa 2 engine (render_scene 0x56410) and rasterizer. */
 void ign_render_track(IgnFrame *fb, const IgnLevel *lv, const IgnCamera *cam);
+/* Primitive list of the last ign_render_track (struct LisaFrame of lisa.h), for verification tools. */
+const struct LisaFrame *ign_render_last_frame(void);
 void ign_render_car(IgnFrame *fb, const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam);
 /* Skid marks of sub_0003731c; call after the track and before the cars. */
 void ign_render_skids(IgnFrame *fb, const IgnLevel *lv, const IgnSkids *s, const IgnCamera *cam);

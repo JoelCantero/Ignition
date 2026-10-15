@@ -1,5 +1,7 @@
 #include "raster.h"
 
+#include "lisa.h"
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -179,15 +181,81 @@ static void draw_object(IgnFrame *fb, const IgnModel *mdl, const IgnObject *o,
     }
 }
 
-void ign_render_track(IgnFrame *fb, const IgnLevel *lv, const IgnCamera *cam) {
-    static const float zero[3] = {0, 0, 0};
-    static const float id[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+/* ---- Lisa 2 engine scene of the level (sub_0002489c) ---- */
+
+static LisaScene scene;
+static const IgnLevel *scene_level;
+static int *scene_ids; /* PLC index -> engine object */
+static LisaFrame lisa_frame;
+
+static void engine_pos(const IgnObject *o, int32_t *x, int32_t *y, int32_t *z, int16_t ang[3]) {
+    *x = o->pos[0] + IGN_SRF_ORIGIN, *y = -o->pos[1], *z = o->pos[2] + IGN_SRF_ORIGIN;
+    for (int k = 0; k < 3; k++) ang[k] = (int16_t)o->rotation[k];
+}
+
+/* The loader creates the PLC objects of class < 100 first, then the rest, every one with texture slot 0, the
+ * class as priority (+0x1e), the computed radius and the zone of type bits 12-15; all detail options on. */
+static int build_scene(const IgnLevel *lv) {
+    if (scene_level == lv) return 0;
+    if (scene_level) lisa_scene_free(&scene), free(scene_ids), scene_level = NULL;
+    const IgnModel *m = &lv->track;
+    if (lisa_scene_init(&scene, 0xc800, 0xc800, m->nobj + 64)) return -1;
+    scene_ids = malloc(sizeof *scene_ids * (size_t)(m->nobj ? m->nobj : 1));
+    if (!scene_ids) return -1;
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; i < m->nobj; i++) {
+            const IgnObject *o = &m->objs[i];
+            int klass = (int)(o->type & 0xfff);
+            if ((klass < 100) != (pass == 0)) continue;
+            int id = lisa_create(&scene, o->verts - 2, m->tex, m->tex_h / 256, klass, (int)((o->type >> 12) & 0xf));
+            scene_ids[i] = id;
+            int32_t x, y, z;
+            int16_t ang[3];
+            engine_pos(o, &x, &y, &z, ang);
+            if (id >= 0) lisa_place(&scene, id, x, y, z, ang);
+        }
+    scene_level = lv;
+    return 0;
+}
+
+/* POS animation moves objects with LI_MOVEOBJECT. */
+static void sync_scene(const IgnLevel *lv) {
     for (int i = 0; i < lv->track.nobj; i++) {
-        const IgnObject *o = &lv->track.objs[i];
-        float rotation[9];
-        ign_object_rotation_matrix(o, rotation);
-        draw_object(fb, &lv->track, o, cam, id, zero, rotation, zero);
+        int id = scene_ids[i];
+        if (id < 0) continue;
+        const LisaObject *e = &scene.objs[id];
+        int32_t x, y, z;
+        int16_t ang[3];
+        engine_pos(&lv->track.objs[i], &x, &y, &z, ang);
+        if (x != e->x || y != e->y || z != e->z || ang[0] != e->ang[0] || ang[1] != e->ang[1] || ang[2] != e->ang[2])
+            lisa_move(&scene, id, x, y, z, ang);
     }
+}
+
+/* race_frame 0x42c92 / race_setup_video: config block of a full-screen view. */
+static void engine_view(const IgnFrame *fb, const IgnCamera *cam, LisaView *v) {
+    const double tenths = 1800.0 / 3.14159265358979323846;
+    memset(v, 0, sizeof *v);
+    v->x = cam->x + (double)IGN_SRF_ORIGIN, v->y = -(double)cam->y, v->z = cam->z + (double)IGN_SRF_ORIGIN;
+    v->pitch = cam->pitch * tenths, v->yaw = cam->yaw * tenths, v->zoom = 1.0;
+    v->fx = (int)fb->fx, v->fy = (int)fb->fy;
+    v->near = fb->w == 320 && fb->h == 200 ? 25 : 10;
+    v->cx = fb->w / 2, v->cy = fb->h / 2;
+    v->layers = LISA_LAYER_ALL;
+    lisa_view_clip(v, 0, 0, fb->w - 1, fb->h - 1);
+}
+
+const LisaFrame *ign_render_last_frame(void) { return &lisa_frame; }
+
+void ign_render_track(IgnFrame *fb, const IgnLevel *lv, const IgnCamera *cam) {
+    if (build_scene(lv)) return;
+    sync_scene(lv);
+    LisaView v;
+    engine_view(fb, cam, &v);
+    lisa_build(&scene, &v, &lisa_frame);
+    IgnRaster r = {.fb = fb->color, .stride = fb->w};
+    ign_raster_clip(&r, 0, 0, fb->w - 1, fb->h - 1);
+    lisa_draw(&lisa_frame, &r);
 }
 
 static void mat_mul(const float a[9], const float b[9], float out[9]) {
