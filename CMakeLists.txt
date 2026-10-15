@@ -141,3 +141,9 @@ add_test(NAME contact COMMAND contact_test)
 if(NOT MSVC)
   target_compile_options(contact_test PRIVATE -Wall -Wextra)
 endif()
+if(IGN_VERIFY_ORIGINAL)
+  add_test(NAME contact_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/contact_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:contact_test>
+            --report ${CMAKE_BINARY_DIR}/contact-original-report.json)
+endif()

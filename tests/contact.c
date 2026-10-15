@@ -226,7 +226,7 @@ static int runner(void) {
             for (int i = 0; i < nb; i++)
                 if (scanf("%f %f", &b[i][0], &b[i][1]) != 2) return 1;
             int r = ign_contact_polygons((const float(*)[2])a, na, (const float(*)[2])b, nb, &cx, &cz, &t);
-            printf("%d %.9g %.9g %.9g\n", r, cx, cz, t);
+            printf("%d %.17g %.17g %.17g\n", r, cx, cz, t);
         } else if (mode == 'I') {
             IgnContactBody b[2];
             float cx, cz, t;
@@ -238,7 +238,7 @@ static int runner(void) {
             int r = ign_contact_impulse(&b[0], &b[1], cx, cz, t);
             printf("%d", r);
             for (int i = 0; i < 2; i++)
-                printf(" %.17g %.17g %.17g %.9g", b[i].vx, b[i].vz, b[i].w, b[i].impact);
+                printf(" %.17g %.17g %.17g %.17g", b[i].vx, b[i].vz, b[i].w, b[i].impact);
             printf("\n");
         } else if (mode == 'R') {
             double n[3], v[3];

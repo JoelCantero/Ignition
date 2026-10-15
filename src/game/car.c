@@ -379,13 +379,14 @@ int ign_contact_polygons(const float (*a)[2], int na, const float (*b)[2], int n
     double inv = 1.0 / n;
     *cx = (float)((float)sx * inv);
     *cz = (float)(inv * (float)sz);
-    /* 0x34fd1: the farthest pair (first strict maximum of the float32 squared distance). */
+    /* 0x34fd1: the farthest pair, the first strict maximum; the unrounded distance is compared with the float32
+     * maximum kept so far (fst/fcomp). */
     float best = 0;
     int bi = 0, bj = 0;
     for (int i = 0; i <= n - 2; i++)
         for (int j = i; j <= n - 1; j++) {
-            float d = (float)(pow((double)hx[i] - hx[j], 2.0) + pow((double)hz[i] - hz[j], 2.0));
-            if (d > best) best = d, bi = i, bj = j;
+            double d = pow((double)hx[i] - hx[j], 2.0) + pow((double)hz[i] - hz[j], 2.0);
+            if (d > best) best = (float)d, bi = i, bj = j;
         }
     *theta = (float)atan2((double)hz[bi] - hz[bj], (double)hx[bi] - hx[bj]);
     return 1;
@@ -418,9 +419,9 @@ int ign_contact_impulse(IgnContactBody *a, IgnContactBody *b, float cx, float cz
     double ja0 = b->mass * inv * j0e;
     float jb0 = (float)(inv * a->mass * j0e);
     double ca = sin((double)aa) * st + cos((double)aa) * ct;
-    float ja = (float)(ja0 / (ca * (ra * ka) + 1.0));
+    float ja = (float)(ja0 / (ca * ((double)ra * ka) + 1.0));
     double cb = sin((double)ab) * st + cos((double)ab) * ct;
-    double jb = jb0 / (cb * (kb * rb) + 1.0);
+    double jb = jb0 / (cb * ((double)kb * rb) + 1.0);
     a->w += (double)ja * ka;
     a->vx -= (double)ja * st;
     a->vz += (double)ja * ct;
