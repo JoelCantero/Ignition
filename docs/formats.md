@@ -984,3 +984,84 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
 - **CDP**: vídeo, `"CDP\0"`, `u16 100`, `u16 frames`, …, `u16 320`, `u16 200`, paleta.
 - **PSQ**, **PFM** (`"li01"`), **BTZ** (config `i32`), **AIS** (texto de IA).
 - Audio: WAV PCM 8 bits mono 22050 Hz, PAT (GUS), XI (FastTracker II); música en pistas CD (`MUSIC/Track02-08.ogg`).
+
+## Objetos de colisión, contacto y objetos especiales (rama `port/collisions-moving-objects`)
+
+Portado en `src/game/pos.c` (lista y fotograma), `src/game/car.c` (núcleos de contacto) y `src/game/assets.c`
+(consulta de suelo). Verificación: `tests/contact.c` (unitaria), `tests/contact_real_assets.c` (7 pistas) y
+`tests/contact_original.py` (bytes LE con Unicorn, `IGN_VERIFY_ORIGINAL=ON`).
+
+- **Consulta de suelo** (`sub_00020814`): los puntos de la cara son vértice MSH + posición actual del objeto del pool
+  (`+0xc/+0x10/+0x14`, que `LI_MOVEOBJECT` actualiza con POS); **la rotación no interviene** (solo la usa el render).
+  Coste entero: `face_avg_height` = `−(v0y+v1y+v2y)/3` (división truncada) `+ y_pool`, `d = media − sonda`,
+  `d < 0 ? −d : d·d` (`imul`). La sonda es `trunc(altura + 50)` para el coche. Resultado `0xebad8`: `+0` tipo,
+  `+4/+8/+0xc` normal entera `(p0−p1)×(p2−p1)`, `+0x10/+0x1c/+0x28` puntos (motor, y abajo), `+0x34` objeto,
+  `+0x38` tramo. **Ningún objeto animado por POS ni de colisión tiene spans SRF** (las 7 pistas): la consulta de
+  suelo nunca los ve; su geometría trasladada solo cuenta en `sub_0003383c` y en `car_ground_contact`. Esto sustituye
+  a la nota de "spans no regenerados" de la sección POS.
+- **Objetos de colisión** (creación del mundo `0x24f22–0x251fa`, lista `[0x1fefc0]`, `[0x1feeb4]` registros de 0x98 B):
+  tipos PLC 0x96–0xc7 (con la opción de detalle `[0x1fed64]`); `+0` = tipo − 0x96, `+4` PLC, `+8` en vuelo,
+  `+0xc/+0x14/+0x1c` posición (`x+0x6400`, y PLC hacia arriba, `z+0x6400`), `+0x24` velocidad, `+0x3c` ángulos
+  (décimas de grado), `+0x54` giro, `+0x6c` cuerpo de contacto (vx, vz, w), `+0x84` masa, `+0x88` inercia,
+  `+0x8c` impacto, `+0x90` fase, `+0x94` periodo. 0x96 y 0x9a: masa 0,3, inercia 100, periodo 30 y fase compartida
+  0, 4, 8… (vuelve a 0 al llegar a 30); 0x98: 25 / 8000; 0x99: 2 / 1500; otro tipo: "Ingen info om kollisions
+  objektet!!" y fin. USA 17, CANADA 22, AUSTRIA 23, BRAZIL 0, CARIB 24, ICELAND 9, JAPAN 53.
+- **`car_ground_contact` 0x350f0** (desde `collisions_pass` si `[0x1feeb4] > 0`, una vez por fotograma):
+  - En reposo, contra cada coche no destruido con `|car+8 − y| < 50` y `|dx|, |dz| < 150`: caja del coche
+    (`car+0x2fc/+0x31c` girada por `car+0xf8`, floats `0x207aa0`) contra el cuadrado ±30 del objeto con
+    `sub_000349e8`; si hay contacto, `sub_000346cc` entre el coche (`car+0`, `+0x10`, velocidad `car+0x640/+0x648`,
+    `body+0x30`, masa 10, inercia 4000 de `cars_init 0x273b3`, impacto `car+0x63c`) y el objeto. **Del coche solo se
+    conservan el giro `body+0x30` y el impacto**; su velocidad no cambia. El objeto sale con `vx, vz` del impulso,
+    `vy = 2 + 2·rand`, giro `5·impacto` en los tres ejes y en vuelo; con impacto del coche > 10 suena COLL 1 con
+    volumen `min(0x10000, trunc((|i| − 10)·3000))`.
+  - En vuelo (`0x356b8`): `vx·0,99`, `vy − 0,4`, `vz·0,99`; ángulos `+= giro` y a `[0, 3600)`; giro `·0,98`;
+    posición `+= v` acotada a `[0, 51200]` en x/z y `[−10000, 10000]` en y; `ground_query(trunc x, trunc y + 150,
+    trunc z)`. Si el plano `h` cumple `h + 15 > y`: con rapidez > 2 rebota (`sub_00035f38` con la normal
+    `(p0−p1)×(p2−p1)` con y invertida, luego `0,9 / 0,6 / 0,9`, `vy ≤ 20`, `y = h + 15`, giro `= 5·rapidez`); si no,
+    queda en reposo. Después `LI_MOVEOBJECT` con la pose truncada.
+  - Tipo 0x9a: durante el primer quinto del periodo, sprite de LIGHT.TEX (ranura 3, tamaño 400, vida 2, en
+    `y + 20`) con la tabla `0xc4010` (fase 0), `0xc4030` o `0xc4050` (último fotograma); la fase avanza cada fotograma.
+- **`sub_000349e8`** (polígonos float x/z): cruce de aristas con signos de productos float32 (`P0−Q`, `Q−P`);
+  denominadores float32; más de 8 cruces = sin contacto. Media de los cruces → `[0x1fee9c]/[0x1feea8]`; par más
+  alejado (primer máximo estricto; la distancia sin redondear se compara con el máximo float) → ángulo
+  `atan2(z_i − z_j, x_i − x_j)` en `[0x1fee98]`.
+- **`sub_000346cc`**: brazos `a = atan2(c − p)` y `r` (floats), velocidades del punto `v ∓ r·w·(sin a, cos a)`;
+  sin contacto si el signo de la velocidad normal difiere del lado de A. `j0` float, impactos `|trunc(j0)|`;
+  `k = cos(θ − a)·r·m/I` (float); `jA = mB/(mA+mB)·(−1,5·j0) / (1 + cos(a−θ)·r·k)` (float),
+  `jB` igual con `mA`; `A.w += jA·kA`, `A.v += jA·(−sin θ, cos θ)`, `B.w −= kB·jB`, `B.v −= jB·(−sin θ, cos θ)`.
+- **`sub_00035f38`**: gira la velocidad `−atan2(nz, nx)` en torno a y y `−atan2(ny, |n_xz|)` en x/y; si la
+  componente normal es ≤ 0 la invierte y deshace los giros.
+- **`sub_00032d8c`** (una vez por fotograma, antes de mover los coches): `car+0x640/+0x648 = (paso del eje trasero +
+  paso del delantero)·0,5` (`car+0x58/+0x78`, `+0x60/+0x80`; ejes `car+0x48/+0x68` a `car+0x5b0` detrás y `car+0x5ac`
+  delante, `cars_update_all 0x2da32`).
+- **Objetos especiales** (PLC 0x12c–0x15d, lista `0x1fef58` de 16 B: PLC, tipo, contador, fase): en `car_update`
+  (`0x2ef9d`, con la sonda de la primera esquina), por cada entrada a < 200 en x y z del coche (posición actual):
+  en ICELAND (`[0x1fef10] == 5`) un objeto de tipo exacto 0x12c a < 30 en x, altura y z hace explotar el coche;
+  si no, `sub_0003383c(trunc x, trunc altura, trunc z, coche)` y, si devuelve ≥ 0x12c, se termina el recorrido.
+  Con el relámpago activo (`[0x1fede4]`, de `0x3bdac`) `sub_00032dc8` puede devolver 0x12d (lanzamiento).
+  Consumidores (`0x30dbb–0x31303`): 0x12c explosión (`car+0x354`), 0x130 deslizamiento (`car+0x35c`), 0x12d o
+  0x131 con un géiser en erupción a < 80 (fase `+0xc` de `sub_00036ce0`) → si está en el suelo y `car+0x554 == 0`:
+  `car+0x20 −= 8` (como mucho −10), `car+0x554 = 1` y una pieza (tipo 5, vida 30, gravedad −460); mientras
+  `car+0x554 > 0` cada tick `car+0x110 = fmod(n·0,078, 2π)` (vuelta de campana) y tras 80 ticks se nivela.
+  0x12e (si está en el suelo y a < 50 de él): `car+0x20 −= 4,5 + 3·rand`, `body+0x30 −= 2,5 + 1,5·rand`, en el aire,
+  `car+0x20 ≥ −10`, y GENERAL sample 8 a volumen 0x10000 si `[0x1fee3c] == 0` (luego 15, decrece en cada
+  `car_update`). 0x12f: `car+0x558/+0x55c/+0x560` y `sub_00031858` (cambio de malla, no portado).
+  Tipos en los datos: 0x12c móviles en USA (204), CANADA (208–211), CARIB (332–335) e ICELAND (192–193); 0x12e USA
+  181; 0x12f USA 173–174 y BRAZIL 299/301; 0x130 AUSTRIA (14); 0x131 ICELAND (5). No hay 0x12d.
+- **`sub_0003383c`**: recorre la lista de objetos del motor que deja `sub_00058c1c` (una vista a 500 sobre el coche
+  con los ángulos de su cámara de persecución); toma los de palabra de tipo (`+0x1e`, 16 bits bajos del tipo PLC)
+  en `[0x12c, 0x15e)`; con `d = punto − posición del objeto`, si `|dy| < 190` activa una puerta **que ya no se
+  borra** para los siguientes objetos; con `|dx|, |dz| <` 600 (900 en modo salto) y la puerta activa, prueba cada
+  cara con el test de cruces entero (`x_j − x_i)·(z − z_i)/(z_j − z_i) + x_i > x`) sobre los vértices sin rotar; el
+  último objeto con una cara bajo el punto da el tipo (si no, −1). Resultado en `0x1ffca8`.
+- **Desviaciones**: el port recorre todos los objetos PLC en orden en lugar de la lista de `sub_00058c1c` (no
+  decodificada); los desplazamientos de eje `car+0x5ac/+0x5b0` vienen de tablas locales de `cars_init` sin
+  decodificar y se aproximan con las ruedas del modelo truncadas; la detección y los consumidores de objetos
+  especiales se ejecutan antes del tick del coche (en el original, dentro de `car_update`, con el suelo de ese tick);
+  el ramal del relámpago (`sub_00032dc8`) y 0x12f no están portados; `car+0x584` al nivelarse toma el balanceo en
+  las unidades del port. En `sub_000346cc` el float `jB0 = −1,25·j0` (masas 10 y 2) puede caer en el punto medio de
+  dos floats y el x87 desempata con su redondeo de 80 bits de `1/(mA+mB)`: 41 de 1 500 casos difieren en 1 ulp.
+- **Verificación LE** (`tests/contact_original.py`, semilla 0x350f0): 9 003 casos — polígonos 1 503, impulsos 1 500
+  (1 459 exactos a 1e−12, el resto 1 ulp float del caso anterior), reflexión 1 500, vuelo 1 500, rebote 1 500 y
+  `sub_0003383c` sobre listas sintéticas 1 500 (con `sub_00058c1c` sustituida por un `ret`), todos dentro de
+  tolerancia y 8 962 exactos. Corrigió dos errores del port: la comparación del par más alejado y `r·k` en float32.
