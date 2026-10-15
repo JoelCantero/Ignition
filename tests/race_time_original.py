@@ -64,7 +64,7 @@ class ClockOriginal(InputOriginal):
     def execute(self, entry, boundaries, returns=False):
         for register in ("EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "EBP"):
             self.uc.reg_write(getattr(self.reg, "UC_X86_REG_" + register), 0)
-        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, 0x037F)
+        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, self.fpcw)
         self.uc.reg_write(self.reg.UC_X86_REG_FPTAG, 0xFFFF)
         self.uc.reg_write(self.reg.UC_X86_REG_ESP, ESP)
         self.put(ESP, "I", RETURN)
@@ -74,7 +74,7 @@ class ClockOriginal(InputOriginal):
         if (end not in self.boundaries or
                 self.uc.reg_read(self.reg.UC_X86_REG_ESP) != ESP + (4 if returns else 0) or
                 self.uc.reg_read(self.reg.UC_X86_REG_FPTAG) != 0xFFFF or
-                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != 0x037F):
+                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != self.fpcw):
             raise ValueError(f"Clock stack/x87/boundary contract failed at 0x{end:x}")
         identity = f"0x{entry:x}->0x{end:x}"
         self.fragment_executions[identity] = self.fragment_executions.get(identity, 0) + 1

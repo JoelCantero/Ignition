@@ -12,11 +12,13 @@ import struct
 import subprocess
 import sys
 
-from physics_original import Original, BODY, BODY_SIZE, ESP, STACK, RETURN, ROOT, ORIGINAL_SHA256
+from physics_original import (Original, BODY, BODY_SIZE, ESP, STACK, RETURN, ROOT, ORIGINAL_SHA256,
+                              FPCW, EXTENDED_FPCW)
 
 CAR, INFO = 0x410000, 0x420000
 CAR_SIZE = 0x484C
-ABS_TOL, REL_TOL = 2e-11, 2e-12
+# Bit-exact under the game's 53-bit x87 control word (no FMA contraction in the port).
+ABS_TOL, REL_TOL = 0.0, 0.0
 FIELDS = {"S": ("steer_visual", "steer"), "G": ("grip_avg", "grip_f", "grip_r"),
           "V": ("height", "fall_speed", "drop", "airborne", "landed"),
           "T": ("drive", "creep", "creep_ticks", "catchup", "catchup_clock", "skid_timer"),
@@ -156,7 +158,7 @@ class CarOriginal(Original):
 
     def step(self, mode, values):
         self.stopped_at_landing = False
-        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, 0x037F)
+        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, self.fpcw)
         self.uc.reg_write(self.reg.UC_X86_REG_FPTAG, 0xFFFF)
         self.uc.reg_write(self.reg.UC_X86_REG_ESP, ESP)
         self.put(ESP, "I", RETURN)
@@ -193,7 +195,7 @@ class CarOriginal(Original):
         if eip != expected_end or self.uc.reg_read(self.reg.UC_X86_REG_ESP) != expected_esp:
             raise ValueError(f"{mode}: unexpected execution boundary EIP=0x{eip:x}")
         if (self.uc.reg_read(self.reg.UC_X86_REG_FPTAG) != 0xFFFF or
-                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != 0x037F):
+                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != self.fpcw):
             raise ValueError(f"{mode}: x87 stack/control word changed")
         if mode == "S":
             return [self.get(CAR + 0xB0, "d"), self.get(BODY + 0xAC, "d")]
@@ -431,8 +433,9 @@ def verify(executable, runner):
     rows = result.stdout.splitlines()
     if len(rows) != sum(c[2] for c in cases):
         raise ValueError("Native output row count mismatch")
-    failures, maxima, cursor = [], dict.fromkeys(FIELDS, 0.0), 0
+    failures, maxima, cursor, starts = [], dict.fromkeys(FIELDS, 0.0), 0, []
     for mode, name, ticks, values in cases:
+        starts.append(cursor)
         original.start_case(mode, values)
         for tick in range(ticks):
             current = values
@@ -444,6 +447,18 @@ def verify(executable, runner):
             cursor += 1
             maxima[mode] = max(maxima[mode], maximum)
             failures.extend(dict(case=name, tick=tick + 1, **diff) for diff in differences)
+    # Negative control: with 64-bit precision the original truncates the unrounded v*3.6 product, so the
+    # torque-index sweep must expose index differences the 53-bit run does not have.
+    # A fresh emulator: cached translations from later modes would run past earlier stop addresses.
+    control_original, control = CarOriginal(executable), 0
+    control_original.fpcw = EXTENDED_FPCW
+    for (mode, name, ticks, values), start in zip(cases, starts):
+        if name.startswith("torque-index-"):
+            control_original.start_case(mode, values)
+            for tick in range(ticks):
+                control += bool(compare_output(mode, rows[start + tick], control_original.step(mode, values))[0])
+    if not control:
+        raise ValueError("Extended-precision control word did not change any torque index")
     required = {"S": {0x5019A, 0x501C1, 0x501DD, 0x5021B, 0x5026A, 0x50296},
                 "G": {0x3077B, 0x307E1, 0x30821, 0x30727, 0x30747},
                 "V": {0x2E28A, 0x2E2B6, 0x2E316, 0x2E340, 0x2E34D, 0x2E370, 0x2E397, 0x2E600},
@@ -470,7 +485,8 @@ def verify(executable, runner):
                                          ROOT / "tests/physics_original.py", ROOT / "tools/le2elf.py", Path(__file__))},
                 observed_at=datetime.now(timezone.utc).isoformat(), host=platform.platform(),
                 python=platform.python_version(), unicorn=unicorn.__version__,
-                absolute_tolerance=ABS_TOL, relative_tolerance=REL_TOL,
+                absolute_tolerance=ABS_TOL, relative_tolerance=REL_TOL, x87_control_word=hex(FPCW),
+                extended_control_word_differing_steps=control,
                 required_addresses_executed={k: [hex(a) for a in sorted(v)] for k, v in required.items()},
                 scope={"S": "Complete car_steer 0x500f0, input -100..100, car+0xa8=10",
                        "G": "Unmodified car_update block 0x3070a..0x30874, supplied surface types",

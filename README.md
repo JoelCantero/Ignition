@@ -124,15 +124,17 @@ ctest --test-dir build -R '^(physics_original|car_original|car_kernel_contract)$
 El informe `build/physics-original-report.json` conserva hashes del original, del ejecutable de prueba, de las
 fuentes y de las entradas, versiones y errores máximos. Hay **190 casos / 1 658 ticks**: tracción, marcha atrás,
 saturación y sus límites, giro, fricción, derrape, pendientes y movimiento en el aire. Se comparan 33 campos
-`double` y dos indicadores enteros. La tolerancia de las salidas es `2e-11 + 2e-12·|original|`; los indicadores
+`double` y dos indicadores enteros. La tolerancia de las salidas es `2e-14 + 1e-14·|original|`; los indicadores
 y los campos no modificados deben coincidir exactamente. No se ha encontrado una divergencia que justifique
 cambiar `ign_body_step`.
 
-Esto verifica **la rutina aislada, con x87 emulado y palabra de control `0x037f`**, no el juego completo,
-`car_update`, colisiones, IA ni una carrera DOS. Véanse los límites y la
+Esto verifica **la rutina aislada, con x87 emulado y la palabra de control del juego `0x127f`**, no el juego
+completo, `car_update`, colisiones, IA ni una carrera DOS. Véanse los límites, la
+[palabra de control x87](docs/formats.md#palabra-de-control-x87) y la
 [revisión de los avisos de Ghidra](docs/formats.md#auditoría-de-la-decompilación-ghidra).
-La regresión general preexistente sigue pasando solo **1/23** casos (divergencias de imágenes y de estado
-de carrera). No se han cambiado los resultados esperados para convertir esas diferencias en un éxito.
+Unicorn calcula `FSIN`/`FCOS`/`FPTAN`/`FPATAN` en binary64 del host, así que `body_step` no puede ser exacto bit a bit.
+La regresión general preexistente pasa **0/23** casos (antes 1/23: la imagen de `USA viewer car 9` cambia al
+desactivar la contracción FMA). No se han cambiado los resultados esperados para convertir esas diferencias en un éxito.
 
 ### Kernels del coche verificados contra el original
 
@@ -141,8 +143,8 @@ dirección completa `0x500f0` (732 casos), bloque de agarre `0x3070a..0x30874` (
 `0x2e234`, hasta la frontera de efectos de aterrizaje o retorno (252), más aceleración (6 829),
 freno (72), aritmética de turbo (2 016), revoluciones (25 016) e integración acelerador→revoluciones (6 941).
 Usa los kernels reales de `car.c`, sin reemplazar sonido/efectos por respuestas inventadas.
-Las mayores diferencias numéricas son `7.11e-15`, `1.78e-15` y `1.43e-14`, respectivamente, dentro
-de la tolerancia del oracle; los indicadores son exactos. Los informes conservan procedencia y cobertura.
+Con la palabra de control del juego (`0x127f`) y el port compilado sin contracción FMA, todos los kernels
+coinciden **bit a bit** (tolerancia cero). Los informes conservan procedencia y cobertura.
 
 Esta prueba confirmó y permitió corregir dos errores de agarre: si una rueda tiene un tipo fuera de 0..29,
 se conserva la media anterior (inicial 0,4) y ambos agarres; los rivales usan perfil 11 y su propia tabla
@@ -151,8 +153,8 @@ cambiar sus fórmulas. Hay fixtures de límites numéricos, aleatorios y secuenc
 
 Los tres bloques nuevos pasan **8 917 casos / 127 230 pasos**. Se corrigieron la truncación x87 del índice
 de par, los límites originales de patinaje, el bloqueo por freno y el turbo agotado: limpia modo/frames
-y no añade fuerza. Las diferencias máximas son `1.82e-12` (aceleración), cero (freno) y `9.32e-10` (turbo),
-dentro de la misma tolerancia; los indicadores son exactos. Las curvas de par son entradas suministradas
+y no añade fuerza. Las salidas coinciden bit a bit; un control negativo con `0x037f` (precisión de 64 bits)
+debe cambiar índices de par en el barrido `torque-index`. Las curvas de par son entradas suministradas
 a ambos kernels, no una verificación de su generación.
 
 Revoluciones añade **31 957 casos / 166 942 pasos**, contando la integración (que repite deliberadamente
