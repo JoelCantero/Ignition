@@ -19,6 +19,7 @@ add_library(ignition_core STATIC
   src/game/ai.c
   src/game/car.c
   src/game/ghost.c
+  src/game/save.c
   src/game/skid.c
   src/game/fx.c
   src/game/palette.c
@@ -28,6 +29,8 @@ add_library(ignition_core STATIC
   src/game/track.c
   src/render/raster.c
   src/render/hud.c
+  src/render/sprite.c
+  src/render/font.c
   src/render/camera.c
 )
 target_include_directories(ignition_core PUBLIC src)
@@ -41,6 +44,16 @@ target_link_libraries(ignition PRIVATE ignition_core SDL3::SDL3)
 if(NOT MSVC)
   target_compile_options(ignition PRIVATE -Wall -Wextra)
 endif()
+
+# Music: MUSIC/TrackNN.ogg (the original CD audio) decoded by the vendored stb_vorbis.
+add_library(stb_vorbis STATIC third_party/stb_vorbis/stb_vorbis.c)
+target_compile_definitions(stb_vorbis PRIVATE STB_VORBIS_NO_PUSHDATA_API STB_VORBIS_NO_STDIO)
+if(NOT MSVC)
+  target_compile_options(stb_vorbis PRIVATE -w)
+  target_link_libraries(stb_vorbis PRIVATE m)
+endif()
+target_sources(ignition PRIVATE src/platform/music.c)
+target_link_libraries(ignition PRIVATE stb_vorbis)
 
 # Flat ELF image of the original executable for disassemblers.
 set(GAME_DIR "/Users/Shared/Epic Games/Ignition/ignition" CACHE PATH "Original game data")
@@ -84,6 +97,10 @@ add_test(NAME track_topology COMMAND track_topology_test)
 add_executable(track_real_assets_test tests/track_real_assets.c)
 target_link_libraries(track_real_assets_test PRIVATE ignition_core)
 add_test(NAME track_real_assets COMMAND track_real_assets_test "${GAME_DIR}")
+# 2D race overlay: LFT/FNT fonts, sprites, HUD frames (the game data part is skipped without the directory).
+add_executable(hud_assets_test tests/hud_assets.c)
+target_link_libraries(hud_assets_test PRIVATE ignition_core)
+add_test(NAME hud_assets COMMAND hud_assets_test "${GAME_DIR}")
 add_executable(pos_test tests/pos.c)
 target_link_libraries(pos_test PRIVATE ignition_core)
 add_test(NAME pos COMMAND pos_test)
@@ -105,9 +122,18 @@ if(NOT MSVC)
   target_compile_options(track_real_assets_test PRIVATE -Wall -Wextra)
   target_compile_options(ai_route_choice_test PRIVATE -Wall -Wextra)
   target_compile_options(ai_schedule_test PRIVATE -Wall -Wextra)
+  target_compile_options(hud_assets_test PRIVATE -Wall -Wextra)
   target_compile_options(palette_test PRIVATE -Wall -Wextra)
 endif()
 option(IGN_VERIFY_ORIGINAL "Compare physics and car kernels with original LE bytes (requires Python unicorn)" OFF)
+if(IGN_VERIFY_ORIGINAL)
+  # Triangle primitive 0x729f3 and matrix sprites 0x82950 against the original LE bytes (Unicorn).
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME hud_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/hud_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:hud_assets_test>
+            --report ${CMAKE_BINARY_DIR}/hud-original-report.json)
+endif()
 if(IGN_VERIFY_ORIGINAL)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME ai_geometry_original
@@ -155,4 +181,20 @@ if(IGN_VERIFY_ORIGINAL)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/lap_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
             --report ${CMAKE_BINARY_DIR}/lap-original-report.json)
+endif()
+
+# Persistence: IGN_DOS.BTZ round trip, record tables and time-trial ghosts.
+add_executable(save_btz_test tests/save_btz.c)
+target_link_libraries(save_btz_test PRIVATE ignition_core)
+if(NOT MSVC)
+  target_compile_options(save_btz_test PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME save_btz COMMAND save_btz_test "${GAME_DIR}" ${CMAKE_BINARY_DIR})
+add_test(NAME btz_tool COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/btz.py roundtrip "${GAME_DIR}/IGN_DOS.BTZ")
+add_test(NAME time_trial COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/time_trial.py
+  --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}")
+if(IGN_VERIFY_ORIGINAL)
+  add_test(NAME btz_defaults_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/btz_defaults_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:save_btz_test>)
 endif()

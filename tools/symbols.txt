@@ -3,7 +3,7 @@
 000215d0  game_init            sets 640x480 then 320x200, prints banner, loads system gfx  roadmap=phase4.ui
 00021860  load_system_gfx      N_SYSGFX.PIC, N_SYSG_2.PIC, SYS.COL  roadmap=phase4.ui
 000224d0  load_level           LEVELS\%s%s.{TRI,SRF,COL,PIC,POS,MSH,TEX}  roadmap=phase2.world
-000243e0  load_panel_gfx       HUD panels, signs, POKAL.PIC  roadmap=phase4.ui
+000243e0  load_panel_gfx       S/N_PANGFX, H_PAN1/2, S/N/H_SIGNS, POKAL.PIC (raw files, pixels at +0x34e); HUD ones loaded by hud.c  status=ported roadmap=phase4.hud
 00011504  menu_load_gfx        baltazar\data\*.pic  roadmap=phase4.ui
 00060f9c  load_file            eax=filename -> eax=malloc'd contents or 0
 000558e4  set_video_mode       mode params in 0xc5cfc..0xc5d08 (w, h, bpp, ?)
@@ -33,7 +33,7 @@
 00041244  pos_make_relative    converts POS positions to consecutive cyclic frame deltas  roadmap=phase2.world
 000412e8  pos_apply_frame      applies current POS delta/rotation; port in src/game/pos.c, rotation order approximate  status=partial roadmap=phase2.world
 00060f40  read_file_into       eax=path, edx=buf, ebx=size
-000240f4  load_fonts           IGNITION.FNT + *.lft  roadmap=phase4.ui
+000240f4  load_fonts           IGNITION.FNT -> [0x1feff4]; yellow/pos/speed{_s,,_h}.lft -> [0x1fea0c..0x1fea38] (font.c/hud.c load the layout's three)  status=ported roadmap=phase4.hud
 001febf4  g_level_pos
 0001aaf8  menu_load_car        menucar.plc/msh/tex  roadmap=phase4.ui
 001fefd4  g_level_msh
@@ -52,7 +52,7 @@
 0005891c  camera_angles        camera orientation in tenths of a degree  roadmap=phase3.render
 00047f94  chase_camera_update  per-car camera [0x1fef9c]+car*0xc8: yaw smoothing, height, pitch, distance (ported)  status=ported roadmap=phase3.render
 000420cc  race_frame           section palette effects, camera selection, render_scene, HUD  roadmap=phase3.render
-0004a320  race_hud             original HUD routine; partial H_PAN1/LFT port in src/render/hud.c  status=partial roadmap=phase4.hud
+0004a320  race_hud             race overlay per viewport (hud.c): times, place, dial, gear lever, turbo, signs, elimination bar and 0x4b648 second-player marker, start lights, medal, messages; medal sound 0x4bc54 (audio) and the draw-less fireworks loop 0x4bca8 not ported  status=ported roadmap=phase4.hud
 00027df8  chase_camera_init    camera struct: height car+8+1400, 400/400, pitch 420+450 tenths  roadmap=phase3.render
 0002b850  race_clock           normal countdown/transition fragments verified by tests/race_time_original.py; forced start excluded  status=partial roadmap=phase4.loop
 0002b734  frame_time           sampled signed wrapping ms difference * 0.001 at 2b7d6..2b7f9 verified; pause/timer excluded  status=identified
@@ -135,6 +135,27 @@
 00049a8c  sound_play           (group, sub, idx, loops, vol, Hz, x, z) distance attenuated  status=ported roadmap=phase4.audio
 0002a4ec  sound_load           banks GENERAL ROLL/SKID/COLL/BOOST/DIV, level, cars + ENGINE.INF  status=ported roadmap=phase4.audio
 00063310  sound_load_dir       load NN_*.WAV/PAT/XI of a directory  status=ported roadmap=phase4.audio
+0006442f  cd_init              MSCDEX present (0x64559) + 0x400 B DOS buffer (DPMI 0x100) -> [0x25ade8]  status=identified roadmap=phase4.audio
+000644c5  cd_free              DPMI 0x101 frees the DOS buffer  status=identified roadmap=phase4.audio
+00064559  cd_mscdex_check      int 0x2f AX=0x1500 via DPMI 0x300; [0xd7d90] drives, [0x25adec] first drive  status=identified roadmap=phase4.audio
+000645e1  cd_request           int 0x2f AX=0x1510 (send device request [0x25ade8]) via DPMI 0x300  status=identified roadmap=phase4.audio
+00064659  cd_request_header    al=command, edx=IOCTL length: 0x0d-byte header, transfer buffer at +0x20  status=identified roadmap=phase4.audio
+00064332  cd_play_audio        command 0x84, eax=start, edx=frames  status=identified roadmap=phase4.audio
+00064391  cd_stop_audio        command 0x85; menu, options and shutdown  status=identified roadmap=phase4.audio
+00064241  cd_play_track        eax=track 1..[0x25a934], start [0x25a938+4n], length [0x25ab90+4n] (music.c ign_music_play)  status=ported roadmap=phase4.audio
+000640b3  cd_read_toc          IOCTL 0x0a disc info (first +0x21, last +0x22, lead-out +0x23), 0x0b per track (start +0x22); [0x25a934] = last-first+1, length = next start - start; MSF -> frames 0x64710  status=identified roadmap=phase4.audio
+00064710  cd_msf_to_frames     m*4500 + s*75 + f - 150  status=identified roadmap=phase4.audio
+00063f3e  cd_set_volume        eax 0..255 on the 4 channels (IOCTL output 3); race [0x1feef4]*2.55, menu [0xe9cf7]*25.5  status=ported roadmap=phase4.audio
+00063cf3  cd_busy              IOCTL 0x0c audio status + busy bit 9 of the request status; 0 = idle (race loop 0x21320 replays the track)  status=identified roadmap=phase4.audio
+00063d56  cd_media_check       IOCTL 4 channel 0 volume -> [0x25adf0]; 6 device status bit 0 (door open) -> [0x25adf4] = 0 and return, else 1; 9 media changed -> [0x25adf8]; 0x0c busy [0x25ae08], resume start/end MSF [0x25ae00]/[0x25adfc]  status=identified roadmap=phase4.audio
+000c3fd8  t_level_cd_track     7 x int by track id [0x1fef10]: {2,3,4,5,6,6,7}  status=ported roadmap=phase4.audio
+001feed8  g_cd_track           current CD track; set by 0x2293c, keys 0xcb/0xcd (0x2c1cb) and joystick (0x4d228)  status=ported roadmap=phase4.audio
+001ff24f  g_cfg_music_track    0 = level's track, -1 = random 1 + rand*[0x25a934], n = fixed; pause menu line (0x43cc8), keys 0xcb/0xcd (--music-track, F5/F6)  status=ported roadmap=phase4.audio
+001ff253  g_cfg_music_volume   0..10; x10 -> [0x1feef4]; 0 disables the replay in the race loop (--music-volume)  status=ported roadmap=phase4.audio
+000e9cf3  g_menu_music_track   menu copy of the setting; 0 plays track 7 (0x13356)  status=identified roadmap=phase4.audio
+001fed54  g_podium_music       track 8 already played on the results (render_main 0x464e2), 0 at race start 0x2aaa1  status=ported roadmap=phase4.audio
+0025adf4  g_cd_door_closed     device status bit 0 clear (0x63d56); the CD calls need it == 1  status=identified roadmap=phase4.audio
+0025a934  g_cd_track_count     tracks on the disc, last - first + 1 (TOC 0x640ff); 8 on the Ignition CD  status=identified roadmap=phase4.audio
 00050824  engine_sound         ENGINE.INF rate/volume by car+0x288  status=ported roadmap=phase4.audio
 00050464  roll_sound           rolling loops by rear wheel surface  status=ported roadmap=phase4.audio
 000360f0  ambient_sound        PLC 0x190+n emitters volume by distance  status=ported roadmap=phase2.effects
@@ -154,3 +175,76 @@
 000bf994  t_ai_lookahead        6 i16 section offsets {1,2,3,4,6,8} (read as dword [0xbf992+2k] >> 16)
 000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty
+00028000  hud_build_sprites    sub-sprites of the panels from rect tables [0x1fef44] (0xc3618/0xc3858/0xc3a98), lights, signs, markers, medals  status=ported roadmap=phase4.hud
+00028a14  hud_select_layout    [0x1feeac] layout 0/1/2 from the runtime video table 0x1d5eb0 (port: by frame width), [0x1fef1c] text table, [0x1feeb0] = 6 + hires (MINI/SMALL)  status=partial roadmap=phase4.hud
+00028a84  hud_rebuild_sprites  same sprite tables as 0x28000, re-creating existing handles  status=identified roadmap=phase4.hud
+0004a150  wrong_way_counter    car+0x580 += frame dt while |section angle - pi/2 - heading| in (2pi/3, 4pi/3), max 120, else -= dt  status=ported roadmap=phase4.hud
+0004bdf4  format_race_time     '%.2d:%.2d:%.2d' minutes (max 99), trunc seconds, trunc hundredths into 0x207ae0  status=ported roadmap=phase4.hud
+0004be7c  hud_rev_dial         dial, needle triangle (prim 0x0f colour 0xc4, car+0x290 smoothed revs*2.7), cap, '%.3d' |v_fwd*3.6|  status=ported roadmap=phase4.hud
+0004c7c0  hud_message_add      5 slots of 0x78 B at [0x1fefb8]: text, duration +0x68, blink period +0x6c, timer +0x70, viewport +0x74  status=ported roadmap=phase4.hud
+0004c858  hud_message_tick     timer++ per frame, slot freed when timer > duration  status=ported roadmap=phase4.hud
+0004c89c  hud_message_draw     centred MINI/SMALL text while fmod(timer, 2 period) < period, (slot+1)*8|16 px above viewport 0 bottom  status=ported roadmap=phase4.hud
+00049fdc  debug_overlay        debug camera ([0xc0b4c], never set in release): X/Y/Z and X/Y VIN with IGNITION.FNT colour 0x14 (hud.c, free camera F1)  status=ported roadmap=phase4.ui
+00053d60  fnt_draw_text        FNT: map +0xc6, widths +6, offsets +0x1c6, bitmaps +0x546; texel + colour; advance width + i16 spacing  status=ported roadmap=phase4.ui
+00061220  font_system_init     30 font slots of 0x63e B at 0x24c214: unused, left, enabled, fixed cells, spacing 1  status=ported roadmap=phase4.ui
+00061399  font_parse_lft       'LFT' v100: count +6, cell width +8, height +0xa, offsets +0xc, signed widths +0x68c, bitmaps +0x84c  status=ported roadmap=phase4.ui
+000615eb  font_load            load_file + font_parse_lft, returns slot or -1  status=ported roadmap=phase4.ui
+00061653  font_free            frees the glyph sprites of a slot  status=identified roadmap=phase4.ui
+000616db  font_text_width      fixed: (cell + spacing) per glyph/space; proportional: glyph + spacing, space trunc(cell*0.35)  status=ported roadmap=phase4.ui
+00061959  font_draw_text       align +0x04 (0 left, 1 centre, 2 right), fixed cells centre glyphs, sprites at (x<<8, y<<8)  status=ported roadmap=phase4.ui
+00061eb0  gfx_install          engine vtable 0x20a068..0x20a0b4 (clip 0x62040, draw sprite 0x62184, create sprite 0x771e0)  status=identified roadmap=phase3.render
+00055958  gfx_set_clip         thunk [0x20a07c] (x0, y0, x1, y1)  status=identified roadmap=phase3.render
+00055968  gfx_draw_sprite      thunk [0x20a084] (handle, 8.8 position, optional {scale, angle})  status=identified roadmap=phase3.render
+00055970  gfx_create_sprite    thunk [0x20a088] ({?, w, h, ?, pixels, stride, hotspot x, y})  status=identified roadmap=phase3.render
+00062184  sprite_draw          8.8 position; optional {scale, angle} -> {S cos, S sin, S sin, S cos}, S = trunc(scale*65536.0f), then 0x62310 builds the page handle  status=ported roadmap=phase3.render
+000771e0  sprite_create        geputget.c: sprite header pool + texture page handle 0x68e4c (port: sprite at the origin of its own 256x256 page)  status=partial roadmap=phase3.render
+000791c9  sprite_blit          unscaled clipped copy dst = lut[src<<8 | dst] from the 256-wide page, lut = handle +0x1c ([0x257e48], level PAN in race); matrix path 0x82950  status=ported roadmap=phase3.render
+000c3618  t_hud_rects_s        36 x {x, y, w, h} sprite windows for 320x200 (0xc3858 640x480, 0xc3a98 800x600)
+000c3ce8  t_hud_text_s         8 ints: y0+ times rows, pos x0+/y1+, speed x1+/y1+ (0xc3d08, 0xc3d28)
+000c3d48  t_hud_place_s        28 ints: offsets from viewport corners (0xc3db8, 0xc3e28)
+000c3e94  t_sign_map           [difficulty*20 + kind] sign sprite; difficulty 3 swaps left/right
+000c3350  t_car_codes          3-letter player names by car model (COO, BAN, ... IGN)
+001feeac  g_hud_layout         0 S_*, 1 N_*, 2 H_* panels
+001fef1c  g_hud_text_pos       pointer to the layout's text table
+001fef20  g_hud_place          pointer to the layout's placement table
+001fefb8  g_hud_messages       5 x 0x78 message slots
+001feff4  g_ignition_fnt       IGNITION.FNT contents
+001fe9c8  g_hud_sprites        sprite handles 0x1fe9c8..0x1febdc
+001fef7c  g_plc_attributes     12 B per PLC object: (type>>12)&15, (type>>16)&255, type>>24 (sign kind)
+0024c214  g_font_slots         30 x 0x63e font slots
+00049724  race_viewports       per-player viewports: centred size factors 0xc0b80, split = player 0 right half (x0 +1), player 1 left half (x1 -1); also cameras and raster init  status=partial roadmap=phase3.render
+000729f3  raster_flat_tri      primitive 0x0f inside 0x60e3d: 16.16 edges with recip 0xc9168 (65536/(n+1)-1), inclusive spans, colour = shade[c<<8 | +0x2d]; tests/hud_original.py identical  status=verified roadmap=phase4.hud
+00060dc4  raster_init          pitch, row table 0xc8804, reciprocal table 0xc9168, primitive init callbacks 0xd7c2c  status=identified roadmap=phase3.render
+00082950  sprite_matrix        corners pos + (w*256-16, h*256-16) x 16.16 matrix (hotspot 0), two textured triangles via 0x78304; tests/hud_original.py identical  status=verified roadmap=phase3.render
+00078304  tex_triangle         affine texture-mapped triangle: sort, reject to 0x78ac0 if outside the 8.8 window, gradients 0x90a80, edges 0x90c00/0x90c40, spans 0x82862  status=verified roadmap=phase3.render
+00078ac0  tex_triangle_clip    clipped variant: edges 0x910c0/0x90fa0 (0x91270 window clip, right-side split), left clip with span 0x828b7  status=verified roadmap=phase3.render
+000782b0  tex_init             three 0x20d8-byte edge buffers [0x268ab4], [0x268a98], [0x268a9c]  status=identified roadmap=phase3.render
+00079174  tex_edge_slope       ((xa - xb) << 8) / (ya - yb), sentinels 0x80010000 / 0x7fff0000 for flat edges  status=verified roadmap=phase3.render
+0008283c  tex_span_setup       packed step = (-du/dx) << 16 | ((-dv/dx) >> 8 & 0xffff), u integer byte 0xe6e6c, page, lut  status=verified roadmap=phase3.render
+00082862  tex_span             right to left, packed u.frac/v 8.8 with carry into the u byte, left end texel from the plain edge  status=verified roadmap=phase3.render
+000828b7  tex_span_clipped     same without the left end texel (span starts at the clip x)  status=verified roadmap=phase3.render
+00090a80  tex_gradients        du/dx, dv/dx from the long edge at the middle row, widths -2..2 forced to +-4, dither 0xe6d00/0xe6d20 = k*(-d/dx >> 3) (data object)  status=verified roadmap=phase3.render
+000914d0  tex_edge_setup       per-edge 16.16 steps (dy <= 64 forced to 65 or 3), prestep 256 - (y & 0xff)  status=verified roadmap=phase3.render
+000911e0  tex_edge_walk        integer u, v, x per row  status=verified roadmap=phase3.render
+00091220  tex_edge_walk_dither 8.8 u, v with the x-fraction dither, x per row  status=verified roadmap=phase3.render
+00091270  tex_edge_clip        window clip of an edge in 8.8, saves the part beyond the right side ([0xe6e14])  status=verified roadmap=phase3.render
+# --- Persistence: IGN_DOS.BTZ, records and time-trial ghosts (src/game/save.c, ghost.c, tools/btz.py) ---
+0002293c  race_config_load     read_file_into([0xc0c64]='ign_dos.btz') -> 0x1ff158 (0x597 B), copies settings to globals and participants  status=partial roadmap=phase4.ui
+00022f38  set_track_names      [0x1fef10] -> g_level_dir, g_level_name, ghost basename 0x1ff141  status=ported roadmap=phase6.ghost
+0002adf8  ghost_load           mode 2 && [0x1fee4c]: GHOSTS\%s.GST; missing -> [0x1fee4c]=0, [0x1fee04]=3000000; other track -> [0x1fee00]=1  status=partial roadmap=phase6.ghost
+0002b430  shutdown_save        frees resources, writes 0x597 B of 0x1ff158 to ign_dos.btz  status=partial roadmap=phase4.ui
+0002ccc8  race_end_save        mode 2, !overflow, [0x1fee04]*0.01 > car+0x3a4 -> pad and write GST; mode 0 championship points/grid; calls 0x2cf60  status=partial roadmap=phase6.ghost
+0002cf60  btz_save             mode != 0: shuffle grid 0x1ff28b ncars times; +0x107=[0x1fef08], +0x10b=[0x1fefcc]; write ign_dos.btz  status=ported roadmap=phase4.ui
+00061078  write_file           (eax=name, edx=buf, ebx=size) fopen 'wb' + fwrite; 1 ok, 0x7d0/0x7e4 errors
+001ff158  g_btz                IGN_DOS.BTZ image, 0x597 B packed; layout in docs/formats.md (BTZ)
+001ff317  g_track_records      7 x 0x78: race names[5][4], race times f64[5] (+0x14), lap names (+0x3c), lap times f64[5] (+0x50)
+001ff141  g_ghost_basename     MOOSEJAW, GOLDRUSH, ... (sub_00022f38)
+001ff6eb  g_language           BTZ+0x593: 0 EN, 1 DE, 2 IT, 3 ES, 4 SV, 5 FR
+001feefc  g_game_mode          BTZ+0x8: 0 championship, 1 ¿?, 2 time trial, 3 elimination
+001fee04  g_ghost_record_cs    time to beat in centiseconds (ghost header, 3000000 without ghost)
+001fee00  g_ghost_overflow     recording over 300 s or ghost of another track: no GST written
+001fee4c  g_ghost_on           BTZ+0x10, kept only in time trial
+0001a864  btz_menu_defaults    fresh menu image at 0xe9bfc: version 30, cars, grid 0..7, PL1/PL2, scancodes, "G1"/"12"  status=ported roadmap=phase4.ui
+0001911c  records_screen       menu records table: BTZ +0x57f track, +0x583 race/lap, '%.2d:%.2d:%.2d'  roadmap=phase4.ui
+000bf628  t_factory_records    7 x 0x78 default record blocks (OSK 145.00 ... K L 84.00), copied by menu_load_gfx 0x126dc
+000e9bfc  g_menu_btz           menu copy of IGN_DOS.BTZ (read only if +0x000 == 30)
