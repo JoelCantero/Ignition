@@ -6,6 +6,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
+# The original rounds every x87 operation to binary64 (control word 0x127f); fused multiply-adds would not.
+if(NOT MSVC)
+  add_compile_options(-ffp-contract=off)
+endif()
 
 find_package(SDL3 REQUIRED CONFIG)
 
