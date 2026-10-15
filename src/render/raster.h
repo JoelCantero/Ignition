@@ -16,7 +16,7 @@
 typedef struct {
     int w, h;
     float fx, fy;    /* projection scale (race_setup_video 0x492fc: camera +0x58/+0x5c) */
-    int perspective; /* PERSP. POLY option; off by default, the original maps textures affinely */
+    int perspective; /* PERSP. POLY option ([0x1fee84] -> config +0x58): near road faces perspective-correct */
     uint8_t color[IGN_MAX_W * IGN_MAX_H];
     float inv_z[IGN_MAX_W * IGN_MAX_H];
 } IgnFrame;
@@ -29,10 +29,21 @@ typedef struct {
 /* Sets the resolution (clamped to IGN_MAX_W x IGN_MAX_H); every mode is shown at 4:3. */
 void ign_frame_init(IgnFrame *fb, int w, int h);
 void ign_frame_clear(IgnFrame *fb);
+/* Where the level's TEX is, to read it whole (the model keeps whole pages only). Call before rendering a level. */
+void ign_render_set_level_dir(const char *data_dir, const char *name);
+/* The viewed car for race_frame: its signed section picks the square cell reach of some tunnels (config +0xa4) and
+ * the zone (PLC type bits 12-15) of `zone_object` (its section object, or -1 for none) hides the objects of the
+ * other non-zero zones ([0x24bff0]). Track ids as GST: 0 CANADA, 1 USA, 2 CARIB, 3 BRAZIL, 4 AUSTRIA, 5 ICELAND,
+ * 6 JAPAN. */
+void ign_render_set_view(const IgnLevel *lv, int track_id, int section, int zone_object);
+/* Static and POS-animated level objects through the Lisa 2 engine (render_scene 0x56410) and rasterizer. */
 void ign_render_track(IgnFrame *fb, const IgnLevel *lv, const IgnCamera *cam);
-/* One object of `mdl` at the world origin, turned by `rotation` about its own origin (menu cars, sub_00019508). */
-void ign_render_object(IgnFrame *fb, const IgnModel *mdl, int obj, const float rotation[9], const IgnCamera *cam);
+/* Primitive list of the last ign_render_track (struct LisaFrame of lisa.h), for verification tools. */
+const struct LisaFrame *ign_render_last_frame(void);
+/* Places the car's engine objects (body, wheels, shadow) for this frame. */
 void ign_render_car(IgnFrame *fb, const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam);
+/* render_scene and the rasterizer: draws everything given since the last flush, far to near. */
+void ign_render_flush(IgnFrame *fb);
 /* Skid marks of sub_0003731c; call after the track and before the cars. */
 void ign_render_skids(IgnFrame *fb, const IgnLevel *lv, const IgnSkids *s, const IgnCamera *cam);
 /* Effects of the 0x1d5f10 slots: debris and splash polygons, then the sprites far to near. Call last. */

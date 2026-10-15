@@ -28,6 +28,8 @@ add_library(ignition_core STATIC
   src/game/race.c
   src/game/track.c
   src/render/raster.c
+  src/render/lisa.c
+  src/render/lisa_raster.c
   src/render/hud.c
   src/render/sprite.c
   src/render/font.c
@@ -114,6 +116,12 @@ add_test(NAME pos COMMAND pos_test)
 add_executable(palette_test tests/palette.c)
 target_link_libraries(palette_test PRIVATE ignition_core)
 add_test(NAME palette COMMAND palette_test)
+
+# Lisa 2 renderer: track-only frames of the port for tests/render_original.py comparisons.
+add_executable(render_shot tests/render_shot.c)
+target_link_libraries(render_shot PRIVATE ignition_core)
+add_executable(lisa_prims tests/lisa_prims.c)
+target_link_libraries(lisa_prims PRIVATE ignition_core)
 
 add_executable(body_step_test tests/body_step.c)
 target_link_libraries(body_step_test PRIVATE ignition_core)
