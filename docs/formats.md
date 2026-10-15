@@ -1374,6 +1374,15 @@ Unicorn, `IGN_VERIFY_ORIGINAL=ON`).
   motor `sub_00058c1c` 300 (rejillas sintéticas con cadenas y capas) y `sub_00010a00` 500. Corrigió dos errores del
   port: la comparación del par más alejado y `r·k` en float32.
 
+## Configuración y récords: `IGN_DOS.BTZ` (portado en `save.c`, `tools/btz.py`)
+
+Volcado crudo de los **0x597 = 1 431 bytes** de `0x1ff158` (`g_btz`), empaquetado: `i32` y `double` sin alinear.
+El menú trabaja con su propia copia en `0xe9bfc` (`g_menu_btz`) y la escribe al lanzar la carrera (`0x130eb`,
+`0x1314e`); la carrera la lee entera en `race_config_load` `0x2293c` (`read_file_into`, nombre en `[0xc0c64]` =
+`ign_dos.btz`; sin fichero sale con "Error while trying to read"). `btz_save` `0x2cf60` (al final de cada carrera,
+desde `race_end_save` `0x2ccc8`) y `shutdown_save` `0x2b430` la escriben entera con `write_file` `0x61078`
+(`fopen "wb"` + un `fwrite`).
+
 **Arranque del menú** (`menu_load_gfx` `0x126be..0x12762`): `btz_menu_defaults` `0x1a864` rellena la copia (lo que no
 toca queda a cero: BSS), copia los 25 valores iniciales de los controles de opciones y la tabla de récords de fábrica
 `0xbf628`; después lee los 4 primeros bytes de `ign_dos.btz` y solo si valen **30** (versión) carga el fichero entero.
