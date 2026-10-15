@@ -11,8 +11,9 @@
 #define STB_VORBIS_NO_STDIO
 #include "../../third_party/stb_vorbis/stb_vorbis.c"
 
-/* Full CD volume against the 0.4 x 0x10000 of one sample in audio.c: the rips are mastered near full scale. */
-#define MUSIC_GAIN 0.5f
+/* CD volume 255 gets the 0.4 of a full-volume sample in audio.c: the rips average RMS 0.09-0.14 and the engine
+ * loops 0.10-0.37, so music and one engine sit at a similar level and the music peaks (< 0.9) keep 1/3 headroom. */
+#define MUSIC_GAIN 0.4f
 #define CHUNK 1024
 
 typedef struct {
@@ -27,6 +28,13 @@ typedef struct {
 
 static Song *song;
 static float gain = MUSIC_GAIN; /* volume 255 */
+
+/* Race state: data folder and level, [0x1ff24f] setting, [0x1feed8] track, [0xc0b30] last check, [0x1fed54]. */
+static struct {
+    char dir[1024], level[32];
+    int mode, track, volume, podium;
+    double checked;
+} R;
 
 int ign_music_track(const char *level, int mode) {
     /* 0xc3fd8, indexed by the track id [0x1fef10]. */
@@ -82,7 +90,10 @@ int ign_music_play(const char *data_dir, int track, int loop) {
     return song_swap(s);
 }
 
-void ign_music_stop(void) { song_swap(NULL); }
+void ign_music_stop(void) {
+    R.dir[0] = 0;
+    song_swap(NULL);
+}
 
 void ign_music_set_volume(int volume) {
     volume = volume < 0 ? 0 : volume > 255 ? 255 : volume;
@@ -127,4 +138,45 @@ void ign_music_mix(float *buf, int n, int rate) {
         buf[i] += (s->s0 + (s->s1 - s->s0) * (float)s->frac) * gain;
         s->frac += step;
     }
+}
+
+static int playing(void) {
+    int locked = ign_audio_lock(), on = song && !song->done;
+    if (locked) ign_audio_unlock();
+    return on;
+}
+
+int ign_music_start(const char *data_dir, const char *level, int mode, int volume) {
+    snprintf(R.dir, sizeof R.dir, "%s", data_dir);
+    snprintf(R.level, sizeof R.level, "%s", level);
+    R.mode = mode;
+    R.volume = volume < 0 ? 0 : volume > 10 ? 10 : volume;
+    R.podium = 0; /* 0x2aaa1 */
+    R.checked = 0;
+    /* sub_0002a4ec 0x2a4f5: [0x1feef4] = [0x1ff253] x 10, CD volume [0x1feef4] x 2.55. */
+    ign_music_set_volume((int)(R.volume * 10 * 2.55));
+    R.track = ign_music_track(level, mode);
+    return ign_music_play(R.dir, R.track, 0);
+}
+
+void ign_music_poll(double seconds, int finish_position) {
+    if (!R.dir[0]) return;
+    /* render_main 0x460c1 / 0x464d8: the results of a finish in places 1-3 play track 8 once. */
+    if (!R.podium && finish_position >= 1 && finish_position < 4) {
+        R.podium = 1;
+        ign_music_play(R.dir, IGN_MUSIC_RESULTS, 0);
+    }
+    /* 0x212f8: every 5 s, with the music volume on, a stopped CD replays [0x1feed8] (also after track 8). */
+    if ((int)R.checked + 5 >= (int)seconds) return;
+    R.checked = (int)seconds;
+    if (R.volume != 0 && !playing()) ign_music_play(R.dir, R.track, 0);
+}
+
+void ign_music_step(int dir) {
+    if (!R.dir[0]) return;
+    /* 0x2c222 / 0x2c2f1: [0x1ff24f] - 1 while above -1, + 1 while below [0x25a934]; then 0x2293c chooses again. */
+    if (dir < 0 && R.mode > IGN_MUSIC_RANDOM) R.mode--;
+    if (dir > 0 && R.mode < IGN_MUSIC_LAST) R.mode++;
+    R.track = ign_music_track(R.level, R.mode);
+    ign_music_play(R.dir, R.track, 0);
 }
