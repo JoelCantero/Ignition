@@ -984,3 +984,69 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
 - **CDP**: vídeo, `"CDP\0"`, `u16 100`, `u16 frames`, …, `u16 320`, `u16 200`, paleta.
 - **PSQ**, **PFM** (`"li01"`), **BTZ** (config `i32`), **AIS** (texto de IA).
 - Audio: WAV PCM 8 bits mono 22050 Hz, PAT (GUS), XI (FastTracker II); música en pistas CD (`MUSIC/Track02-08.ogg`).
+
+## Configuración y récords: `IGN_DOS.BTZ` (portado en `save.c`, `tools/btz.py`)
+
+Volcado crudo de los **0x597 = 1 431 bytes** de `0x1ff158` (`g_btz`), empaquetado: `i32` y `double` sin alinear.
+`race_config_load` `0x2293c` lo lee entero con `read_file_into` (nombre en `[0xc0c64]`, por defecto `ign_dos.btz`;
+sin fichero sale con "Error while trying to read") y copia los campos a globales; `btz_save` `0x2cf60` (al final de
+cada carrera, desde `race_end_save` `0x2ccc8`) y `shutdown_save` `0x2b430` lo escriben entero con `write_file`
+`0x61078` (`fopen "wb"` + un `fwrite`). El menú (`0x12bb8`, `BALTAZAR`) también lo usa; las zonas sin referencia en
+la carrera son probablemente suyas.
+
+| Offset | Tipo | Destino / significado |
+|---|---|---|
+| `+0x000` | `i32` | 30 en el fichero distribuido ¿? |
+| `+0x004` | `i32` | `[0x1fef14]` jugadores humanos − 1 (`[0x1feea0]` = valor + 1) |
+| `+0x008` | `i32` | modo `[0x1feefc]` (salto `0x2292c`): 0 campeonato, 1 ¿carrera suelta?, 2 contrarreloj, 3 eliminación |
+| `+0x00c` | `i32` | `[0x1fedd8]` ¿clase/dificultad?: fila de la tabla de pistas del campeonato `0xc45b4` (7 `i32`), orden de teclas |
+| `+0x010` | `i32` | `[0x1fee4c]` fantasma activado; se fuerza a 0 fuera de contrarreloj o con más de un coche no humano |
+| `+0x014` | `i32` | `[0x1fed64]` (1 en campeonato) |
+| `+0x01c` | `i32[9]` | participante `+0x00` (modelo de coche) |
+| `+0x048` | `i32[9]` | participante `+0x0c` |
+| `+0x06c` | `char[9][15]` | nombres, `sprintf("%s")` a participante `+0x3c` |
+| `+0x0f3` | `i32` | pista (`[0x1fef10]`); en campeonato, ronda: pista = `0xc45b4[+0x00c][ronda]`; `0x2ccc8` la incrementa (máx. 6) si `[0x1fee54] > pista` |
+| `+0x0f7` | `i32` | `[0x1feed8]`: 0 = valor de la pista `0xc3fd8` (tope `[0x25a934]`), −1 = aleatorio, otro = fijo |
+| `+0x0fb`, `+0x0ff` | `i32` | `[0x1feef4]`, `[0x1fee94]` = valor × 10 (`[0x1fee28]` = `[0x1fee94] != 0`) |
+| `+0x107` | `i32` | `[0x1fef08]`/`[0x1fefdc]`; `0x2cf60` lo reescribe desde `[0x1fef08]` |
+| `+0x10b` | `i32` | `[0x1fefcc]`; `0x2cf60` lo reescribe |
+| `+0x10f`, `+0x113`, `+0x117` | `i32` | `[0x1fee84]`, `[0x1fed80]`, `[0x1fed70]` |
+| `+0x123`, `+0x12b` | `i32[2]` | participante `+0x08` y `+0x18` de los humanos |
+| `+0x133` | `i32[8]` | orden de salida `0xc33d0`; en campeonato `0x2ccc8` escribe `6 − puesto`; fuera de él `0x2cf60` hace `ncoches` intercambios con dos índices `floor(rand01 × ncoches)` |
+| `+0x153` | `i32` | coches en carrera `[0x1fefe4]` |
+| `+0x15b` | `i32` | `[0x1fee48]` |
+| `+0x15f` | `i32[8]` | participante `+0x04` (1 = ¿ordenador?; si hay más de un 0... véase `+0x010`) |
+| `+0x17f` | `u8[2][8]` | teclas de los humanos → participante `+0x1c..+0x23` (las dos primeras se cruzan si `+0x00c ≥ 3`) |
+| `+0x197` | `i32` | `[0x1febe0]` |
+| `+0x1bf` | 7 × `0x78` | **récords por pista** (`g_track_records` = `0x1ff317`), índice = id de pista del GST (0 CANADA … 6 JAPAN) |
+| `+0x587`, `+0x58b` | `i32` | `[0x1ff6df]`, `[0x1ff6e3]` (escritos por `render_main`) |
+| `+0x593` | `i32` | idioma `[0x1ff6eb]`: 0 inglés, 1 alemán, 2 italiano, 3 español, 4 sueco, 5 francés |
+
+Bloque de récords de una pista (`0x78` B): `char[5][4]` nombres de carrera, `double[5]` tiempos de carrera (`+0x14`,
+segundos), `char[5][4]` nombres de vuelta (`+0x3c`), `double[5]` tiempos de vuelta (`+0x50`), el mejor primero.
+`reset_race_times` `0x2a442` siembra `g_best_lap` (`0x1fb390`) con la vuelta 0 de la pista. Avisos en carrera
+(`car_update`): "LAP RECORD" (`0x2f43a`, 6 idiomas) cuando una vuelta mejora `g_best_lap`; "TRACK RECORD"
+(`0x2f548`) al completar la vuelta 3 fuera de eliminación con `car+0x3a4` < tiempo de carrera 0. Inserción
+(`render_main` `0x45938..0x45f20`, una vez por coche con `car+0x528 == 1`, solo humanos): si `t <` hueco 4 (`fcomp`
++ `jae`: empate o NaN no entran) se escribe en el hueco 4 con `sprintf("%s", nombre)` y se hace una pasada de
+burbuja 4→1 intercambiando mientras el inferior sea estrictamente menor. Lo mismo para la tabla de vueltas con los
+tres huecos `car+0x3bc/+0x3c4/+0x3cc`.
+
+Contrarreloj (`[0x1feefc] == 2` y `[0x1fee4c] == 1`): `ghost_load` `0x2adf8` lee `GHOSTS\<nombre>.GST`; si falla,
+`[0x1fee4c] = 0` y `[0x1fee04] = 3 000 000`; si no, `[0x1fee04]` = tiempo de la cabecera (antes de mirar la
+pista), `[0x1fed84]` = modelo, nombre a `0x1fb4b8`, y si la pista de la cabecera no es `[0x1fef10]` no copia
+las muestras y pone `[0x1fee00] = 1` (por tanto no se guardará). Al terminar, `0x2ccc8` graba el fantasma solo si
+`[0x1fee00] == 0` y `[0x1fee04] × 0.01 > car+0x3a4`. Sin la opción de fantasma, `[0x1fee04]` queda a 0 y nunca se
+graba.
+
+**Port**: `IgnBtz` conserva la imagen como bytes; los campos se leen por offset, así que los desconocidos sobreviven.
+`tools/btz.py roundtrip` reconstruye 1 255 bytes decodificados desde cero y deja 13 bytes no nulos opacos
+(`+0x507..+0x587`). Verificado: el `IGN_DOS.BTZ` real carga, decodifica, recodifica y guarda idéntico byte a byte
+(`save_btz`), y la escritura del port tras una carrera sin récord es idéntica al original. `--time-trial` guarda en
+`SDL_GetPrefPath("UDS", "Ignition")` (o `IGN_SAVE_DIR`): `IGN_DOS.BTZ` (si no existe se parte del fichero del juego,
+que solo se lee, o de una imagen por defecto con "---" y 999,99 s) y `GHOSTS/<nombre>.GST` (se busca primero ahí y
+luego en la carpeta del juego). La ventana usa siempre la persistencia de récords; sin ventana solo con
+`--time-trial`. **Desviaciones**: nombres de récord truncados a 3 letras (el original desbordaría al hueco siguiente);
+un coche eliminado o una vuelta vacía (0) no entran en las tablas; sin menú, nombre y jugador son el participante 0
+del BTZ y no se reescriben los campos de configuración (`+0x107`, `+0x10b`, la mezcla del orden de salida no se
+llama); contrarreloj sin rivales; la comparación `× 0.01` se hace en `double`, no en x87 de 80 bits.
