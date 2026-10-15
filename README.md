@@ -447,7 +447,7 @@ build anterior al bloque. El smoke repetido de 200 s con siete rivales pasa **7/
 y determinismo, pero persisten atascos: no demuestra carreras completas ni IA terminada.
 Se conserva la referencia histórica sin regenerar.
 Las 12 pruebas focalizadas pasan, incluido el replay de 21 escenarios. Contra la referencia
-histórica permanecen **1/23**: 22 diferencias de estado, 22 de imagen y ninguna de ejecución.
+histórica permanecen **0/23**: 22 diferencias de estado, 23 de imagen y ninguna de ejecución.
 Véanse [alcance geométrico y límites](docs/formats.md#geometría-derivada-de-load_tri-y-mezcla-de-rumbo-verificación-por-fragmentos).
 
 ---
@@ -798,7 +798,7 @@ implementado.
       Smoke de 200 s con siete rivales en siete pistas, repetido con estados/trazas/imágenes idénticos y sin
       valores no finitos. No verifica la IA completa ni el dispatcher: `car+0x350` sigue sin modelar y la
       geometría del error de rumbo aún es aproximada. La referencia histórica no se regenera.
-      Comparación histórica actual: 1/23, con 22 diferencias de estado y 22 de imagen, sin fallos de ejecución;
+      Comparación histórica actual: 0/23, con 22 diferencias de estado y 23 de imagen, sin fallos de ejecución;
       ya existían divergencias previas y este cambio altera deliberadamente la conducción de IA.
 - [x] **P1** Cámara de persecución original (`sub_00047f94`, `sub_000420cc`, focales de `race_setup_video`).
 - [x] **P2** Cámara trasera (`car+0x5a4`, campos `+0x90/+0xa0/+0x70`) y cámaras fijas tras la meta (`0xc464c`).
