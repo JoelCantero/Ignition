@@ -79,9 +79,9 @@ static void insertion(void) {
     car.race_elapsed = 100.0;
     car.lap_times[0] = 33.0, car.lap_times[1] = 34.0, car.lap_times[2] = 0;
     int bits = ign_records_commit(&b, 1, "PL1", &car);
-    check((bits & IGN_SAVED_TRACK_RECORD) && (bits & IGN_SAVED_LAP_RECORD), "commit into empty tables");
+    check((bits & IGN_SAVED_TRACK_RECORD) && (bits & IGN_SAVED_LAP_RECORD), "commit beats the factory USA records");
     ign_btz_records(&b, 1, &r);
-    check(r.race[0] == 100.0 && r.lap[0] == 33.0 && r.lap[1] == 34.0 && r.lap[2] == 999.99, "commit skips 0 laps");
+    check(r.race[0] == 100.0 && r.lap[0] == 33.0 && r.lap[1] == 34.0 && r.lap[2] == 39.0, "commit skips 0 laps");
     car.wrecked = 1;
     check(ign_records_commit(&b, 1, "PL1", &car) == 0, "wrecked car is not recorded");
 }
@@ -110,6 +110,52 @@ static void ghost_rules(const char *scratch) {
     check(!ign_ghost_trial_beats(&rec, record, 1.0), "mismatch never saves");
 }
 
+static void defaults_and_championship(void) {
+    IgnBtz b;
+    ign_btz_default(&b);
+    IgnTrackRecords r;
+    ign_btz_records(&b, 0, &r);
+    check(!strcmp(r.race_name[0], "OSK") && r.race[0] == 145.0 && r.lap[4] == 55.0, "factory CANADA records");
+    ign_btz_records(&b, 6, &r);
+    check(!strcmp(r.lap_name[4], "K L") && r.lap[4] == 84.0, "factory JAPAN records");
+    char name[IGN_BTZ_NAME_LEN + 1];
+    ign_btz_name(&b, 8, name);
+    check(ign_btz_i32(&b, IGN_BTZ_VERSION) == 30 && !strcmp(name, "PL2") && ign_btz_i32(&b, 0x0ff) == 10 &&
+              ign_btz_i32(&b, IGN_BTZ_GRID + 28) == 7 && b.raw[0x17f] == 0xcb && ign_btz_i32(&b, 0x52f) == 1,
+          "sub_0001a864 defaults");
+
+    check(ign_champ_qualified(3, 99, 0) && !ign_champ_qualified(4, 0, 0) && ign_champ_qualified(5, 3, 1),
+          "top 4 of car 0, or car 1 with two players");
+    check(ign_champ_class_complete(4, 0) && !ign_champ_class_complete(4, 1) && ign_champ_class_complete(6, 3) &&
+              ign_champ_class_complete(5, 1) && !ign_champ_class_complete(6, 1),
+          "class lengths 5, 6, 7, 7");
+    int place[3] = {1, 0, 2};
+    ign_btz_set_i32(&b, IGN_BTZ_TRACK, 2);
+    ign_champ_end_race(&b, 0, place, 3);
+    check(ign_btz_i32(&b, IGN_BTZ_TRACK) == 2 && ign_btz_i32(&b, IGN_BTZ_GRID) == 0, "not qualified: unchanged");
+    ign_champ_end_race(&b, 1, place, 3);
+    check(ign_btz_i32(&b, IGN_BTZ_TRACK) == 3 && ign_btz_i32(&b, IGN_BTZ_GRID) == 5 &&
+              ign_btz_i32(&b, IGN_BTZ_GRID + 4) == 6 && ign_btz_i32(&b, IGN_BTZ_GRID + 8) == 4 &&
+              ign_btz_i32(&b, IGN_BTZ_GRID + 12) == 3,
+          "next round and grid 6 - place");
+    ign_btz_set_i32(&b, IGN_BTZ_TRACK, 6);
+    ign_champ_end_race(&b, 1, place, 3);
+    check(ign_btz_i32(&b, IGN_BTZ_TRACK) == 6, "round capped at 6");
+
+    ign_btz_set_i32(&b, IGN_BTZ_TRACK, 4);
+    ign_btz_set_i32(&b, IGN_BTZ_CLASS, 0);
+    ign_champ_unlock(&b);
+    check(ign_btz_i32(&b, IGN_BTZ_CLASS) == 1 && ign_btz_i32(&b, IGN_BTZ_UNLOCKED) == 1, "class 0 done unlocks 1");
+    ign_btz_set_i32(&b, IGN_BTZ_TRACK, 6);
+    ign_btz_set_i32(&b, IGN_BTZ_CLASS, 2);
+    ign_champ_unlock(&b);
+    check(ign_btz_i32(&b, IGN_BTZ_CLASS) == 3 && ign_btz_i32(&b, IGN_BTZ_UNLOCKED) == 3 &&
+              ign_btz_i32(&b, IGN_BTZ_BONUS) == 0,
+          "class 2 done unlocks 3, no bonus in the same pass");
+    ign_champ_unlock(&b);
+    check(ign_btz_i32(&b, IGN_BTZ_BONUS) == 1 && ign_btz_i32(&b, IGN_BTZ_UNLOCKED) == 3, "class 3 done: bonus");
+}
+
 static double fixed_random(void) {
     static const double seq[] = {0.0, 0.99, 0.5, 0.2};
     static int i;
@@ -120,12 +166,13 @@ static void shuffle(void) {
     IgnBtz b;
     ign_btz_default(&b);
     for (int i = 0; i < 8; i++) ign_btz_set_i32(&b, IGN_BTZ_GRID + i * 4, i);
-    ign_btz_set_i32(&b, IGN_BTZ_NCARS, 4);
     IgnBtz before = b;
-    ign_btz_shuffle_grid(&b, fixed_random);
+    ign_btz_shuffle_grid(&b, 0, 4, fixed_random);
     check(!memcmp(&b, &before, sizeof b), "championship keeps the grid");
-    ign_btz_set_i32(&b, IGN_BTZ_MODE, 2);
-    ign_btz_shuffle_grid(&b, fixed_random);
+    ign_btz_shuffle_grid(&b, 2, 1, fixed_random);
+    check(!memcmp(&b, &before, sizeof b), "one car keeps the grid");
+    ign_btz_before_save(&b, 2, 4, 7, 9, fixed_random);
+    check(ign_btz_i32(&b, 0x107) == 7 && ign_btz_i32(&b, 0x10b) == 9, "0x2cf60 writes back +0x107/+0x10b");
     int seen = 0;
     for (int i = 0; i < 4; i++) seen |= 1 << ign_btz_i32(&b, IGN_BTZ_GRID + i * 4);
     check(seen == 0xf && ign_btz_i32(&b, IGN_BTZ_GRID + 16) == 4, "shuffle permutes the first ncars slots");
@@ -134,12 +181,19 @@ static void shuffle(void) {
 int main(int argc, char **argv) {
     const char *data = argc > 1 ? argv[1] : "/Users/Shared/Epic Games/Ignition/ignition";
     const char *scratch = argc > 2 ? argv[2] : ".";
+    if (argc > 3 && !strcmp(argv[3], "--dump-default")) {
+        IgnBtz b;
+        ign_btz_default(&b);
+        fwrite(b.raw, 1, IGN_BTZ_SIZE, stdout);
+        return 0;
+    }
     char path[1100];
     snprintf(path, sizeof path, "%s/%s", data, IGN_BTZ_NAME);
     round_trip(path, scratch);
     insertion();
     ghost_rules(scratch);
     shuffle();
+    defaults_and_championship();
     if (failures) return 1;
     printf("save_btz: ok\n");
     return 0;

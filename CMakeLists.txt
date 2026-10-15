@@ -145,3 +145,8 @@ add_test(NAME save_btz COMMAND save_btz_test "${GAME_DIR}" ${CMAKE_BINARY_DIR})
 add_test(NAME btz_tool COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/btz.py roundtrip "${GAME_DIR}/IGN_DOS.BTZ")
 add_test(NAME time_trial COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/time_trial.py
   --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}")
+if(IGN_VERIFY_ORIGINAL)
+  add_test(NAME btz_defaults_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/btz_defaults_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:save_btz_test>)
+endif()
