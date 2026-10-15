@@ -31,9 +31,10 @@ original (`MAINDOS.EXE`, DOS/4GW, Watcom C). El objetivo es un juego nativo para
 El port implementa **carreras de 3 vueltas** en las 7 pistas: física, choques con muros y entre coches, turbo,
 parrilla de salida y coches bien montados (sombra y dirección incluidas), contra hasta 7 rivales. Hay fin de carrera y
 clasificación básicos; los rivales usan una **IA aproximada**. POS ya carga y anima los objetos de pista, con rotación
-aproximada. El HUD de carrera ya usa el panel y fuentes LFT originales para tiempos, posición y velocidad; faltan la
-reproducción exacta de sus estados, aguja/medidores dinámicos y avisos. También faltan colisiones móviles completas, la
-IA fiel, el sombreado original, los menús, la música y el multijugador.
+aproximada. El HUD de carrera (`0x4a320`) está portado en sus tres resoluciones con las coordenadas, estados, aguja,
+turbo, señales, semáforo 3-2-1-GO, lugar al terminar y avisos multilingües originales; los rasterizadores 2D que usa
+(triángulo plano y sprites con matriz) son idénticos píxel a píxel a los bytes originales. También faltan colisiones
+móviles completas, la IA fiel, el sombreado original, los menús, la música y el multijugador.
 
 | Métrica | Valor |
 |---|---|
@@ -74,10 +75,10 @@ Pistas: `USA`, `CANADA`, `AUSTRIA`, `BRAZIL`, `CARIB`, `ICELAND`, `JAPAN`. La ru
 | ↑ / W | acelerar |
 | ↓ / S | frenar / marcha atrás |
 | ← → / A D | girar |
-| Espacio | turbo (la carga aparece en el título de la ventana) |
+| Espacio | turbo (barra y piloto del HUD; la carga también aparece en el título de la ventana) |
 | M | alternar cambio manual/automático |
 | Q / E | bajar / subir marcha en modo manual |
-| F1 | cámara libre (W/A/S/D, Q/E, flechas, Shift = rápido) |
+| F1 | cámara libre (W/A/S/D, Q/E, flechas, Shift = rápido) con la superposición de depuración de `0x49fdc` |
 | R (mantener) | vista trasera |
 | TAB | tras la meta: cámaras fijas 1–3 / seguir al coche en cabeza |
 | Esc | salir |
@@ -107,8 +108,9 @@ Variables de entorno de depuración: `IGN_TRACE=1` (traza por tick y estadístic
 `IGN_TRACE=full` (estado inicial y cada tick, esquema v5 de 112 campos con controles y precisión de 17 cifras),
 `IGN_SAVE_DIR=carpeta/` (carpeta de récords, `IGN_DOS.BTZ` y fantasmas en lugar de `SDL_GetPrefPath`; sin ventana
 activa la persistencia),
-`IGN_TRACK_DUMP=archivo` (vuelca los tramos), `IGN_LIFT=u` (eleva el coche en el visor para ver la sombra) e
-`IGN_BANARNE=1` (carrocería alta en el visor).
+`IGN_TRACK_DUMP=archivo` (vuelca los tramos), `IGN_LIFT=u` (eleva el coche en el visor para ver la sombra),
+`IGN_BANARNE=1` (carrocería alta en el visor) e `IGN_LANG=en|de|it|es|sv|fr` (idioma de los avisos del HUD; por defecto
+el de `IGN_DOS.BTZ`).
 
 ### Verificación diferencial de la física original
 
@@ -326,7 +328,9 @@ src/game/save.{c,h}     IGN_DOS.BTZ: imagen por defecto, récords, campeonato y 
 src/game/skid.{c,h}     efectos de derrape: marcas en la pista y polvo (`sub_0003731c`)
 src/game/fx.{c,h}       huecos de efectos del original: sprites, piezas, salpicaduras, explosión, turbo, reaparición
 src/render/raster.{c,h} rasterizador por software de 8 bits (320×200 a 800×600, 4:3), z-buffer, texturas afines
-src/render/hud.{c,h}    superposición de carrera con H_PAN1.PIC y fuentes LFT originales (port parcial)
+src/render/hud.{c,h}    HUD de carrera (`0x4a320`): paneles, medidores, señales, semáforo, lugar, mensajes, ventanas
+src/render/font.{c,h}   fuentes LFT (ranuras de `0x24c214`) y FNT (`0x53d60`)
+src/render/sprite.{c,h} sprites de geputget con tabla PAN, triángulo plano `0x729f3` y sprites con matriz `0x82950`
 src/render/camera.{c,h} cámaras del original: persecución, trasera y fijas tras la meta (`sub_00047f94`, `0xc464c`)
 src/platform/main.c     SDL3: ventana, entrada, bucle fijo de 72 Hz, cámaras, modos sin ventana y visor
 docs/formats.md         referencia técnica detallada (formatos, fórmulas, direcciones)
@@ -347,6 +351,8 @@ tests/lap_original.py     cruce de vuelta, fases, tiempos y mejor vuelta contra 
 tests/car_kernels.c       runner nativo de los seis kernels, sin duplicar sus fórmulas
 tests/solo_replay.py    replay sin rivales, exacto por tick, con informe de procedencia (solo port)
 tests/test_verification.py controles positivos y negativos de las herramientas de verificación
+tests/hud_assets.c      parsers LFT/FNT, sprites, formato de tiempo y fotogramas del HUD sin ventana (`GAME_DIR [PPM_DIR]`)
+tests/hud_original.py   triángulo `0x729f3` y sprites con matriz `0x82950` contra bytes LE (Unicorn, `IGN_VERIFY_ORIGINAL`)
 tools/ignassets.py      PIC/COL/TEX/DAT/nivel → PNG
 tools/gst.py            fantasmas GST: cabecera, validación, tiempos por vuelta y trayectoria sobre la pista
 tools/btz.py            IGN_DOS.BTZ: campos, participantes, récords por pista y comprobación de ida y vuelta
@@ -407,13 +413,13 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | TRI | bordes izquierdo/derecho por tramo (puertas de la IA) | 🟡 bordes portados; `double`s sin descifrar |
 | POS | animaciones de objetos (fotogramas pos+rot) | 🟡 parser, avance a 36 Hz y render aplicados; rotación aproximada y colisiones incompletas |
 | TAB | tabla de sombreado `color×nivel` (64 niveles) | 🟡 significado conocido; no se usa |
-| PAN / SHD | tablas 256×256 de 64 KB | � SHD fila 0x28 = sombra; PAN desconocida |
+| PAN / SHD | tablas 256×256 de 64 KB | 🟡 SHD fila 0x28 = sombra; PAN = tabla de mezcla de los sprites y primitivas del HUD (portada) |
 | CARS | 11 coches × (carrocería + 4 ruedas) | ✅ portado y montado como en `cars_init` |
-| LFT / FNT | fuentes | 🔴 solo cabeceras |
+| LFT / FNT | fuentes | ✅ portado (`font.c`): ranuras de `0x61399`, ancho/dibujo alineado de `0x616db`/`0x61959`, FNT de `0x53d60` |
 | CDP | vídeos de introducción | 🔴 solo cabecera |
 | PSQ / PFM | coche 3D del menú | 🔴 |
 | GST | coches fantasma | ✅ leer, escribir, reproducir y contrarreloj (`ghost.c`, `save.c`, `tools/gst.py`) |
-| BTZ | configuración y récords | ✅ todos los bytes del fichero distribuido mapeados; ida y vuelta exacta (`save.c`, `tools/btz.py`) |
+| BTZ | configuración y récords | ✅ todos los bytes del fichero distribuido mapeados; ida y vuelta exacta (`save.c`, `tools/btz.py`); el HUD usa su idioma y récords de carrera |
 | INF | curvas del sonido del motor por coche | � 4 tablas de 200 B: tono y volumen de `00_A`/`01_A` por régimen (`sound.c`) |
 | WAV / PAT / XI / OGG | sonido (PCM, Gravis, FastTracker, pistas de CD) | 🟢 WAV, PAT y XI (`audio.c`); OGG con stb_vorbis (`music.c`) |
 
@@ -450,6 +456,9 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | BTZ, récords, contrarreloj y campeonato | `0x2293c`, `0x2adf8`, `0x2ccc8`, `0x2cf60`, `render_main` `0x45938`, menú `0x1a864` | `save.c`, `ghost.c` | ida y vuelta byte a byte del BTZ real; imagen por defecto idéntica al original (Unicorn); reglas por pruebas unitarias; sin menú ni clasificación por puntos |
 | IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, registros `load_tri` con mapeo engine→PLC, selector `ai_find_section` y reglas observadas de topología/ramas implementados; la estructura de rutas y registros TRI pasa `track_real_assets` en las 7 pistas, pero falta una comparación independiente con la tabla runtime original y la asignación exacta de registros divididos a carriles; pendiente (Y), giro por solape y frenada de curva (heurística) |
 | Render 3D | motor Lisa 2 | `raster.c` | propio: z-buffer, sin sombreado TAB |
+| HUD de carrera y mensajes | `race_hud` `0x4a320`, `0x4be7c`, `0x4c7c0`/`0x4c858`/`0x4c89c`, `0x4a150`, `0x28000` | `hud.c` | fiel: tablas de recortes, colocación y texto de las tres resoluciones, ventanas de uno y dos jugadores; contadores a 36 Hz |
+| Fuentes LFT/FNT | `0x61220`, `0x61399`, `0x616db`, `0x61959`, `0x53d60` | `font.c` | fiel; pruebas del parser |
+| Sprites, triángulo plano y sprites con matriz | `0x771e0`, `0x791c9`, `0x729f3`, `0x82950`/`0x78304`/`0x78ac0` | `sprite.c` | triángulo: 6 009 casos y sprites con matriz: 624 fotogramas idénticos a los bytes LE (`tests/hud_original.py`) |
 
 Geometría IA: `tests/ai_geometry_original.py` compara ambos fragmentos LE con `atan2`/`__CHP`
 reales, para 902 fixtures sintéticos y 1 558 registros de las siete pistas; compara bits float32
@@ -538,7 +547,7 @@ crear clima `0x26154` · pantalla de carga `0x21d68` · nombres de pista `0x22f3
 
 **Render y presentación**: `render_scene` `0x56410` · `race_setup_video` `0x492fc` · `camera_angles` `0x5891c` ·
 `render_main` `0x43fe0` (resultados y puntuaciones) · `car_place_objects` `0x48a14` · HUD `0x4a320` · tiempos
-`0x4bdf4` · dígitos `0x4be7c` · depuración XYZ *¿?* `0x49fdc` · pausa `0x4395c` · salir o reiniciar `0x43e48` ·
+`0x4bdf4` · esfera, aguja y velocidad `0x4be7c` · mensajes `0x4c7c0`/`0x4c89c` · depuración de la cámara `0x49fdc` · pausa `0x4395c` · salir o reiniciar `0x43e48` ·
 captura TGA `0x515f8` · fondo del menú `0x541d4`.
 
 **Frontend**: `menu_load_gfx` `0x11504` · BTZ por defecto `0x1a864` · pantalla de récords `0x1911c` · opciones y
@@ -564,10 +573,11 @@ pulsada `0x55c28` · palabra tecleada `0x55cd0` · `atan2` `0x647ef` · `pow` `0
 - `GENERAL/*.TEX`: texturas de efectos (BOOM, DARKSMOK, DIVSPR, EXSMOKE, LIGHT, SMOKE).
 - `GENERAL/SOUND/{BOOST,COLL,DIV,ROLL,SKID}`, `CARS/<coche>/SOUND/{00_A.WAV,01_A.WAV,ENGINE.INF}` y
   `LEVELS/<pista>/SOUND/*.PAT|WAV`: ambiente por pista.
-- `FONTS/*.LFT`, `IGNITION.FNT`; `*_PANGFX.PIC`, `H_PAN*.PIC`, `*_SIGNS.PIC`, `POKAL.PIC`: HUD, señales y trofeo.
+- `MUSIC/Track02–08.ogg`: música (pistas de CD).
+- `POKAL.PIC`: trofeo de los resultados (las fuentes y paneles del HUD ya se usan).
 - `BALTAZAR/DATA`: menú (MENU.COL/TAB, MENUCAR.*, BILAR/CAR_SEL/DEMOCAR/DEMOTRK/FLAGGOR/IGN_LOGO/MARK/CONSPR/TRK_SPR.PIC,
   `*.LFT`, `IGN*.CDP`, `DEFAULT2.PSQ`, `TEST2.PFM`).
-- `LEVELS/<pista>/<pista>.{PAN,SHD,TAB,POS}`.
+- `LEVELS/<pista>/<pista>.{SHD,TAB}` en parte (PAN ya mezcla el HUD y POS anima los objetos).
 - Nombres internos de las pistas: ICELAND = CAPETHOR, CANADA = MOOSEJAW (Moosejaw Falls), USA = GOLDRUSH,
   CARIB = SNAKEISL, AUSTRIA = YODELPEA, JAPAN = TOKYOBUL, BRAZIL = LOSTRUIN.
 
@@ -633,9 +643,9 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    velocidad: el original lanzaría el coche cientos de unidades hacia arriba.
 5. **Cámara**: la de `sub_00047f94` se actualiza a 36 Hz para todos los coches. Mientras sigue al coche, la vista se
    recalcula con la posición actual del coche (el port dibuja más deprisa que las actualizaciones de la cámara). La
-   media de ángulos de tramo con `car+0x36c == 3` no está portada. La cuenta atrás solo sale en el título de la
-   ventana (faltan los sprites y sonidos), y sin ventana empieza la carrera directamente salvo con `--countdown`.
-6. **Posiciones**: la clasificación (`ign_race_position`) es propia; falta la rutina original del HUD `0x4a320`.
+   media de ángulos de tramo con `car+0x36c == 3` no está portada. Sin ventana la carrera empieza directamente salvo
+   con `--countdown` (entonces se dibuja el semáforo del HUD).
+6. **Posiciones**: la clasificación (`ign_race_position`) es propia; el HUD (`0x4a320`, portado) solo la muestra.
 7. **Dificultad**: `[0x1fedd8]` se fija con `--difficulty` (agarre trasero, índice de velocidad, modelos y bono de par
    de la IA).
 8. **Efectos**: los sprites se ordenan de lejos a cerca como en el original, pero además se prueban contra el z-buffer
@@ -654,7 +664,13 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    carpeta del juego, que solo se lee. Sin menú: modo por línea de órdenes, jugador = participante 0, récords
    guardados ya al terminar el jugador, nombres de 3 letras, sin récords de coches eliminados ni vueltas vacías, y
    sin desbloqueos del campeonato (falta la clasificación por puntos). "LAP RECORD"/"TRACK RECORD" salen por la salida
-   estándar, no en el HUD. Véase [BTZ](docs/formats.md#configuración-y-récords-ign_dosbtz-portado-en-savec-toolsbtzpy).
+   estándar y también como mensajes del HUD. Véase [BTZ](docs/formats.md#configuración-y-récords-ign_dosbtz-portado-en-savec-toolsbtzpy).
+12. **HUD**: `main.c` usa una sola ventana (el HUD admite las dos del original); los contadores por fotograma avanzan
+   una vez por cada 1/36 s del reloj de carrera; el primer fotograma pone aguja y palanca en su objetivo; el temblor
+   usa un generador propio; los mensajes se detectan comparando el estado entre fotogramas y los pilotos se nombran por
+   el código de su modelo; la capa de paneles se elige por el ancho del fotograma; cada sprite escalado ocupa su propia
+   página de textura; no se emiten el sonido del lugar al terminar (`0x4bc54`) ni el bucle de «fuegos» sin dibujo de
+   `0x4bca8`.
 
 ---
 
@@ -821,22 +837,25 @@ implementado.
       ya existían divergencias previas y este cambio altera deliberadamente la conducción de IA.
 - [x] **P1** Cámara de persecución original (`sub_00047f94`, `sub_000420cc`, focales de `race_setup_video`).
 - [x] **P2** Cámara trasera (`car+0x5a4`, campos `+0x90/+0xa0/+0x70`) y cámaras fijas tras la meta (`0xc464c`).
-- [x] **P1** Cuenta atrás y reloj de salida (`sub_0002b850`) con sus pitidos; faltan los sprites 3-2-1-GO.
+- [x] **P1** Cuenta atrás y reloj de salida (`sub_0002b850`) con sus pitidos y el semáforo 3-2-1-GO del HUD.
 - [x] **P1** Conversión del reloj por coche y transición normal verificadas contra instrucciones originales;
       18 450 casos / 74 178 pasos, HUD/turbo/fantasma conectados; timer DOS y pausa pendientes.
 - [ ] **P2** `render_scene` `0x56410`: capas según los flags de configuración `[0x24c05c]+0x38..0x54`.
 - [x] **P2** Resoluciones 320×200 / 640×480 / 800×600 (`--res`), mostradas a 4:3.
-- [ ] **P2** Viewports por jugador (`race_setup_video` `0x492fc`).
-- [ ] **P2** Sprites (`geputget.c`, `0x771e0`) y señales (`*_SIGNS.PIC`).
+- [ ] **P2** Viewports por jugador (`race_setup_video` `0x492fc`): la geometría de `0x49724` (uno o dos jugadores) ya la
+      usa el HUD; faltan las cámaras y el render por ventana.
+- [x] **P2** Sprites (`geputget.c`, `0x771e0`) y señales (`*_SIGNS.PIC`): blit con la tabla PAN, sprites con matriz
+      (`0x82950`, triángulos texturizados `0x78304`/`0x78ac0`) y triángulo plano `0x729f3`, idénticos a los bytes LE
+      en `tests/hud_original.py` (6 009 triángulos, 624 sprites).
 - [ ] **P3** Escalado moderno (pantalla completa, relación de aspecto, filtrado opcional).
 
 ### Fase 4 — HUD, menús y flujo de juego
 
-- [ ] **P1** Fuentes **LFT/FNT** (`load_fonts` `0x240f4`, `0x61220`): LFT ya se lee para los campos del HUD básico;
-      faltan FNT y el resto de las fuentes.
-- [ ] **P1** Completar el HUD en carrera `0x4a320`: ya dibuja partes de `H_PAN1.PIC` y los campos de tiempo, vuelta,
-      posición y velocidad. Pendiente: reconstruir coordenadas/estados exactos, medidores dinámicos, avisos
-      multilingües y los demás paneles `H_PAN*.PIC`, `*_PANGFX.PIC`, `*_SIGNS.PIC`.
+- [x] **P1** Fuentes **LFT/FNT** (`load_fonts` `0x240f4`, `0x61220`): ranuras, parser LFT con anchos con signo,
+      ancho y dibujo alineado (fijo/proporcional) y FNT (`0x53d60`); pruebas en `tests/hud_assets.c`.
+- [x] **P1** HUD en carrera `0x4a320`: coordenadas y estados de las tres resoluciones, aguja y medidores (turbo
+      incluido), palanca de cambios, señales y WRONG WAY, semáforo, barra de eliminación, lugar al terminar, mensajes
+      multilingües (IS OUT, LAP/TRACK RECORD, WARNING, YOU'RE LAST!) y ventanas de dos jugadores.
 - [ ] **P1** Pantallas de resultados y puntuación (`render_main` `0x43fe0`: TRACK RESULTS, TRACK SCORE, TOTAL SCORE)
       y trofeo `POKAL.PIC`.
 - [ ] **P1** Pausa, continuar, salir y reiniciar (`0x4395c`, `0x43e48`).
@@ -846,9 +865,10 @@ implementado.
 - [ ] **P2** Modos de juego (campeonato, contrarreloj, práctica…), desbloqueos y flujo entre pistas.
 - [ ] **P2** Pantallas de carga (`0x21d68`) e idiomas (inglés, alemán, francés, italiano, español y sueco).
 - [x] **P2** Configuración y récords en **BTZ** (`0x2b430`, `0x2cf60`, `IGN_DOS.BTZ`): formato completo, imagen por
-      defecto del menú verificada contra el original, récords, avance del campeonato y persistencia (`save.c`).
+      defecto del menú verificada contra el original, récords, avance del campeonato y persistencia (`save.c`). El HUD lee
+      de la misma imagen el idioma y los récords de carrera para «TRACK RECORD».
 - [ ] **P3** Vídeos **CDP** (`IGN1.CDP`, `IGN2.CDP`, `IGN3_*.CDP`) y *Script Player* `0x549b0`.
-- [ ] **P3** Capturas TGA `0x515f8` y superposición de depuración `0x49fdc`.
+- [ ] **P3** Capturas TGA `0x515f8`. La superposición de depuración `0x49fdc` ya está portada (cámara libre, F1).
 
 ### Fase 5 — Sonido y música
 

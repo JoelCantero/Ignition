@@ -82,6 +82,9 @@ static int session_on, session_saved;
 static int tv_index = 3, spectated, spectate_wait;
 static IgnSkids skids;
 static IgnFx fx;
+static const IgnTrack *hud_track;
+/* The free camera (F1) shows the debug camera overlay of sub_00049fdc. */
+static bool hud_debug;
 static IgnWeather weather;
 
 /* Start grid of sub_00026458: PLC origin of the type-0 object facing the type-1 object; slot i is
@@ -287,6 +290,22 @@ static void race_view(const IgnCar *player, int rear, IgnCamera *cam) {
     ign_chase_view(&cams[0], player, rear, cam);
 }
 
+/* Race data read by the HUD (sub_0004a320); all[0] is the player. */
+static IgnHudState hud_state(const IgnLevel *lv, const IgnCar *const *all) {
+    return (IgnHudState){.cars = all, .ncars = nrivals + 1, .level = lv, .track = hud_track, .mode = race.mode,
+                         .remaining = race.remaining, .difficulty = ign_get_difficulty(), .clock = race.clock,
+                         .total = race.total, .best_lap = race.best_lap,
+                         .shake = cams[0].shake, .track_id = track_id};
+}
+
+/* Per-frame HUD counters, advanced from the race clock so headless runs see the same frames. */
+static void hud_tick(const IgnLevel *lv, const IgnCar *car) {
+    const IgnCar *all[MAX_RIVALS + 1] = {car};
+    for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
+    const IgnHudState hs = hud_state(lv, all);
+    ign_hud_update(&hud, &hs);
+}
+
 static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     ign_frame_clear(&frame);
     ign_render_track(&frame, lv, cam);
@@ -303,7 +322,10 @@ static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_render_fx(&frame, lv, &fx, all, nrivals + 1, cam);
     ign_render_weather(&frame, lv, &weather, cam);
-    ign_hud_draw(&hud, &frame, car, nrivals + 1);
+    const IgnHudState hs = hud_state(lv, (const IgnCar *const *)all);
+    ign_hud_update(&hud, &hs);
+    ign_hud_draw(&hud, &frame, &hs);
+    if (hud_debug) ign_hud_draw_debug(&hud, &frame, cam->x, cam->y, cam->z, cam->yaw, cam->pitch);
 }
 
 static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
@@ -526,7 +548,8 @@ int main(int argc, char **argv) {
             return 1;
         ghost_on = 1;
     }
-    if (ign_hud_init(&hud, data_dir, &lv.palette)) {
+    hud_track = &track;
+    if (ign_hud_init(&hud, data_dir, level, frame.w, frame.h)) {
         fprintf(stderr, "cannot load HUD panel or fonts from %s\n", data_dir);
         ign_free_level(&lv);
         return 1;
@@ -537,6 +560,14 @@ int main(int argc, char **argv) {
         !session_setup(data_dir, level, car.id, race_mode == IGN_MODE_TIME_TRIAL) &&
         session.ghost_state == IGN_TRIAL_GHOST && !ign_car_init(&ghost_car, &lv, ghost.car, sx, sz, sh))
         ghost_on = 1;
+    if (session_on) {
+        /* The HUD's TRACK RECORD and languages come from the session's IGN_DOS.BTZ ([0x1ff32b], [0x1ff6eb]). */
+        IgnTrackRecords rec;
+        if (track_id >= 0 && track_id < 7 && ign_btz_records(&session.btz, track_id, &rec) == 0)
+            hud.track_record[track_id] = rec.race[0];
+        int language = ign_btz_i32(&session.btz, IGN_BTZ_LANGUAGE);
+        if (!getenv("IGN_LANG") && language >= 0 && language < 6) hud.language = language;
+    }
     /* Headless runs start at once unless --countdown; the game window always counts down. */
     if (shot && !countdown) ign_race_skip_countdown(&race);
     ign_set_race_started(ign_race_started(&race));
@@ -605,6 +636,7 @@ int main(int argc, char **argv) {
                 ign_pos_step(&lv.pos, &lv.track);
                 pos_ticks = 0;
             }
+            hud_tick(&lv, &car);
             if (full_trace) trace_car(++trace_tick, &car, &in);
             if (!ign_race_started(&race)) continue;
             if (ghost_out && !car.out) ign_ghost_record(&rec, &car, track.count);
@@ -714,7 +746,7 @@ int main(int argc, char **argv) {
                 (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE))
                 running = false;
             if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) {
-                if (ev.key.key == SDLK_F1) free_cam = !free_cam;
+                if (ev.key.key == SDLK_F1) free_cam = !free_cam, hud_debug = free_cam;
                 else if (ev.key.key == SDLK_M) manual_gear = !manual_gear;
                 else if (!free_cam && ev.key.key == SDLK_Q) pending_gear_shift = -1;
                 else if (!free_cam && ev.key.key == SDLK_E) pending_gear_shift = 1;
