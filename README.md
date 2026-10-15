@@ -40,7 +40,7 @@ IA fiel, el sombreado original, los menús, la música y el multijugador.
 | Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 488 clasificadas como runtime) |
 | Instrucciones únicas desensambladas | **128 832** (20 323 de runtime/libc/DOS/4G) |
 | Código del juego marcado como portado/verificado | **17 334 de 108 509 instrucciones (16,0 %)**; **45 de 624 funciones (7,2 %)** |
-| Código del juego marcado como parcial | **9 537 instrucciones en 12 funciones**; excluido del numerador portado |
+| Código del juego marcado como parcial | **10 616 instrucciones en 13 funciones**; excluido del numerador portado |
 | Funciones de juego vinculadas explícitamente a una tarea del roadmap | **95 de 624 (15,2 %)**; runtime excluido y `unmapped` no significa fuera de alcance |
 | Formatos de datos propios descifrados | 10 de 21 (TRI, POS y TAB solo en parte) |
 | Código del port | ≈ 4 865 líneas de C (`src/`) |
@@ -127,15 +127,17 @@ ctest --test-dir build -R '^(physics_original|car_original|car_kernel_contract)$
 El informe `build/physics-original-report.json` conserva hashes del original, del ejecutable de prueba, de las
 fuentes y de las entradas, versiones y errores máximos. Hay **190 casos / 1 658 ticks**: tracción, marcha atrás,
 saturación y sus límites, giro, fricción, derrape, pendientes y movimiento en el aire. Se comparan 33 campos
-`double` y dos indicadores enteros. La tolerancia de las salidas es `2e-11 + 2e-12·|original|`; los indicadores
+`double` y dos indicadores enteros. La tolerancia de las salidas es `2e-14 + 1e-14·|original|`; los indicadores
 y los campos no modificados deben coincidir exactamente. No se ha encontrado una divergencia que justifique
 cambiar `ign_body_step`.
 
-Esto verifica **la rutina aislada, con x87 emulado y palabra de control `0x037f`**, no el juego completo,
-`car_update`, colisiones, IA ni una carrera DOS. Véanse los límites y la
+Esto verifica **la rutina aislada, con x87 emulado y la palabra de control del juego `0x127f`**, no el juego
+completo, `car_update`, colisiones, IA ni una carrera DOS. Véanse los límites, la
+[palabra de control x87](docs/formats.md#palabra-de-control-x87) y la
 [revisión de los avisos de Ghidra](docs/formats.md#auditoría-de-la-decompilación-ghidra).
-La regresión general preexistente sigue pasando solo **1/23** casos (divergencias de imágenes y de estado
-de carrera). No se han cambiado los resultados esperados para convertir esas diferencias en un éxito.
+Unicorn calcula `FSIN`/`FCOS`/`FPTAN`/`FPATAN` en binary64 del host, así que `body_step` no puede ser exacto bit a bit.
+La regresión general preexistente pasa **0/23** casos (antes 1/23: la imagen de `USA viewer car 9` cambia al
+desactivar la contracción FMA). No se han cambiado los resultados esperados para convertir esas diferencias en un éxito.
 
 ### Kernels del coche verificados contra el original
 
@@ -144,8 +146,8 @@ dirección completa `0x500f0` (732 casos), bloque de agarre `0x3070a..0x30874` (
 `0x2e234`, hasta la frontera de efectos de aterrizaje o retorno (252), más aceleración (6 829),
 freno (72), aritmética de turbo (2 016), revoluciones (25 016) e integración acelerador→revoluciones (6 941).
 Usa los kernels reales de `car.c`, sin reemplazar sonido/efectos por respuestas inventadas.
-Las mayores diferencias numéricas son `7.11e-15`, `1.78e-15` y `1.43e-14`, respectivamente, dentro
-de la tolerancia del oracle; los indicadores son exactos. Los informes conservan procedencia y cobertura.
+Con la palabra de control del juego (`0x127f`) y el port compilado sin contracción FMA, todos los kernels
+coinciden **bit a bit** (tolerancia cero). Los informes conservan procedencia y cobertura.
 
 Esta prueba confirmó y permitió corregir dos errores de agarre: si una rueda tiene un tipo fuera de 0..29,
 se conserva la media anterior (inicial 0,4) y ambos agarres; los rivales usan perfil 11 y su propia tabla
@@ -154,8 +156,8 @@ cambiar sus fórmulas. Hay fixtures de límites numéricos, aleatorios y secuenc
 
 Los tres bloques nuevos pasan **8 917 casos / 127 230 pasos**. Se corrigieron la truncación x87 del índice
 de par, los límites originales de patinaje, el bloqueo por freno y el turbo agotado: limpia modo/frames
-y no añade fuerza. Las diferencias máximas son `1.82e-12` (aceleración), cero (freno) y `9.32e-10` (turbo),
-dentro de la misma tolerancia; los indicadores son exactos. Las curvas de par son entradas suministradas
+y no añade fuerza. Las salidas coinciden bit a bit; un control negativo con `0x037f` (precisión de 64 bits)
+debe cambiar índices de par en el barrido `torque-index`. Las curvas de par son entradas suministradas
 a ambos kernels, no una verificación de su generación.
 
 Revoluciones añade **31 957 casos / 166 942 pasos**, contando la integración (que repite deliberadamente
@@ -413,7 +415,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | GST | coches fantasma | ✅ leer, escribir, reproducir y contrarreloj (`ghost.c`, `save.c`, `tools/gst.py`) |
 | BTZ | configuración y récords | ✅ todos los bytes del fichero distribuido mapeados; ida y vuelta exacta (`save.c`, `tools/btz.py`) |
 | INF | curvas del sonido del motor por coche | � 4 tablas de 200 B: tono y volumen de `00_A`/`01_A` por régimen (`sound.c`) |
-| WAV / PAT / XI / OGG | sonido (PCM, Gravis, FastTracker, pistas de CD) | 🟢 WAV, PAT y XI (`audio.c`); falta OGG (música) |
+| WAV / PAT / XI / OGG | sonido (PCM, Gravis, FastTracker, pistas de CD) | 🟢 WAV, PAT y XI (`audio.c`); OGG con stb_vorbis (`music.c`) |
 
 ### Sistemas del juego descifrados y portados
 
@@ -449,6 +451,17 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, registros `load_tri` con mapeo engine→PLC, selector `ai_find_section` y reglas observadas de topología/ramas implementados; la estructura de rutas y registros TRI pasa `track_real_assets` en las 7 pistas, pero falta una comparación independiente con la tabla runtime original y la asignación exacta de registros divididos a carriles; pendiente (Y), giro por solape y frenada de curva (heurística) |
 | Render 3D | motor Lisa 2 | `raster.c` | propio: z-buffer, sin sombreado TAB |
 
+Geometría IA: `tests/ai_geometry_original.py` compara ambos fragmentos LE con `atan2`/`__CHP`
+reales, para 902 fixtures sintéticos y 1 558 registros de las siete pistas; compara bits float32
+y coordenadas enteras. No ejecuta todo el cargador ni el controlador DOS. Los controles humanos
+recto/turbo conservan **14/14** trazas de 576 ticks, 112 campos, estado e imagen idénticos al
+build anterior al bloque. El smoke repetido de 200 s con siete rivales pasa **7/7** en ejecución
+y determinismo, pero persisten atascos: no demuestra carreras completas ni IA terminada.
+Se conserva la referencia histórica sin regenerar.
+Las 12 pruebas focalizadas pasan, incluido el replay de 21 escenarios. Contra la referencia
+histórica permanecen **0/23**: 22 diferencias de estado, 23 de imagen y ninguna de ejecución.
+Véanse [alcance geométrico y límites](docs/formats.md#geometría-derivada-de-load_tri-y-mezcla-de-rumbo-verificación-por-fragmentos).
+
 ---
 
 ## Cobertura del desensamblado
@@ -459,10 +472,10 @@ instrucciones está en `docs/function-coverage.txt`):
 | Estado | Funciones | Interpretación |
 |---|---:|---|
 | `unknown` | 519 | Sin identificación fiable; requiere análisis |
-| `identified` | 46 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
+| `identified` | 45 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
 | `understood` | 0 | Comportamiento entendido, todavía no implementado |
 | `port-pending` | 2 | Pendiente explícita y priorizada: `car_ground_contact`, `collisions_pass` |
-| `partial` | 12 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
+| `partial` | 13 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
 | `ported` | 40 | Implementada en el port, sin afirmar verificación completa |
 | `verified` | 5 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
 | `native` | 0 | Sustitución nativa explícita; no se asigna por inferencia |
@@ -537,7 +550,8 @@ lista de fantasmas `0x17054` · `menu_load_car` `0x1aaf8` · trucos `0x160c4`.
 récords de fábrica `0xbf628`.
 
 **Sonido**: sonidos de coche (ROLL, SKID…) `0x2a4ec` · cargar muestras `.WAV/.PAT/.RW8` `0x63310` · reproducir sonido
-*¿?* `0x49a8c` · canal *¿?* `0x626fc` · detección de Sound Blaster (`BLASTER`) `0x7a85c` · *Script Player* `0x549b0`.
+*¿?* `0x49a8c` · canal *¿?* `0x626fc` · detección de Sound Blaster (`BLASTER`) `0x7a85c` · *Script Player* `0x549b0` ·
+CD audio (MSCDEX): tocar pista `0x64241`, volumen `0x63f3e`, ocupado `0x63cf3`, TOC `0x640b3`.
 
 **Motor Lisa 2 y runtime**: API de objetos `LI_MOVEOBJECT` `0x56d24`, `LI_PLACEOBJECT` `0x56c74`, cambiar malla
 `0x56e9c` · `engine_alloc_objects` `0x569ec` · memoria `mem.c` (`pool_alloc` `0x64e84`, `0x64db8`, `0x650f8`, `0x651c8`)
@@ -550,7 +564,6 @@ pulsada `0x55c28` · palabra tecleada `0x55cd0` · `atan2` `0x647ef` · `pow` `0
 - `GENERAL/*.TEX`: texturas de efectos (BOOM, DARKSMOK, DIVSPR, EXSMOKE, LIGHT, SMOKE).
 - `GENERAL/SOUND/{BOOST,COLL,DIV,ROLL,SKID}`, `CARS/<coche>/SOUND/{00_A.WAV,01_A.WAV,ENGINE.INF}` y
   `LEVELS/<pista>/SOUND/*.PAT|WAV`: ambiente por pista.
-- `MUSIC/Track02–08.ogg`: música (pistas de CD).
 - `FONTS/*.LFT`, `IGNITION.FNT`; `*_PANGFX.PIC`, `H_PAN*.PIC`, `*_SIGNS.PIC`, `POKAL.PIC`: HUD, señales y trofeo.
 - `BALTAZAR/DATA`: menú (MENU.COL/TAB, MENUCAR.*, BILAR/CAR_SEL/DEMOCAR/DEMOTRK/FLAGGOR/IGN_LOGO/MARK/CONSPR/TRK_SPR.PIC,
   `*.LFT`, `IGN*.CDP`, `DEFAULT2.PSQ`, `TEST2.PFM`).
@@ -602,7 +615,11 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 
 ## Desviaciones conocidas respecto al original
 
-1. **IA**: port parcial de `0x1aea0` (`ai.c`): puertas reconstruidas al vuelo (con mapeo engine→PLC; sin asumir índices idénticos), sin tablas de carril `0xbf9a0`, acelerador (`0x1b9a2`) aproximado y frenada por curvatura propia.
+1. **IA**: port parcial de `0x1aea0` (`ai.c`): tablas de carril, dos slots TRI por sección PLC, ángulos float32
+   y mezcla de rumbo implementados; acelerador/controlador y frenada por curvatura aún incompletos.
+   Los interiores se calculan pero falta aplicarlos al recorte del objetivo. Las puertas antiguas
+   `ign_track_gates` usadas por progreso/reaparición aún hacen una segunda conversión engine→PLC
+   incorrecta para secciones; se conserva su comportamiento en este bloque y se documenta como deuda separada.
 2. **Render**: z-buffer propio en lugar del orden del pintor del motor Lisa 2 (el original no usa profundidad por
    píxel). Texturas afines como el original (`--persp` activa la corrección de perspectiva, la opción PERSP. POLY).
    Sin TAB: el motor la pasa al rasterizador (`[0xc484c]`) pero las caras texturizadas se dibujan sin sombrear (en
@@ -716,7 +733,11 @@ implementado.
 
 ### Fase 1 — Carrera completa de un jugador (jugabilidad)
 
-- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: núcleo de dirección/atasco/turbo/límites y álgebra exacta, elección de carril, registros `load_tri`, selector `0x1decc` y reglas observadas de `build_sections`; estructura validada sobre assets de las 7 pistas, aún sin comparación runtime independiente con el original; pendiente asignación exacta de registros divididos, pendiente (Y) y giro por solape) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
+- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: contador de atasco/turnos, tablas de carril/RNG,
+      registros PLC y dos slots `load_tri`, selector `0x1decc` y topología observada; geometría derivada con
+      4 920 comparaciones exactas contra fragmentos originales y mezcla de rumbo con 1 184 casos.
+      No acredita cargador/controlador completo. Pendientes: recorte por interiores, asignación final de carriles,
+      pendiente Y, giro por solape, ganancias y esquiva) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
       byte `+0x6d` de TRI), consulta de puertas `0x1decc`, velocidad objetivo por curvatura y pendiente
       (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
       Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.
@@ -796,7 +817,7 @@ implementado.
       Smoke de 200 s con siete rivales en siete pistas, repetido con estados/trazas/imágenes idénticos y sin
       valores no finitos. No verifica la IA completa ni el dispatcher: `car+0x350` sigue sin modelar y la
       geometría del error de rumbo aún es aproximada. La referencia histórica no se regenera.
-      Comparación histórica actual: 1/23, con 22 diferencias de estado y 22 de imagen, sin fallos de ejecución;
+      Comparación histórica actual: 0/23, con 22 diferencias de estado y 23 de imagen, sin fallos de ejecución;
       ya existían divergencias previas y este cambio altera deliberadamente la conducción de IA.
 - [x] **P1** Cámara de persecución original (`sub_00047f94`, `sub_000420cc`, focales de `race_setup_video`).
 - [x] **P2** Cámara trasera (`car+0x5a4`, campos `+0x90/+0xa0/+0x70`) y cámaras fijas tras la meta (`0xc464c`).
@@ -838,7 +859,8 @@ implementado.
 - [x] **P1** Efectos: BOOST, COLL, DIV, ROLL, SKID (`0x2a4ec`); reproducción posicional `0x49a8c` y canales `0x626fc`.
 - [x] **P2** Ambiente por pista `LEVELS/<pista>/SOUND`: emisores PLC `0x190+n` (`0x2489c`, `0x360f0`), lluvia,
       viento y truenos.
-- [ ] **P2** Música `MUSIC/Track02–08.ogg` (antes pistas de CD): asignación por pista y menú.
+- [x] **P2** Música `MUSIC/Track02–08.ogg` (antes pistas de CD, MSCDEX `0x63cf3…0x64710`): pista por nivel `0xc3fd8`,
+      repetición `0x212f8`, podio (pista 8) y cambio de pista; falta el menú (pista 7) cuando exista.
 
 ### Fase 6 — Fantasmas y persistencia
 

@@ -20,7 +20,12 @@ ORIGINAL_SHA256 = "179c654ba65281f08bbcda2b5943ab9f35c309ec718600f81104644d22db9
 BODY, STACK, RETURN = 0x400000, 0x500000, 0x600000
 ESP = STACK + 0x8000
 BODY_SIZE = 0x1D0
-ABS_TOL, REL_TOL = 2e-11, 2e-12
+ABS_TOL, REL_TOL = 2e-14, 1e-14
+# Watcom XI init 0x56294 -> 0x6f651 loads [0xe6be0]: 53-bit precision, round to nearest, all masked.
+# Game code that changes it (__CHP 0x55f9c, rasteriser 0x765c3) restores it before returning.
+FPCW = 0x127F
+# Negative controls: the 64-bit precision word makes x87 truncate unrounded products.
+EXTENDED_FPCW = 0x037F
 # This is the Watcom layout, deliberately independent of the native C layout.
 FIELDS = [
     ("mass", 0x00), ("inertia", 0x08), ("restitution", 0x10),
@@ -66,6 +71,9 @@ class Original:
         # Select the original hardware-x87 atan2 path; no helper is replaced.
         if self.uc.mem_read(0xE68C8, 1)[0] & 1:
             raise ValueError("Original selects the software-FPU runtime path")
+        if struct.unpack("<H", self.uc.mem_read(0xE6BE0, 2))[0] != FPCW:
+            raise ValueError("Unexpected runtime x87 control word at 0xe6be0")
+        self.fpcw = FPCW
         self.visited = set()
         self.uc.hook_add(unicorn.UC_HOOK_CODE, self.code)
         self.uc.hook_add(unicorn.UC_HOOK_MEM_WRITE, self.write)
@@ -87,7 +95,7 @@ class Original:
         struct.pack_into("<i", self.initial, 0xA8, values["saturated"])
         struct.pack_into("<i", self.initial, 0xD4, values["sliding"])
         self.uc.mem_write(BODY, bytes(self.initial))
-        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, 0x037F)
+        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, self.fpcw)
         self.uc.reg_write(self.reg.UC_X86_REG_FPTAG, 0xFFFF)
 
     def step(self, airborne, slope_k):
@@ -106,7 +114,7 @@ class Original:
             raise ValueError("Original did not obey Watcom RET 8 stack cleanup")
         if self.uc.reg_read(self.reg.UC_X86_REG_FPTAG) != 0xFFFF:
             raise ValueError("Original leaked x87 stack values")
-        if self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != 0x037F:
+        if self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != self.fpcw:
             raise ValueError("Original changed the x87 control word")
         raw = self.uc.mem_read(BODY, BODY_SIZE)
         mutable = set(range(0xA8, 0xAC))
@@ -248,7 +256,8 @@ def verify(executable, runner):
         "absolute_tolerance": ABS_TOL, "relative_tolerance": REL_TOL,
         "max_absolute_errors": max_errors,
         "required_addresses_executed": [hex(address) for address in sorted(required)],
-        "scope": "Isolated body_step, hardware x87, CW=0x037f; not whole-game equivalence",
+        "scope": "Isolated body_step, x87 CW=0x127f (53-bit); Unicorn computes fsin/fcos/fptan/fpatan "
+                 "in host binary64, so transcendentals are not bit-faithful; not whole-game equivalence",
     }
 
 
