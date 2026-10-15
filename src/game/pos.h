@@ -42,6 +42,11 @@ int ign_coll_init(IgnCollObjs *c, IgnModel *track);
  * wrecked, flying objects fall, tumble and bounce on the ground; kind 4 flashes (LIGHT.TEX). */
 void ign_coll_frame(IgnCollObjs *c, const IgnLevel *lv, IgnCar *const *cars, int ncars, IgnFx *fx, float focus_x,
                     float focus_z);
+/* 0x356b8-0x358ff: a flying object's damping, gravity, tumbling, motion and world clamp. */
+void ign_coll_fly_step(IgnCollObj *o);
+/* 0x35967-0x35c84: with the ground query's face under it, an object within 15 of the plane bounces, or comes to rest
+ * when slower than 2. */
+void ign_coll_bounce(IgnCollObj *o, const IgnGroundHit *hit);
 /* sub_00035f38: reflects v (+0x18) on the plane of normal n (+0) when it moves against it, through two rotations. */
 void ign_coll_reflect(const double n[3], double v[3]);
 /* 0x35967: height (up) of the query's plane at engine (x, z). */

@@ -133,3 +133,11 @@ if(IGN_VERIFY_ORIGINAL)
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
             --report ${CMAKE_BINARY_DIR}/lap-original-report.json)
 endif()
+
+# Collision objects and car contact (car_ground_contact 0x350f0).
+add_executable(contact_test tests/contact.c)
+target_link_libraries(contact_test PRIVATE ignition_core)
+add_test(NAME contact COMMAND contact_test)
+if(NOT MSVC)
+  target_compile_options(contact_test PRIVATE -Wall -Wextra)
+endif()

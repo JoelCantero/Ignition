@@ -155,8 +155,7 @@ double ign_coll_ground_up(const IgnGroundHit *hit, double x, double z) {
     return -(p0[1] + t);
 }
 
-/* 0x356b8: one frame of a flying object; returns 1 if it is still flying. */
-static int coll_fly(IgnCollObj *o, const IgnLevel *lv) {
+void ign_coll_fly_step(IgnCollObj *o) {
     o->vel[0] *= 0.99;
     o->vel[1] += -0.4;
     o->vel[2] = 0.99 * o->vel[2];
@@ -173,24 +172,23 @@ static int coll_fly(IgnCollObj *o, const IgnLevel *lv) {
     if (o->pos[1] > 10000.0) o->pos[1] = 10000.0;
     if (0 > o->pos[2]) o->pos[2] = 0;
     if (o->pos[2] > 51200.0) o->pos[2] = 51200.0;
+}
 
-    IgnGroundHit hit;
-    if (ign_ground_query(lv, (int32_t)trunc(o->pos[0]), (int32_t)trunc(o->pos[1]) + 150, (int32_t)trunc(o->pos[2]),
-                         &hit))
-        return 1;
-    double ground = ign_coll_ground_up(&hit, o->pos[0], o->pos[2]);
-    if (!(ground + 15.0 > o->pos[1])) return 1;
+void ign_coll_bounce(IgnCollObj *o, const IgnGroundHit *hit) {
+    double ground = ign_coll_ground_up(hit, o->pos[0], o->pos[2]);
+    if (!(ground + 15.0 > o->pos[1])) return;
     double speed = sqrt(pow(o->vel[0], 2.0) + pow(o->vel[1], 2.0) + pow(o->vel[2], 2.0));
     if (!(speed > 2.0)) {
         /* 0x35c29: too slow to bounce, it rests where it is. */
         memset(o->vel, 0, sizeof o->vel);
         memset(o->spin, 0, sizeof o->spin);
-        return 0;
+        o->flying = 0;
+        return;
     }
     /* 0x35a6b: bounce on the face, (p0 - p1) x (p2 - p1) with y flipped up. */
-    const int32_t *p0 = hit.p[0], *p1 = hit.p[1], *p2 = hit.p[2];
-    double ax = p0[0] - p1[0], ay = p0[1] - p1[1], az = p0[2] - p1[2];
-    double bx = p2[0] - p1[0], by = p2[1] - p1[1], bz = p2[2] - p1[2];
+    const int32_t *p0 = hit->p[0], *p1 = hit->p[1], *p2 = hit->p[2];
+    double ax = (double)p0[0] - p1[0], ay = (double)p0[1] - p1[1], az = (double)p0[2] - p1[2];
+    double bx = (double)p2[0] - p1[0], by = (double)p2[1] - p1[1], bz = (double)p2[2] - p1[2];
     double n[3] = {ay * bz - az * by, ax * bz - az * bx, ax * by - ay * bx};
     ign_coll_reflect(n, o->vel);
     o->vel[0] *= 0.9;
@@ -199,7 +197,15 @@ static int coll_fly(IgnCollObj *o, const IgnLevel *lv) {
     if (o->vel[1] > 20.0) o->vel[1] = 20.0;
     o->pos[1] = ground + 15.0;
     for (int k = 0; k < 3; k++) o->spin[k] = speed * 5.0;
-    return 1;
+}
+
+/* 0x356b8: one frame of a flying object. */
+static void coll_fly(IgnCollObj *o, const IgnLevel *lv) {
+    ign_coll_fly_step(o);
+    IgnGroundHit hit;
+    if (ign_ground_query(lv, (int32_t)trunc(o->pos[0]), (int32_t)trunc(o->pos[1]) + 150, (int32_t)trunc(o->pos[2]),
+                         &hit) == 0)
+        ign_coll_bounce(o, &hit);
 }
 
 /* 0x3514e: a resting object against one car. */
@@ -244,7 +250,7 @@ void ign_coll_frame(IgnCollObjs *c, const IgnLevel *lv, IgnCar *const *cars, int
         if (!o->flying) {
             for (int i = 0; i < ncars; i++) coll_touch(o, cars[i], fx);
         } else {
-            o->flying = coll_fly(o, lv);
+            coll_fly(o, lv);
             /* 0x35c84: LI_MOVEOBJECT with the truncated pose. */
             IgnObject *e = &c->track->objs[o->obj];
             e->pos[0] = (int32_t)trunc(o->pos[0]) - IGN_SRF_ORIGIN;
