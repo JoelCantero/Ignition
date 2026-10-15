@@ -88,10 +88,10 @@ Pistas: `USA`, `CANADA`, `AUSTRIA`, `BRAZIL`, `CARIB`, `ICELAND`, `JAPAN`. La ru
 | ↑ / W | acelerar |
 | ↓ / S | frenar / marcha atrás |
 | ← → / A D | girar |
-| Espacio | turbo (la carga aparece en el título de la ventana) |
+| Espacio | turbo (barra y piloto del HUD; la carga también aparece en el título de la ventana) |
 | M | alternar cambio manual/automático |
 | Q / E | bajar / subir marcha en modo manual |
-| F1 | cámara libre (W/A/S/D, Q/E, flechas, Shift = rápido) |
+| F1 | cámara libre (W/A/S/D, Q/E, flechas, Shift = rápido) con la superposición de depuración de `0x49fdc` |
 | R (mantener) | vista trasera |
 | TAB | tras la meta: cámaras fijas 1–3 / seguir al coche en cabeza |
 | Esc | salir |
@@ -345,7 +345,9 @@ src/game/save.{c,h}     IGN_DOS.BTZ: imagen por defecto, récords, campeonato y 
 src/game/skid.{c,h}     efectos de derrape: marcas en la pista y polvo (`sub_0003731c`)
 src/game/fx.{c,h}       huecos de efectos del original: sprites, piezas, salpicaduras, explosión, turbo, reaparición
 src/render/raster.{c,h} rasterizador por software de 8 bits (320×200 a 800×600, 4:3), z-buffer, texturas afines
-src/render/hud.{c,h}    superposición de carrera con H_PAN1.PIC y fuentes LFT originales (port parcial)
+src/render/hud.{c,h}    HUD de carrera (`0x4a320`): paneles, medidores, señales, semáforo, lugar, mensajes, ventanas
+src/render/font.{c,h}   fuentes LFT (ranuras de `0x24c214`) y FNT (`0x53d60`)
+src/render/sprite.{c,h} sprites de geputget con tabla PAN, triángulo plano `0x729f3` y sprites con matriz `0x82950`
 src/render/camera.{c,h} cámaras del original: persecución, trasera y fijas tras la meta (`sub_00047f94`, `0xc464c`)
 src/platform/main.c     SDL3: ventana, entrada, bucle fijo de 72 Hz, cámaras, modos sin ventana y visor
 docs/formats.md         referencia técnica detallada (formatos, fórmulas, direcciones)
@@ -366,6 +368,8 @@ tests/lap_original.py     cruce de vuelta, fases, tiempos y mejor vuelta contra 
 tests/car_kernels.c       runner nativo de los seis kernels, sin duplicar sus fórmulas
 tests/solo_replay.py    replay sin rivales, exacto por tick, con informe de procedencia (solo port)
 tests/test_verification.py controles positivos y negativos de las herramientas de verificación
+tests/hud_assets.c      parsers LFT/FNT, sprites, formato de tiempo y fotogramas del HUD sin ventana (`GAME_DIR [PPM_DIR]`)
+tests/hud_original.py   triángulo `0x729f3` y sprites con matriz `0x82950` contra bytes LE (Unicorn, `IGN_VERIFY_ORIGINAL`)
 tools/ignassets.py      PIC/COL/TEX/DAT/nivel → PNG
 tools/gst.py            fantasmas GST: cabecera, validación, tiempos por vuelta y trayectoria sobre la pista
 tools/btz.py            IGN_DOS.BTZ: campos, participantes, récords por pista y comprobación de ida y vuelta
@@ -426,7 +430,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | TRI | bordes izquierdo/derecho por tramo (puertas de la IA) | 🟡 bordes portados; `double`s sin descifrar |
 | POS | animaciones de objetos (fotogramas pos+rot) | 🟡 parser, avance a 36 Hz y render aplicados; rotación aproximada y colisiones incompletas |
 | TAB | tabla de sombreado `color×nivel` (64 niveles) | 🟡 significado conocido; no se usa |
-| PAN / SHD | tablas 256×256 de 64 KB | � SHD fila 0x28 = sombra; PAN desconocida |
+| PAN / SHD | tablas 256×256 de 64 KB | 🟡 SHD fila 0x28 = sombra; PAN = tabla de mezcla de los sprites y primitivas del HUD (portada) |
 | CARS | 11 coches × (carrocería + 4 ruedas) | ✅ portado y montado como en `cars_init` |
 | LFT / FNT | fuentes | ✅ LFT (`gfx2d.c`: alineación, proporcional, espaciado); FNT solo cabecera |
 | CDP | vídeos de introducción | ✅ portado (`cdp.c`) |
@@ -480,13 +484,28 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 
 Geometría IA: `tests/ai_geometry_original.py` compara ambos fragmentos LE con `atan2`/`__CHP`
 reales, para 902 fixtures sintéticos y 1 558 registros de las siete pistas; compara bits float32
-y coordenadas enteras. No ejecuta todo el cargador ni el controlador DOS. Los controles humanos
-recto/turbo conservan **14/14** trazas de 576 ticks, 112 campos, estado e imagen idénticos al
-build anterior al bloque. El smoke repetido de 200 s con siete rivales pasa **7/7** en ejecución
-y determinismo, pero persisten atascos: no demuestra carreras completas ni IA terminada.
-Se conserva la referencia histórica sin regenerar.
-Las 12 pruebas focalizadas pasan, incluido el replay de 21 escenarios. Contra la referencia
-histórica permanecen **0/23**: 22 diferencias de estado, 23 de imagen y ninguna de ejecución.
+y coordenadas enteras. Ahora se ejecuta con el control word del runtime **`0x127f`** (53 bits), como
+los demás oracles: con el antiguo `0x037F` (64 bits) el oracle pasaba, pero con `0x127f` el residuo
+extendido del port fallaba en 297 comparaciones de interiores (20 registros reales) y en un límite de
+la mezcla de rumbo. Interiores y mezcla usan ya aritmética binary64 directa; con `0x127f` hay 0 fallos.
+
+Recorte del objetivo: `tests/ai_target_original.py` ejecuta sin parchear `0x1b4a2→0x1b823` de `ai_drive`
+(cambio de rumbo inicial, recorte por interiores, byte TRI de agarre y suma de curvatura) con `atan2` real
+y CW `0x127f`: **7 562 casos** (1 830 sintéticos y 5 432 de registros slot 0 de las siete pistas) sin
+fallos; enteros, centros, signo y doubles comparados bit a bit. Cubre 224 de 228 instrucciones del
+fragmento; mutaciones del port (bucle interior, signo, orden de producto, constante π, centro) se detectan.
+No valida la selección de registros/carril ni el controlador completo. Los consumidores posteriores
+(divisor `3·índice+6` del acelerador, condición `índice>2` del ajuste interior, `look_off[índice]` del turbo,
+`a8 = 1+(agarre+0.8)·curva`) se portan por lectura del desensamblado, sin oracle propio; esa lectura
+corrigió además el divisor invertido del ajuste interior con signo +1 (`0x1c57a..0x1c5a4`).
+
+Controles humanos (`--sim 60` con dirección 0, 1 y turbo): **21/21** trazas `IGN_TRACE` de 60 s e imágenes idénticas al build
+anterior al bloque, en las siete pistas. El smoke repetido de 200 s con siete rivales es determinista en las
+**7/7** pistas y sin NaN. Frente al build anterior (casi todos los rivales en la vuelta 0), en USA, BRAZIL,
+CARIB, ICELAND y JAPAN la mayoría pasa a las vueltas 1–3, pero CANADA (secciones −158/−159) y AUSTRIA
+(196–201, todos en la vuelta 0) siguen atascados y quedan rivales a <10 km/h: no demuestra carreras
+completas ni IA terminada. Se conserva la referencia histórica sin
+regenerar: **0/23** (22 diferencias de estado, 23 de imagen, ninguna de ejecución).
 Véanse [alcance geométrico y límites](docs/formats.md#geometría-derivada-de-load_tri-y-mezcla-de-rumbo-verificación-por-fragmentos).
 
 ---
@@ -565,7 +584,7 @@ crear clima `0x26154` · pantalla de carga `0x21d68` · nombres de pista `0x22f3
 
 **Render y presentación**: `render_scene` `0x56410` · `race_setup_video` `0x492fc` · `camera_angles` `0x5891c` ·
 `render_main` `0x43fe0` (resultados y puntuaciones) · `car_place_objects` `0x48a14` · HUD `0x4a320` · tiempos
-`0x4bdf4` · dígitos `0x4be7c` · depuración XYZ *¿?* `0x49fdc` · pausa `0x4395c` · salir o reiniciar `0x43e48` ·
+`0x4bdf4` · esfera, aguja y velocidad `0x4be7c` · mensajes `0x4c7c0`/`0x4c89c` · depuración de la cámara `0x49fdc` · pausa `0x4395c` · salir o reiniciar `0x43e48` ·
 captura TGA `0x515f8` · fondo del menú `0x541d4`.
 
 **Frontend** (portado en `src/frontend/`): `main` `0x10010` · `main_step` `0x10060` · `menu_load_gfx` `0x11504`
@@ -648,8 +667,11 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 ## Desviaciones conocidas respecto al original
 
 1. **IA**: port parcial de `0x1aea0` (`ai.c`): tablas de carril, dos slots TRI por sección PLC, ángulos float32
-   y mezcla de rumbo implementados; acelerador/controlador y frenada por curvatura aún incompletos.
-   Los interiores se calculan pero falta aplicarlos al recorte del objetivo. Las puertas antiguas
+   y mezcla de rumbo implementados; el recorte del objetivo por interiores y la suma de curvatura siguen el
+   original, pero acelerador/controlador (pendiente Y, giro por solape, ganancias 5/8, esquiva) aún incompletos.
+   La selección de los seis registros de lookahead usa los helpers de ruta del port; sin geometría TRI (no ocurre
+   en las siete pistas) se apunta al centro de la puerta siguiente, y un byte de agarre fuera de tabla distinto de
+   −21/79/90/97 lee 0 en lugar de memoria del original. Las puertas antiguas
    `ign_track_gates` usadas por progreso/reaparición aún hacen una segunda conversión engine→PLC
    incorrecta para secciones; se conserva su comportamiento en este bloque y se documenta como deuda separada.
 2. **Render**: z-buffer propio en lugar del orden del pintor del motor Lisa 2 (el original no usa profundidad por
@@ -665,9 +687,9 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    velocidad: el original lanzaría el coche cientos de unidades hacia arriba.
 5. **Cámara**: la de `sub_00047f94` se actualiza a 36 Hz para todos los coches. Mientras sigue al coche, la vista se
    recalcula con la posición actual del coche (el port dibuja más deprisa que las actualizaciones de la cámara). La
-   media de ángulos de tramo con `car+0x36c == 3` no está portada. La cuenta atrás solo sale en el título de la
-   ventana (faltan los sprites y sonidos), y sin ventana empieza la carrera directamente salvo con `--countdown`.
-6. **Posiciones**: la clasificación (`ign_race_position`) es propia; falta la rutina original del HUD `0x4a320`.
+   media de ángulos de tramo con `car+0x36c == 3` no está portada. Sin ventana la carrera empieza directamente salvo
+   con `--countdown` (entonces se dibuja el semáforo del HUD).
+6. **Posiciones**: la clasificación (`ign_race_position`) es propia; el HUD (`0x4a320`, portado) solo la muestra.
 7. **Dificultad**: `[0x1fedd8]` se fija con `--difficulty` (agarre trasero, índice de velocidad, modelos y bono de par
    de la IA).
 8. **Efectos**: los sprites se ordenan de lejos a cerca como en el original, pero además se prueban contra el z-buffer
@@ -775,9 +797,10 @@ implementado.
 
 - [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: contador de atasco/turnos, tablas de carril/RNG,
       registros PLC y dos slots `load_tri`, selector `0x1decc` y topología observada; geometría derivada con
-      4 920 comparaciones exactas contra fragmentos originales y mezcla de rumbo con 1 184 casos.
-      No acredita cargador/controlador completo. Pendientes: recorte por interiores, asignación final de carriles,
-      pendiente Y, giro por solape, ganancias y esquiva) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
+      4 920 comparaciones exactas contra fragmentos originales con CW `0x127f` y mezcla de rumbo con 1 184 casos;
+      recorte del objetivo por interiores y curvatura `0x1b4a2..0x1b823` con 7 562 casos.
+      No acredita cargador/controlador completo. Pendientes: asignación final de carriles,
+      pendiente Y, giro por solape, ganancias 5/8 y esquiva) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
       byte `+0x6d` de TRI), consulta de puertas `0x1decc`, velocidad objetivo por curvatura y pendiente
       (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
       Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.
@@ -843,10 +866,9 @@ implementado.
       caras 18/19/22). **SHD**: fila 0x28 = sombra de coche (hecho); resto de filas por confirmar en el DOS.
 - [ ] **P1** USA tramos 48–50: la IA no salta el barranco a ~70 km/h, cae al fondo y no hay reaparición
       (`0x00435910` en `Ign_win.exe`), así que se queda atascada.
-- [ ] **P1** IA contra los muros: ahora los bordes contienen a los coches en las 7 pistas, y la IA (que apunta al punto
-      medio de puertas a +1…+8 tramos) corta las curvas contra el borde interior a toda velocidad y se queda empujando
-      (ICELAND tramo 17 a 157 km/h, tramo ~65, JAPAN, CARIB). Falta la línea de carrera y los registros por tramo
-      originales de `load_tri` ya se cargan parcialmente, pero falta reproducir toda su geometría de conducción.
+- [ ] **P1** IA contra los muros: ahora los bordes contienen a los coches en las 7 pistas. La IA ya elige el punto
+      medio de +1…+8 tramos con el recorte original por interiores, pero siguen atascos (CANADA −159, AUSTRIA 198,
+      rivales a 0–8 km/h en ICELAND). Faltan pendiente, giro por solape, esquiva y la selección de carril original.
       El contador de atasco y las ventanas de marcha atrás ya siguen el original; no garantizan desatascarse.
 - [x] **P1** Planificador rotatorio de IA de `cars_update_all`: fase de controles a 36 Hz, pero decisión nueva
       por coche a **36/N Hz**, con N coches totales, incluidos humanos/inactivos. Resto de turnos: replay de
@@ -861,22 +883,25 @@ implementado.
       ya existían divergencias previas y este cambio altera deliberadamente la conducción de IA.
 - [x] **P1** Cámara de persecución original (`sub_00047f94`, `sub_000420cc`, focales de `race_setup_video`).
 - [x] **P2** Cámara trasera (`car+0x5a4`, campos `+0x90/+0xa0/+0x70`) y cámaras fijas tras la meta (`0xc464c`).
-- [x] **P1** Cuenta atrás y reloj de salida (`sub_0002b850`) con sus pitidos; faltan los sprites 3-2-1-GO.
+- [x] **P1** Cuenta atrás y reloj de salida (`sub_0002b850`) con sus pitidos y el semáforo 3-2-1-GO del HUD.
 - [x] **P1** Conversión del reloj por coche y transición normal verificadas contra instrucciones originales;
       18 450 casos / 74 178 pasos, HUD/turbo/fantasma conectados; timer DOS y pausa pendientes.
 - [ ] **P2** `render_scene` `0x56410`: capas según los flags de configuración `[0x24c05c]+0x38..0x54`.
 - [x] **P2** Resoluciones 320×200 / 640×480 / 800×600 (`--res`), mostradas a 4:3.
-- [ ] **P2** Viewports por jugador (`race_setup_video` `0x492fc`).
-- [ ] **P2** Sprites (`geputget.c`, `0x771e0`) y señales (`*_SIGNS.PIC`).
+- [ ] **P2** Viewports por jugador (`race_setup_video` `0x492fc`): la geometría de `0x49724` (uno o dos jugadores) ya la
+      usa el HUD; faltan las cámaras y el render por ventana.
+- [x] **P2** Sprites (`geputget.c`, `0x771e0`) y señales (`*_SIGNS.PIC`): blit con la tabla PAN, sprites con matriz
+      (`0x82950`, triángulos texturizados `0x78304`/`0x78ac0`) y triángulo plano `0x729f3`, idénticos a los bytes LE
+      en `tests/hud_original.py` (6 009 triángulos, 624 sprites).
 - [ ] **P3** Escalado moderno (pantalla completa, relación de aspecto, filtrado opcional).
 
 ### Fase 4 — HUD, menús y flujo de juego
 
-- [ ] **P1** Fuentes **LFT/FNT** (`load_fonts` `0x240f4`, `0x61220`): LFT ya se lee para los campos del HUD básico;
-      faltan FNT y el resto de las fuentes.
-- [ ] **P1** Completar el HUD en carrera `0x4a320`: ya dibuja partes de `H_PAN1.PIC` y los campos de tiempo, vuelta,
-      posición y velocidad. Pendiente: reconstruir coordenadas/estados exactos, medidores dinámicos, avisos
-      multilingües y los demás paneles `H_PAN*.PIC`, `*_PANGFX.PIC`, `*_SIGNS.PIC`.
+- [x] **P1** Fuentes **LFT/FNT** (`load_fonts` `0x240f4`, `0x61220`): ranuras, parser LFT con anchos con signo,
+      ancho y dibujo alineado (fijo/proporcional) y FNT (`0x53d60`); pruebas en `tests/hud_assets.c`.
+- [x] **P1** HUD en carrera `0x4a320`: coordenadas y estados de las tres resoluciones, aguja y medidores (turbo
+      incluido), palanca de cambios, señales y WRONG WAY, semáforo, barra de eliminación, lugar al terminar, mensajes
+      multilingües (IS OUT, LAP/TRACK RECORD, WARNING, YOU'RE LAST!) y ventanas de dos jugadores.
 - [ ] **P1** Pantallas de resultados y puntuación (`render_main` `0x43fe0`: TRACK RESULTS, TRACK SCORE, TOTAL SCORE)
       y trofeo `POKAL.PIC`.
 - [ ] **P1** Pausa, continuar, salir y reiniciar (`0x4395c`, `0x43e48`).
