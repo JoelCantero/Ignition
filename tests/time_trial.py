@@ -6,7 +6,9 @@ a temporary folder and checks that:
   1. the first run (no ghost) writes GHOSTS/GOLDRUSH.GST and IGN_DOS.BTZ in the user folder only;
   2. the second run loads the ghost, does not beat it and leaves both files unchanged;
   3. after making the saved ghost slower (header time), a third run replaces it with the new time;
-  4. the BTZ written by the port is still a valid image (tools/btz.py roundtrip) and the game folder is untouched.
+  4. the BTZ written by the port is still a valid image (tools/btz.py roundtrip) and the game folder is untouched;
+  5. an elimination race that ends (USA, 3 rivals) only reshuffles the first 4 grid slots (0x2cf60); skipped if
+     the AI does not bring the race to its end.
 """
 import argparse
 import hashlib
@@ -35,9 +37,9 @@ def tree_digest(folder):
     return out
 
 
-def run(binary, data, save, shot):
+def run(binary, data, save, shot, args=("--time-trial", "--sim", "150", "auto")):
     env = dict(os.environ, IGN_SAVE_DIR=save, IGNITION_DATA=data)
-    p = subprocess.run([binary, "USA", "--time-trial", "--sim", "150", "auto", "--shot", shot],
+    p = subprocess.run([binary, "USA", *args, "--shot", shot],
                        env=env, capture_output=True, text=True, timeout=600)
     if p.returncode:
         raise SystemExit("ignition failed (%d): %s" % (p.returncode, p.stderr))
@@ -98,6 +100,19 @@ def main():
         rt = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "btz.py"), "roundtrip", btz],
                             capture_output=True, text=True)
         check(rt.returncode == 0, "saved BTZ parses and rebuilds: " + rt.stdout.strip())
+
+        save2 = os.path.join(tmp, "elim") + os.sep
+        os.makedirs(save2)
+        out4 = run(a.binary, a.data, save2, shot, ("--elimination", "--rivals", "3", "--sim", "600", "auto"))
+        if "race: 4/4 finished" not in out4:
+            print("skip elimination race end: not every car is out")
+        else:
+            orig = open(os.path.join(a.data, "IGN_DOS.BTZ"), "rb").read()
+            new = open(os.path.join(save2, "IGN_DOS.BTZ"), "rb").read()
+            changed = [i for i in range(0x597) if orig[i] != new[i]]
+            check(all(0x133 <= i < 0x143 for i in changed), "elimination end only touches grid slots 0-3")
+            check(sorted(struct.unpack_from("<4i", new, 0x133)) == sorted(struct.unpack_from("<4i", orig, 0x133)),
+                  "grid shuffle is a permutation")
         check(tree_digest(a.data) == game_before, "game folder untouched")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

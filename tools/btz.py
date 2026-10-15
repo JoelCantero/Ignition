@@ -22,28 +22,28 @@ RECORDS, STRIDE, SLOTS = 0x1BF, 0x78, 5
 
 # (offset, count, name, global/meaning). Every byte not listed here is kept as opaque data.
 FIELDS = [
-    (0x000, 1, "unknown_000", "30 in the shipped file"),
+    (0x000, 1, "version", "30; the menu ignores a file with another value"),
     (0x004, 1, "players", "[0x1fef14] human players - 1"),
     (0x008, 1, "mode", "[0x1feefc] 0..3"),
-    (0x00C, 1, "class", "[0x1fedd8] ¿? row of the championship table 0xc45b4"),
+    (0x00C, 1, "class", "[0x1fedd8] championship class 0..3 (5/6/7/7 tracks), <= unlocked"),
     (0x010, 1, "ghost", "[0x1fee4c] ghost on (only kept in time trial)"),
     (0x014, 1, "opt_014", "[0x1fed64] (forced 1 in championship)"),
     (0x018, 1, "unknown_018", ""),
     (0x01C, 9, "car", "participant+0x00 car model"),
-    (0x040, 2, "unknown_040", ""),
+    (0x040, 2, "menu_car", "car chosen by players 1/2 in the menu (capped to the available cars)"),
     (0x048, 9, "opt_048", "participant+0x0c"),
     (0x0F3, 1, "track", "track id, championship round when mode 0"),
     (0x0F7, 1, "opt_0f7", "[0x1feed8] (0 = track default, -1 = random)"),
     (0x0FB, 1, "opt_0fb", "[0x1feef4] = value * 10"),
     (0x0FF, 1, "opt_0ff", "[0x1fee94] = value * 10"),
-    (0x103, 1, "unknown_103", ""),
+    (0x103, 1, "opt_103", "menu sets 3 - opt_107 on load"),
     (0x107, 1, "opt_107", "[0x1fef08]/[0x1fefdc], written back by 0x2cf60"),
     (0x10B, 1, "opt_10b", "[0x1fefcc], written back by 0x2cf60"),
     (0x10F, 1, "opt_10f", "[0x1fee84]"),
     (0x113, 1, "opt_113", "[0x1fed80]"),
     (0x117, 1, "opt_117", "[0x1fed70]"),
     (0x11B, 2, "unknown_11b", ""),
-    (0x123, 2, "human_08", "participant+0x08 of the human cars"),
+    (0x123, 2, "human_08", "participant+0x08 of the human cars; cheat_check sets 1/2/3"),
     (0x12B, 2, "human_18", "participant+0x18 of the human cars"),
     (0x133, 8, "grid", "0xc33d0 grid order (6 - place after a championship race)"),
     (0x153, 1, "cars", "[0x1fefe4] cars in the race"),
@@ -51,12 +51,17 @@ FIELDS = [
     (0x15B, 1, "opt_15b", "[0x1fee48]"),
     (0x15F, 8, "computer", "participant+0x04 (1 = computer ¿?)"),
     (0x197, 1, "opt_197", "[0x1febe0]"),
-    (0x587, 1, "opt_587", "[0x1ff6df] written by render_main"),
-    (0x58B, 1, "opt_58b", "[0x1ff6e3] written by render_main"),
+    (0x507, 25, "options", "menu option widgets (+0x14 of the widgets at 0xea47c)"),
+    (0x57F, 1, "records_track", "track shown by the records screen 0x1911c"),
+    (0x583, 1, "records_table", "table shown by the records screen (race/lap)"),
+    (0x587, 1, "unlocked", "[0x1ff6df] highest class unlocked (render_main 0x45008)"),
+    (0x58B, 1, "bonus", "[0x1ff6e3] 1 after winning class 3 (0x44ffe)"),
+    (0x58F, 1, "opt_58f", "menu only"),
     (0x593, 1, "language", "[0x1ff6eb] 0 EN, 1 DE, 2 IT, 3 ES, 4 SV, 5 FR"),
 ]
 NAMES, NAME_LEN, MAX_CARS = 0x6C, 15, 9
-KEYS, KEY_LEN = 0x17F, 8  # 2 humans x 8 key bytes -> participant+0x1c..0x23
+KEYS, KEY_LEN = 0x17F, 8  # 2 humans x 8 DOS scancodes -> participant+0x1c..0x23
+STRINGS = (0x19B, 0x1AA)  # 15-byte strings set to "G1" and "12" by sub_0001a864 (menu only)
 
 
 def cstr(b):
@@ -71,6 +76,7 @@ def parse(data):
         v = list(struct.unpack_from("<%di" % n, data, off))
         out[name] = v[0] if n == 1 else v
     out["names"] = [data[NAMES + i * NAME_LEN:NAMES + (i + 1) * NAME_LEN] for i in range(MAX_CARS)]
+    out["strings"] = [data[o:o + 15] for o in STRINGS]
     out["keys"] = [data[KEYS + i * KEY_LEN:KEYS + (i + 1) * KEY_LEN] for i in range(2)]
     out["records"] = []
     for t in range(len(LEVELS)):
@@ -92,6 +98,8 @@ def build(p):
         struct.pack_into("<%di" % n, data, off, *v)
     for i, nm in enumerate(p["names"]):
         data[NAMES + i * NAME_LEN:NAMES + (i + 1) * NAME_LEN] = nm
+    for o, v in zip(STRINGS, p["strings"]):
+        data[o:o + 15] = v
     for i, k in enumerate(p["keys"]):
         data[KEYS + i * KEY_LEN:KEYS + (i + 1) * KEY_LEN] = k
     for t, r in enumerate(p["records"]):
@@ -108,6 +116,7 @@ def mapped_mask():
     m = [False] * SIZE
     spans = [(off, n * 4) for off, n, _, _ in FIELDS]
     spans += [(NAMES, NAME_LEN * MAX_CARS), (KEYS, KEY_LEN * 2), (RECORDS, STRIDE * len(LEVELS))]
+    spans += [(o, 15) for o in STRINGS]
     for off, n in spans:
         for i in range(off, off + n):
             m[i] = True
@@ -133,7 +142,7 @@ def info(p):
         print("+0x%03x %-12s %-28s %s" % (off, name, v, note))
     print("participants:", ", ".join(cstr(n) for n in p["names"]))
     print("keys:", " ".join(k.hex() for k in p["keys"]))
-    print("unmapped: +0x19b..+0x1bf, +0x507..+0x587, +0x58f (frontend ¿?)")
+    print("strings:", ", ".join(repr(cstr(v)) for v in p["strings"]))
     show_records(p, range(len(LEVELS)))
 
 
