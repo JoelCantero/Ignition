@@ -129,7 +129,7 @@
 00026154  weather_init         [0x1fee8c] 1 rain / 2 snow / 3 wind by track  status=ported roadmap=phase2.effects
 000400f4  weather_zone         weather flag by player section  status=ported roadmap=phase2.effects
 000403c8  weather_update       weather tiles, density, lightning  status=ported roadmap=phase2.effects
-00051508  palette_blend        palette toward (r,g,b) by fraction
+00051508  palette_blend        eax=src 0x300 B, edx/ebx/ecx=r,g,b, stack: double frac, int32 keep[256]|0; copy to static 0x207afe (returned), c += chop(frac*(t-c)) at CW 0x127f, low byte; keep[i]!=0 skips; callers pass keep=0; palette.c, original-byte replay 164 cases (tests/palette_original.py); fx.c flash not yet routed through it  status=verified roadmap=phase2.effects
 00049a8c  sound_play           (group, sub, idx, loops, vol, Hz, x, z) distance attenuated  status=ported roadmap=phase4.audio
 0002a4ec  sound_load           banks GENERAL ROLL/SKID/COLL/BOOST/DIV, level, cars + ENGINE.INF  status=ported roadmap=phase4.audio
 00063310  sound_load_dir       load NN_*.WAV/PAT/XI of a directory  status=ported roadmap=phase4.audio
