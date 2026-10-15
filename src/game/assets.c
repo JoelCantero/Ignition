@@ -340,10 +340,21 @@ int ign_level_start(const IgnLevel *lv, float *x, float *z, float *heading) {
     return 0;
 }
 
+void ign_object_point(const IgnObject *o, int vertex, int32_t out[3]) {
+    const int32_t *v = o->verts + vertex * 3;
+    out[0] = v[0] + o->pos[0] + IGN_SRF_ORIGIN;
+    out[1] = v[1] + o->pos[1];
+    out[2] = v[2] + o->pos[2] + IGN_SRF_ORIGIN;
+}
+
 /* Plane height of a face at world (x, z); returns 0 on success. */
 static int face_height(const IgnObject *o, const IgnFace *f, float x, float z, float *y) {
     float p[3][3];
-    for (int k = 0; k < 3; k++) ign_object_vertex(o, f->v[k], p[k]);
+    for (int k = 0; k < 3; k++) {
+        int32_t q[3];
+        ign_object_point(o, f->v[k], q);
+        p[k][0] = (float)(q[0] - IGN_SRF_ORIGIN), p[k][1] = (float)q[1], p[k][2] = (float)(q[2] - IGN_SRF_ORIGIN);
+    }
     float ux = p[1][0] - p[0][0], uy = p[1][1] - p[0][1], uz = p[1][2] - p[0][2];
     float vx = p[2][0] - p[0][0], vy = p[2][1] - p[0][1], vz = p[2][2] - p[0][2];
     float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
@@ -361,20 +372,27 @@ static int wall_type(int t) {
     return t >= 0x28 && t <= 0x4f;
 }
 
-/* Mean vertex height of a face, up positive (sub_00020bbc). */
-static float face_avg_up(const IgnObject *o, const IgnFace *f) {
-    float sum = 0;
-    for (int k = 0; k < 3; k++) {
-        float p[3];
-        ign_object_vertex(o, f->v[k], p);
-        sum -= p[1];
-    }
-    return sum / 3.0f;
+/* face_avg_height 0x20bbc: integer mean of the vertices' heights (up) plus the object's current height. */
+static int32_t face_avg_up(const IgnObject *o, const IgnFace *f) {
+    int32_t sum = 0;
+    for (int k = 0; k < 3; k++) sum -= o->verts[f->v[k] * 3 + 1];
+    return sum / 3 - o->pos[1];
+}
+
+/* sub_00020814 0x20990-0x20b9c: the chosen face's normal (p0 - p1) x (p2 - p1) and points, engine coordinates. */
+static void face_plane(const IgnObject *o, const IgnFace *f, IgnGroundHit *hit) {
+    for (int k = 0; k < 3; k++) ign_object_point(o, f->v[k], hit->p[k]);
+    const int32_t *u = hit->p[0], *v = hit->p[1], *w = hit->p[2];
+    int32_t ax = u[0] - v[0], ay = u[1] - v[1], az = u[2] - v[2];
+    int32_t bx = w[0] - v[0], by = w[1] - v[1], bz = w[2] - v[2];
+    hit->normal[0] = (int32_t)((uint32_t)ay * (uint32_t)bz - (uint32_t)by * (uint32_t)az);
+    hit->normal[1] = (int32_t)((uint32_t)az * (uint32_t)bx - (uint32_t)bz * (uint32_t)ax);
+    hit->normal[2] = (int32_t)((uint32_t)ax * (uint32_t)by - (uint32_t)bx * (uint32_t)ay);
 }
 
 static void check_list(const IgnLevel *lv, const uint8_t *list, int off, int n, int descending,
-                       int32_t sx, int32_t sz, float x, float z, float query_up, IgnGroundHit *best,
-                       float *best_d, int *best_type) {
+                       int32_t sx, int32_t sz, int32_t probe_up, IgnGroundHit *best, int32_t *best_d,
+                       int *best_type, const IgnFace **best_face) {
     const IgnSurface *s = &lv->surface;
     for (int k = 0; k < n; k++) {
         size_t at = (size_t)off + (size_t)k * 4;
@@ -397,39 +415,47 @@ static void check_list(const IgnLevel *lv, const uint8_t *list, int off, int n, 
         int64_t rel = (int64_t)fo - 2 - (int64_t)o->nv * 3;
         if (rel < 0 || rel % 11 || rel / 11 >= o->nf) continue;
         const IgnFace *f = &o->faces[rel / 11];
-        float y;
-        if (face_height(o, f, x, z, &y)) continue;
-        /* Faces below the probe cost their distance, faces above its square; walls only as fallback. */
-        float d = face_avg_up(o, f) - query_up;
-        float metric = d < 0 ? -d : d * d;
+        /* 0x20907: faces below the probe cost their distance, faces above its square (imul, wrapping); walls only
+         * win when nothing else does. */
+        int32_t d = (int32_t)((uint32_t)face_avg_up(o, f) - (uint32_t)probe_up);
+        int32_t metric = d < 0 ? -d : (int32_t)((uint32_t)d * (uint32_t)d);
         int type = (int)(f->flags >> 16);
         if ((metric < *best_d && !wall_type(type)) ||
             (wall_type(*best_type) && !(wall_type(type) && metric >= *best_d))) {
             *best_d = metric;
             *best_type = type;
-            best->y = y;
             best->surface_type = type;
             best->object = plc;
             best->face = (int)(rel / 11);
+            *best_face = f;
         }
     }
 }
 
-int ign_ground_at(const IgnLevel *lv, float x, float z, float y_hint, IgnGroundHit *hit) {
+int ign_ground_query(const IgnLevel *lv, int32_t sx, int32_t probe_up, int32_t sz, IgnGroundHit *hit) {
     const IgnSurface *s = &lv->surface;
-    if (!s->data) return -1;
-    int32_t sx = (int32_t)floorf(x) + IGN_SRF_ORIGIN, sz = (int32_t)floorf(z) + IGN_SRF_ORIGIN;
-    if (sx < 0 || sz < 0 || sx / s->cell_w >= s->gx || sz / s->cell_h >= s->gz) return -1;
+    hit->object = -1;
+    if (!s->data || sx < 0 || sz < 0 || sx / s->cell_w >= s->gx || sz / s->cell_h >= s->gz) return -1;
     const uint8_t *c = s->cells + ((size_t)(sz / s->cell_h) * s->gx + sx / s->cell_w) * 12;
     uint32_t count = rd32(c + 8);
-    float best_d = 1e9f, query_up = -y_hint + 50.0f;
+    int32_t best_d = 1000000000;
     int best_type = 0x4f;
-    hit->object = -1;
-    check_list(lv, s->list_b, (int32_t)rd32(c), (int)(count >> 16), 0, sx, sz, x, z, query_up, hit,
-               &best_d, &best_type);
-    check_list(lv, s->list_a, (int32_t)rd32(c + 4), (int)(count & 0xFFFF), 1, sx, sz, x, z,
-               query_up, hit, &best_d, &best_type);
-    return hit->object < 0 ? -1 : 0;
+    const IgnFace *face = NULL;
+    check_list(lv, s->list_b, (int32_t)rd32(c), (int)(count >> 16), 0, sx, sz, probe_up, hit, &best_d, &best_type,
+               &face);
+    check_list(lv, s->list_a, (int32_t)rd32(c + 4), (int)(count & 0xFFFF), 1, sx, sz, probe_up, hit, &best_d,
+               &best_type, &face);
+    if (hit->object < 0) return -1;
+    face_plane(&lv->track.objs[hit->object], face, hit);
+    return 0;
+}
+
+int ign_ground_at(const IgnLevel *lv, float x, float z, float y_hint, IgnGroundHit *hit) {
+    int32_t sx = (int32_t)floorf(x) + IGN_SRF_ORIGIN, sz = (int32_t)floorf(z) + IGN_SRF_ORIGIN;
+    /* car_update 0x2ef41: the probe is trunc(height + 50). */
+    if (ign_ground_query(lv, sx, (int32_t)trunc(-(double)y_hint + 50.0), sz, hit)) return -1;
+    const IgnObject *o = &lv->track.objs[hit->object];
+    return face_height(o, &o->faces[hit->face], x, z, &hit->y) ? (hit->object = -1, -1) : 0;
 }
 
 #define WALL_RADIUS 600

@@ -95,14 +95,24 @@ void ign_free_level(IgnLevel *lv);
 void ign_object_rotation_matrix(const IgnObject *o, float out[9]);
 void ign_object_vertex(const IgnObject *o, int vertex, float out[3]);
 
+/* The engine's ground query and collisions see an object's mesh vertices plus its current (POS or collision object)
+ * position: the rotation only reaches the renderer. Engine coordinates: x/z + IGN_SRF_ORIGIN, y down. */
+void ign_object_point(const IgnObject *o, int vertex, int32_t out[3]);
+
 typedef struct {
     float y;          /* ground height (y down) */
     int surface_type; /* face flags >> 16 */
     int object, face;
+    /* sub_00020814 result 0xebad8: +4 normal (p0 - p1) x (p2 - p1), +0x10/+0x1c/+0x28 the face points (engine). */
+    int32_t normal[3];
+    int32_t p[3][3];
 } IgnGroundHit;
 
-/* sub_00020814: ground face under world (x, z) for a car whose height (y down) is y_hint. Returns 0 if found. */
+/* sub_00020814: ground face under world (x, z) for a car whose height (y down) is y_hint, probed 50 above it.
+ * Returns 0 if found. */
 int ign_ground_at(const IgnLevel *lv, float x, float z, float y_hint, IgnGroundHit *hit);
+/* sub_00020814 with its own integer arguments: engine x/z (world + IGN_SRF_ORIGIN) and the probe height (up). */
+int ign_ground_query(const IgnLevel *lv, int32_t sx, int32_t probe_up, int32_t sz, IgnGroundHit *hit);
 
 /* Start pose from the first two TRI road sections. Returns 0 on success. */
 int ign_level_start(const IgnLevel *lv, float *x, float *z, float *heading);
