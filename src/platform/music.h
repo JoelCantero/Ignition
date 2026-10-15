@@ -16,6 +16,8 @@ int ign_music_track(const char *level, int mode);
 int ign_music_play(const char *data_dir, int track, int loop);
 /* sub_00064391: stops the music, ends the race state and frees the decoder. Call before ign_sound_stop closes the device. */
 void ign_music_stop(void);
+/* sub_00063cf3: the CD is still playing (the menu restarts the music when it is not). */
+int ign_music_playing(void);
 /* sub_00063f3e: CD volume 0..255 (the race sets the 0..10 setting [0x1ff253] x 25.5). */
 void ign_music_set_volume(int volume);
 /* level_prepare 0x2249c: stores the race state (data folder, level, [0x1ff24f] `mode`, [0x1ff253] `volume` 0..10),

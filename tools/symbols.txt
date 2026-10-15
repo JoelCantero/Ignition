@@ -3,8 +3,8 @@
 000215d0  game_init            sets 640x480 then 320x200, prints banner, loads system gfx  roadmap=phase4.ui
 00021860  load_system_gfx      N_SYSGFX.PIC, N_SYSG_2.PIC, SYS.COL  roadmap=phase4.ui
 000224d0  load_level           LEVELS\%s%s.{TRI,SRF,COL,PIC,POS,MSH,TEX}  roadmap=phase2.world
+00011504  menu_load_gfx        LOADING, MENU.COL/TAB, pictures, settings + IGN_DOS.BTZ, menu_init 0x14000 inlined (src/frontend/frontend.c)  status=ported roadmap=phase4.ui
 000243e0  load_panel_gfx       S/N_PANGFX, H_PAN1/2, S/N/H_SIGNS, POKAL.PIC (raw files, pixels at +0x34e); HUD ones loaded by hud.c  status=ported roadmap=phase4.hud
-00011504  menu_load_gfx        baltazar\data\*.pic  roadmap=phase4.ui
 00060f9c  load_file            eax=filename -> eax=malloc'd contents or 0
 000558e4  set_video_mode       mode params in 0xc5cfc..0xc5d08 (w, h, bpp, ?)
 00062775  sprintf              cdecl (dest, fmt, ...)
@@ -25,7 +25,7 @@
 00048a14  car_place_objects    per frame: body/wheels/shadow/name engine objects, front wheel steer  roadmap=phase3.render
 00040ec8  cars_body_sway       body tilt car+0x584/+0x58c = ground tilt + lean, smoothed 0.25  roadmap=phase1.car
 0002e6f8  car_body_lean        lean car+0xb8/+0xc0 from per-tick acceleration  roadmap=phase1.car
-000160c4  cheat_check          typed words 0xbf030[7] toggle flags 0x1fb2f0[i] (BANARNE..STRINGS)  roadmap=phase4.ui
+000160c4  menu_page_key        page key callback: cheats (0xbf030), idle, intro skip, sounds, CONTROLS, language confirm + car list, KEY ALREADY ASSIGNED, car/track animations; returns 0x441 to consume  status=ported roadmap=phase4.ui
 0001ebb4  body_vs_body         box-box contact (edges 0xbfe40), returns 1 on impulse  roadmap=phase2.collisions
 0001e638  body_pair_impulse    eax=A, edx=B, stack: cx, cz, theta  roadmap=phase2.collisions
 0002236c  level_prepare        progress bar, load_tri, objects, load_srf_grid  roadmap=phase2.world
@@ -35,7 +35,7 @@
 00060f40  read_file_into       eax=path, edx=buf, ebx=size
 000240f4  load_fonts           IGNITION.FNT -> [0x1feff4]; yellow/pos/speed{_s,,_h}.lft -> [0x1fea0c..0x1fea38] (font.c/hud.c load the layout's three)  status=ported roadmap=phase4.hud
 001febf4  g_level_pos
-0001aaf8  menu_load_car        menucar.plc/msh/tex  roadmap=phase4.ui
+0001aaf8  menu_load_car        DEFAULT2.PSQ, TEST2.PFM, 29 texture pages, CANADA.SHD + solid table, MENUCAR.*  status=ported roadmap=phase4.ui
 001fefd4  g_level_msh
 001fec08  g_cars_msh
 001fefec  g_level_plc          u32 n + 20-byte records
@@ -198,6 +198,103 @@
 000bf994  t_ai_lookahead        6 i16 section offsets {1,2,3,4,6,8} (read as dword [0xbf992+2k] >> 16)
 000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty
+00010010  main                 lisa_init, video, kbd_init(350,70), timer, loop main_step; replaced by SDL main()  status=native roadmap=phase4.loop
+00010060  main_step            [0xab5e0] 0 boot / 1 game_frame 0x20d60 / 2 shutdown; advances g_timer_ms (x1000/36 of PIT units)  status=native roadmap=phase4.loop
+00010158  main_init_no_sys     dead copy of main's init half  roadmap=phase4.loop
+00010198  timer_init           PIT ch0 mode 2 + BIOS ticks, shift calibration; SDL_GetTicks in the port  status=native roadmap=phase4.loop
+00010238  timer_delta          dt in 1/36.418 s units clamped to 10, fps/uptime side effects  status=native roadmap=phase4.loop
+00010334  bios_ticks           dead: INT 1Ah  roadmap=phase4.loop
+0001034c  pit_read             latched PIT ch0 count >> g_pit_shift  status=native roadmap=phase4.loop
+00010390  anim_free_all        PLC 0xfa texture-tile animations [0xab5f0]  roadmap=phase2.world
+0001044c  anim_free_all2       byte-identical copy of 0x10390  roadmap=phase2.world
+00010508  anim_register        faces of a 0xfa mesh = frames (64x64 tiles); collects matching world faces  roadmap=phase2.world
+0001098c  anim_count_faces     roadmap=phase2.world
+00010a00  anim_step            shifts collected faces' UV/page to the next frame (collisions_pass)  roadmap=phase2.world
+00010b30  anim_collect         roadmap=phase2.world
+00010bc8  anim_count_matches   roadmap=phase2.world
+00010c5c  face_in_tile         roadmap=phase2.world
+00010cf8  uv_in_tile           roadmap=phase2.world
+00010d34  sqr_table_init       roadmap=phase3.render
+00010d80  dead_vga_copy        no stores; compiled-out body  roadmap=phase3.render
+00010e04  blend_table_avg      dead  roadmap=phase3.render
+00010ea4  blend_table_avg_fast dead  roadmap=phase3.render
+00010f4c  blend_table_lerp     dead; likely the MENU.TAB generator  roadmap=phase3.render
+00011004  color_buckets_build  roadmap=phase3.render
+00011200  rgb_avg3             dead  roadmap=phase3.render
+00011228  nearest_color_fast   roadmap=phase3.render
+00011384  rgb_avg              roadmap=phase3.render
+000113c0  rgb_lerp             roadmap=phase3.render
+00011410  nearest_color        roadmap=phase3.render
+00011494  overlay_table_build  T[s][d] = s ? s : d; called by sub_24840  roadmap=phase3.render
+000114d0  alloc_ea3c4          dead  roadmap=phase3.render
+000114e0  raster_init_wrap     dead  roadmap=phase3.render
+000114f4  draw_list_wrap       dead  roadmap=phase3.render
+00012bb8  menu_frame           fixed-step menu frame: intro CDP + fades, idle credits, iris, CD/SFX volume, gui tick; 1 stay 2 race 3 quit  status=ported roadmap=phase4.ui
+00013a5c  menu_shutdown        status=ported roadmap=phase4.ui
+00013c1c  menu_restore_video   dead copy (same code in menu_load_gfx / 0x16f70)  status=ported roadmap=phase4.ui
+00013ccc  menu_sound_init      dead copy of menu_load_gfx's sound init (no-soundcard wait not reproduced)  status=ported roadmap=phase4.ui
+00013e70  menu_play_sound      dead  status=ported roadmap=phase4.ui
+00013ec0  menu_draw_sprite     dead  status=ported roadmap=phase4.ui
+00013ee0  menu_draw_sprite_xf  dead  status=ported roadmap=phase4.ui
+00013f14  menu_present         dead  status=ported roadmap=phase4.ui
+00013f65  menu_frame_dt        dead; real entry 0x13f64  status=ported roadmap=phase4.ui
+00014000  menu_init            inlined in menu_load_gfx  status=ported roadmap=phase4.ui
+00015254  menu_msg_post        dead debug message poster; consumer ported in menu_frame  roadmap=phase4.ui
+00015344  menu_iris            iris transition through the 0x2ac28 table and MENU.TAB  status=ported roadmap=phase4.ui
+00015548  menu_format_time     '%.2d:%.2d:%.2d'  status=ported roadmap=phase4.ui
+000155d0  menu_draw_text_layer boxes + item texts / credits / dialogs / calibration texts  status=ported roadmap=phase4.ui
+00016e18  cheat_poll           dead copy of the cheat prologue of 0x160c4  status=ported roadmap=phase4.ui
+00016f18  act_quit             item callback 1  status=ported roadmap=phase4.ui
+00016f44  act_start_race       item callback 2  status=ported roadmap=phase4.ui
+00016f70  act_video_mode       item callback 3 (unreferenced by the menus)  status=ported roadmap=phase4.ui
+00017014  act_restore_settings item callback 4  status=ported roadmap=phase4.ui
+00017054  act_reset_ghosts     item callback 5: deletes GHOSTS\*.GST  status=ported roadmap=phase4.ui
+000170ac  menu_page_draw       page draw callback of every menu: sprites, text layer, PFM background, logo, blend, flags, car carousel, corners  status=ported roadmap=phase4.ui
+0001911c  menu_draw_hiscores   BEST TIMES table  status=ported roadmap=phase4.ui
+00019508  menu_car_render      one MENUCAR model; port draws with its own rasteriser (camera approximate)  status=ported roadmap=phase4.ui
+0001969c  menu_bg_anim_step    dead copy of the inlined PSQ step  status=ported roadmap=phase4.ui
+00019790  menu_load_tex_pages  dead copy (inlined in menu_load_car)  status=ported roadmap=phase4.ui
+00019840  menu_load_shd_tables dead copy (inlined in menu_load_car)  status=ported roadmap=phase4.ui
+000198bc  menu_commit_settings menu cursors -> race configuration in g_cfg 0xe9bfc  status=ported roadmap=phase4.ui
+00019ac8  menu_setup           dead copy (inlined in menu_load_gfx)  status=ported roadmap=phase4.ui
+0001a864  settings_defaults    g_cfg defaults  status=ported roadmap=phase4.ui
+0002ac28  iris_table_build     405x800 shade ramp [0x1fef4c]  status=ported roadmap=phase4.ui
+00051818  blit_lut_rect        dst = lut[src<<8|dst] over a rectangle  status=ported roadmap=phase4.ui
+00051b20  gui_start            Baltazar menu framework (src/frontend/gui.c)  status=ported roadmap=phase4.ui
+00051c94  gui_tick             25 Hz key scan, key callback, text entry, key capture, value/cursor actions  status=ported roadmap=phase4.ui
+000527c8  gui_draw_items       status=ported roadmap=phase4.ui
+00052a0c  gui_free             status=ported roadmap=phase4.ui
+00052a5c  gui_set_input_lock   status=ported roadmap=phase4.ui
+00052a9c  gui_process_keys     dead copy of the key loop inlined in gui_tick  status=ported roadmap=phase4.ui
+00053390  gui_publish_state    snapshot 0x2080ac read by the game callbacks  status=ported roadmap=phase4.ui
+000533f4  gui_key_consume      dead  status=ported roadmap=phase4.ui
+00053410  gui_sprite_put_xy    dead  status=ported roadmap=phase4.ui
+00053431  gui_dt               dead; real entry 0x53430  status=ported roadmap=phase4.ui
+000534cc  gui_navigate         transition table 0xbe514: push / pop / callback rows  status=ported roadmap=phase4.ui
+0005383c  gui_draw_element     status=ported roadmap=phase4.ui
+000539f8  gui_item_build_sprite no shipped element has sprite pixels: no-op  status=ported roadmap=phase4.ui
+000541d4  menubox_init         MenuBkg.dat + highlight remap  status=ported roadmap=phase4.ui
+00054278  menubox_clear        status=ported roadmap=phase4.ui
+000542c4  menubox_add          status=ported roadmap=phase4.ui
+0005430c  menubox_draw         status=ported roadmap=phase4.ui
+00054330  menubox_draw_one     fill, connectors to the row above, corners  status=ported roadmap=phase4.ui
+00054838  menubox_hline        status=ported roadmap=phase4.ui
+00054864  menubox_tile         bottom-up 19-row tile, styles per half  status=ported roadmap=phase4.ui
+000549b0  pfm_load             Script Player: li00..li03 chunks; port matched the original pixel for pixel in an emulator (209 frames)  status=ported roadmap=phase4.ui
+00054b44  pfm_index_frame      status=ported roadmap=phase4.ui
+00054bf0  pfm_load_texdefs     li02  status=ported roadmap=phase4.ui
+00054cd0  pfm_load_sprites     li03  status=ported roadmap=phase4.ui
+00054df8  pfm_build_frame      PFM types 7, 11, 13, 15, 17, 18, 19  status=ported roadmap=phase4.ui
+000552e0  mem_group_free_default Script Player pool  roadmap=phase4.ui
+000552f0  cdp_set_palette      status=ported roadmap=phase4.ui
+000552fc  cdp_open             status=ported roadmap=phase4.ui
+00055384  cdp_next_frame       decoder at 0xc5800 (fe = 16-bit run)  status=ported roadmap=phase4.ui
+00055cd0  kbd_typed            cheat words in the typed ring  status=ported roadmap=phase4.ui
+00060e3d  raster_draw_list     dispatcher 0xd7bd0; PFM primitive types ported (src/frontend/pfm.c), 3D types use raster.c  status=partial roadmap=phase4.ui
+000704a0  raster_pfm_sprite    type 7 -> two type-18 triangles  status=ported roadmap=phase4.ui
+00073c58  raster_tex_tri       type 17  status=ported roadmap=phase4.ui
+000744c8  raster_tex_shade_tri type 18  status=ported roadmap=phase4.ui
+00074d04  raster_shade_tri     type 19  status=ported roadmap=phase4.ui
 00028000  hud_build_sprites    sub-sprites of the panels from rect tables [0x1fef44] (0xc3618/0xc3858/0xc3a98), lights, signs, markers, medals  status=ported roadmap=phase4.hud
 00028a14  hud_select_layout    [0x1feeac] layout 0/1/2 from the runtime video table 0x1d5eb0 (port: by frame width), [0x1fef1c] text table, [0x1feeb0] = 6 + hires (MINI/SMALL)  status=partial roadmap=phase4.hud
 00028a84  hud_rebuild_sprites  same sprite tables as 0x28000, re-creating existing handles  status=identified roadmap=phase4.hud
@@ -267,7 +364,5 @@
 001fee04  g_ghost_record_cs    time to beat in centiseconds (ghost header, 3000000 without ghost)
 001fee00  g_ghost_overflow     recording over 300 s or ghost of another track: no GST written
 001fee4c  g_ghost_on           BTZ+0x10, kept only in time trial
-0001a864  btz_menu_defaults    fresh menu image at 0xe9bfc: version 30, cars, grid 0..7, PL1/PL2, scancodes, "G1"/"12"  status=ported roadmap=phase4.ui
-0001911c  records_screen       menu records table: BTZ +0x57f track, +0x583 race/lap, '%.2d:%.2d:%.2d'  roadmap=phase4.ui
 000bf628  t_factory_records    7 x 0x78 default record blocks (OSK 145.00 ... K L 84.00), copied by menu_load_gfx 0x126dc
 000e9bfc  g_menu_btz           menu copy of IGN_DOS.BTZ (read only if +0x000 == 30)

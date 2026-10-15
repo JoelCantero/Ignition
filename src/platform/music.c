@@ -146,6 +146,8 @@ static int playing(void) {
     return on;
 }
 
+int ign_music_playing(void) { return playing(); }
+
 int ign_music_start(const char *data_dir, const char *level, int mode, int volume) {
     snprintf(R.dir, sizeof R.dir, "%s", data_dir);
     snprintf(R.level, sizeof R.level, "%s", level);

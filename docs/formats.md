@@ -1244,132 +1244,184 @@ hay menú principal (pista 7).
 - **PIC de pista** (`USA.PIC` etc.): imagen 320×200 de la pista, no el fondo de la vista 3D.
 - **TRI**: significado de los `double`s y de los registros que no coinciden (¿objetos animados?). **SRF**: campos 2–4 de los triángulos (¿plano/altura?) y el tercer valor de cada celda.
 - **LFT/FNT y HUD de carrera**: véase la sección «HUD de carrera, fuentes y sprites».
-- **CDP**: vídeo, `"CDP\0"`, `u16 100`, `u16 frames`, …, `u16 320`, `u16 200`, paleta.
-- **PSQ**, **PFM** (`"li01"`), **BTZ** (véase la sección `IGN_DOS.BTZ` más abajo), **AIS** (texto de IA).
+- **CDP**, **PSQ**, **PFM** y **MenuBkg.dat**: descifrados y portados, véase [Frontend](#frontend-portado-a-srcfrontend).
+- **BTZ**: véase la sección `IGN_DOS.BTZ` más abajo. **AIS** (texto de IA).
 - Audio: WAV PCM 8 bits mono 22050 Hz, PAT (GUS), XI (FastTracker II); música en pistas CD (`MUSIC/Track02-08.ogg`).
 
-## Objetos de colisión, contacto, objetos especiales y `collisions_pass`
+## Configuración y récords: `IGN_DOS.BTZ` (portado en `save.c`, `tools/btz.py`)
 
-Portado en `src/game/pos.c` (objetos móviles, especiales, `collisions_pass`), `src/game/car.c` (contacto,
-aplastamiento, reaparición) y `src/game/assets.c` (consultas de suelo y lista del motor). Verificación:
-`tests/contact.c` (unitaria), `tests/contact_real_assets.c` (7 pistas) y `tests/contact_original.py` (bytes LE con
-Unicorn, `IGN_VERIFY_ORIGINAL=ON`).
+Volcado crudo de los **0x597 = 1 431 bytes** de `0x1ff158` (`g_btz`), empaquetado: `i32` y `double` sin alinear.
+El menú trabaja con su propia copia en `0xe9bfc` (`g_menu_btz`) y la escribe al lanzar la carrera (`0x130eb`,
+`0x1314e`); la carrera la lee entera en `race_config_load` `0x2293c` (`read_file_into`, nombre en `[0xc0c64]` =
+`ign_dos.btz`; sin fichero sale con "Error while trying to read"). `btz_save` `0x2cf60` (al final de cada carrera,
+desde `race_end_save` `0x2ccc8`) y `shutdown_save` `0x2b430` la escriben entera con `write_file` `0x61078`
+(`fopen "wb"` + un `fwrite`).
 
-- **Orden de carga y clases.** La máquina de estados `[0x1fee08]` de `sub_00020d60` ejecuta 1 → `0x22170`, 2 →
-  `0x221dc` (`split_plc_types 0x247b0`, tramos, `cars_init`, creación del mundo `0x2489c`) y 3 → `level_prepare`
-  (POS, TRI, efectos, animaciones de textura `0x2abdc`, fantasma, SRF). `0x247b0` **reescribe el tipo del PLC por su
-  clase** (`tipo & 0xfff`) y guarda en `[0x1fef7c]` (12 B por objeto) la capa (bits 12–15) y los bytes 2 y 3. Todas
-  las comparaciones de tipo del mundo ven la clase: los 0x112c de USA (182, 209) y JAPAN (250) son peligros 0x12c y
-  los 0x115f de USA (199, 211) emisores de humo.
-- **Consulta de suelo SRF** (`sub_00020814`): puntos = vértice MSH + posición actual del objeto del pool
-  (`+0xc/+0x10/+0x14`, que `LI_MOVEOBJECT` actualiza con POS); **la rotación no interviene** (solo la usa el render).
-  Coste entero: `face_avg_height` = `−(v0y+v1y+v2y)/3` (división truncada) `+ y_pool`, `d = media − sonda`,
-  `d < 0 ? −d : d·d` (`imul`). Sonda `trunc(altura + 50)`. Resultado `0xebad8`: `+0` tipo, `+4/+8/+0xc` normal entera
-  `(p0−p1)×(p2−p1)`, `+0x10/+0x1c/+0x28` puntos (motor, y abajo), `+0x34` objeto, `+0x38` tramo. **Ningún objeto
-  animado por POS ni de colisión tiene spans SRF** (7 pistas): para ellos cuentan la lista del motor, `0x32dc8`,
-  `0x3383c` y `car_ground_contact`. Esto sustituye a la nota de "spans no regenerados" de la sección POS.
-- **Rejilla y lista del motor.** `engine_alloc_objects 0x569ec` con el mundo de 51 200: celdas de 256 unidades, 200 ×
-  200 (`[0x24c048]`, ancho `[0x24c014]`); `LI_PLACEOBJECT 0x56c74` y `LI_MOVEOBJECT 0x56d24` (este solo si cambia de
-  celda) insertan el objeto **en la cabeza** de la cadena `+0x26` de su celda. La creación del mundo coloca primero las
-  clases < 100 y luego el resto, ambas en orden PLC. `sub_00058c1c` construye la lista `[0x24c01c]` (cuenta en
-  `vista+0x60`) recorriendo un patrón fijo de filas (`0xc5d8c`: fila y columna de inicio −10/−4, luego pares
-  (celdas, desplazamiento de la fila siguiente) hasta −5000) desplazado por `0xc5e40[yaw·0,01][pitch·0,01]`; cada
-  celda desde su cabeza. Con `[0x24bff0] ≠ 0` solo entran los objetos de capa (palabra `+0x24`) 0 o igual a ella;
-  `cars_update_all 0x2d685` y `respawn_place 0x41863` la toman de la capa del objeto del tramo del coche / de
-  reaparición, mientras `[0x1fb4d0] < 120` (−1 en carrera; luego fotogramas desde la meta del jugador).
-  `sub_0003383c` y `respawn_place` usan la vista (850, 0), que suma una fila.
-- **`sub_00032dc8`** (`eax=x, edx=altura, ebx=z, ecx=coche/−1`, sonda en pila, `ret 4`): sobre la lista del motor,
-  objetos de clase < 100 a < 600 (900 en modo salto del coche `[0x1feff0]`) en x/z: caras cuyo centro está a < 200 y
-  cuya proyección x/z cubre el punto (test de cruces entero) y que no son muros 0x28–0x4f, hasta 8 registros de 16
-  dwords en `0x1ff6f0` (más: mensaje y desbordamiento). Objetos de clase 0x12c–0x15d, solo si el resultado anterior
-  `[0x1ff970]` está en `[0, 0x15e)`, a < 190 en altura: el último con una cara bajo el punto gana. Si no hay especial,
-  la cara con menor `y + sonda − media_arriba ≥ 0` (primer mínimo estricto, normal no vertical); resultado como el de
-  `0x20814`, o −1. La usan `respawn_place` (sonda 50 sobre la altura de reaparición, reintento 20 hacia −x) y
-  `car_update` mientras vive un rayo (`[0x1fede4]`, puesto tras el primer fotograma de `0x3bdac` y borrado al final):
-  0x12d lanza el coche. No hay caras ni objetos 0x12d en los datos.
-- **Objetos de colisión** (creación del mundo `0x24f22–0x251fa`, lista `[0x1fefc0]`, `[0x1feeb4]` registros de 0x98 B):
-  clases 0x96–0xc7 (con la opción de detalle `[0x1fed64]`); `+0` = clase − 0x96, `+4` PLC, `+8` en vuelo,
-  `+0xc/+0x14/+0x1c` posición (`x+0x6400`, y PLC hacia arriba, `z+0x6400`), `+0x24` velocidad, `+0x3c` ángulos
-  (décimas de grado), `+0x54` giro, `+0x6c` cuerpo de contacto (vx, vz, w), `+0x84` masa, `+0x88` inercia,
-  `+0x8c` impacto, `+0x90` fase, `+0x94` periodo. 0x96 y 0x9a: masa 0,3, inercia 100, periodo 30 y fase compartida
-  0, 4, 8… (vuelve a 0 al llegar a 30); 0x98: 25 / 8000; 0x99: 2 / 1500; otra clase: "Ingen info om kollisions
-  objektet!!" y fin. USA 17, CANADA 22, AUSTRIA 23, BRAZIL 0, CARIB 24, ICELAND 9, JAPAN 53.
-- **`car_ground_contact` 0x350f0** (desde `collisions_pass` si `[0x1feeb4] > 0`, una vez por fotograma):
-  - En reposo, contra cada coche no destruido con `|car+8 − y| < 50` y `|dx|, |dz| < 150`: caja del coche
-    (`car+0x2fc/+0x31c` girada por `car+0xf8`, floats `0x207aa0`) contra el cuadrado ±30 del objeto con
-    `sub_000349e8`; si hay contacto, `sub_000346cc` entre el coche (`car+0`, `+0x10`, velocidad `car+0x640/+0x648`,
-    `body+0x30`, masa 10, inercia 4000 de `cars_init 0x273b3`, impacto `car+0x63c`) y el objeto. **Del coche solo se
-    conservan el giro `body+0x30` y el impacto**. El objeto sale con `vx, vz` del impulso, `vy = 2 + 2·rand`, giro
-    `5·impacto` y en vuelo; con impacto del coche > 10 suena COLL 1 con volumen `min(0x10000, trunc((|i| − 10)·3000))`.
-  - En vuelo (`0x356b8`): `vx·0,99`, `vy − 0,4`, `vz·0,99`; ángulos `+= giro` y a `[0, 3600)`; giro `·0,98`;
-    posición `+= v` acotada a `[0, 51200]` en x/z y `[−10000, 10000]` en y; `ground_query(trunc x, trunc y + 150,
-    trunc z)`. Si el plano `h` cumple `h + 15 > y`: con rapidez > 2 rebota (`sub_00035f38` con la normal
-    `(p0−p1)×(p2−p1)` con y invertida, luego `0,9 / 0,6 / 0,9`, `vy ≤ 20`, `y = h + 15`, giro `= 5·rapidez`); si no,
-    queda en reposo. Después `LI_MOVEOBJECT` con la pose truncada (cambia de celda en la rejilla).
-  - Clase 0x9a: durante el primer quinto del periodo, sprite de LIGHT.TEX (ranura 3, tamaño 400, vida 2, en `y + 20`)
-    con la tabla `0xc4010` (fase 0), `0xc4030` o `0xc4050` (último fotograma); la fase avanza cada fotograma.
-- **`sub_000349e8`** (polígonos float x/z): cruce de aristas con signos de productos float32; denominadores float32;
-  más de 8 cruces = sin contacto. Media de los cruces → `[0x1fee9c]/[0x1feea8]`; par más alejado (primer máximo
-  estricto; la distancia sin redondear se compara con el máximo float) → `atan2(z_i − z_j, x_i − x_j)` en `[0x1fee98]`.
-- **`sub_000346cc`**: brazos `a = atan2(c − p)` y `r` (floats), velocidades del punto `v ∓ r·w·(sin a, cos a)`;
-  sin contacto si el signo de la velocidad normal difiere del lado de A. `j0` float, impactos `|trunc(j0)|`;
-  `k = cos(θ − a)·r·m/I` (float); `jA = mB/(mA+mB)·(−1,5·j0) / (1 + cos(a−θ)·r·k)` (float),
-  `jB` igual con `mA`; `A.w += jA·kA`, `A.v += jA·(−sin θ, cos θ)`, `B.w −= kB·jB`, `B.v −= jB·(−sin θ, cos θ)`.
-- **`sub_00035f38`**: gira la velocidad `−atan2(nz, nx)` en torno a y y `−atan2(ny, |n_xz|)` en x/y; si la
-  componente normal es ≤ 0 la invierte y deshace los giros.
-- **`sub_00032d8c`** (una vez por fotograma): `car+0x640/+0x648 = (paso del eje trasero + del delantero)·0,5`
-  (`car+0x58/+0x78`, `+0x60/+0x80`); ejes `car+0x48/+0x68` a `car+0x5b0` detrás y `car+0x5ac` delante
-  (`cars_update_all 0x2da32`). `cars_init 0x267be`: `car+0x5ac = |x|` de la rueda 1 y `car+0x5b0 = |x|` de la rueda 3
-  respecto a la carrocería en CARS.PLC (tipo = coche·10 + pieza).
-- **Objetos especiales** (clases 0x12c–0x15d, lista `0x1fef58` de 16 B: PLC, tipo, contador, fase): en `car_update`
-  (`0x2ef9d`, con la sonda de la primera esquina), por cada entrada a < 200 en x y z del coche (posición actual): en
-  ICELAND (`[0x1fef10] == 5`) un objeto de clase 0x12c a < 30 en x, altura y z hace explotar el coche; si no,
-  `sub_0003383c(trunc x, trunc altura, trunc z, coche)` y, si devuelve ≥ 0x12c, termina el recorrido.
-  Consumidores (`0x30dbb–0x31303`): 0x12c explosión (`car+0x354`), 0x130 deslizamiento (`car+0x35c`); 0x12d o
-  0x131 con un géiser en erupción a < 80 (fase `+0xc` de `sub_00036ce0`) → si está en el suelo y `car+0x554 == 0`:
-  `car+0x20 −= 8` (como mucho −10), `car+0x554 = 1` y una pieza (tipo 5, vida 30, gravedad −460); mientras
-  `car+0x554 > 0` cada tick `car+0x110 = fmod(n·0,078, 2π)` (vuelta de campana) y tras 80 ticks se nivela.
-  0x12e (en el suelo y a < 50 de él): `car+0x20 −= 4,5 + 3·rand`, `body+0x30 −= 2,5 + 1,5·rand`, en el aire,
-  `car+0x20 ≥ −10`, y GENERAL sample 8 a 0x10000 si `[0x1fee3c] == 0` (luego 15, decrece en cada `car_update`).
-  0x12f: aplastamiento. Datos: 0x12c móviles en USA (182, 204, 209), CANADA (208–211), CARIB (332–335), ICELAND
-  (192–193) y JAPAN (250); 0x12e USA 181; 0x12f USA 173–174 y BRAZIL 299/301; 0x130 AUSTRIA (14); 0x131 ICELAND (5).
-- **`sub_0003383c`**: sobre la lista del motor de la vista (850, 0) en el coche; objetos de clase (palabra `+0x1e`)
-  en `[0x12c, 0x15e)`; con `d = punto − posición`, si `|dy| < 190` activa una puerta **que ya no se borra** para los
-  siguientes; con `|dx|, |dz| <` 600 (900 en modo salto) y la puerta activa, test de cruces entero sobre los
-  vértices sin rotar; el último objeto con una cara bajo el punto da la clase (si no, −1). Resultado en `0x1ffca8`.
-- **Aplastamiento** (`sub_00031858`): copia la malla de la carrocería escalada x·1,2, y·0,2, z·1,6 (cambio de malla
-  `0x56e9c`) y suena COLL 6. Disparadores: en el bucle de pares de `cars_update_all` (`0x2d3c2`), dos coches no
-  destruidos ni aplastados a < 25 en x y z (y < 70 en altura): el de menor `car+0x20` (el de abajo); y el objeto 0x12f.
-  Mientras dura (`car+0x558` cuenta ticks): `human_input 0x2c8f5` invierte la dirección, la IA (`0x1c5d8`) la invierte
-  parte del tiempo, y uno de cada seis ticks sale una bocanada de SMOKE (tamaño 150–300, vida 50). A los 200 ticks, si
-  no hay otro coche a < 30 en x y z, recupera la malla, salta 6 si está en el suelo y suena COLL 7; si lo hay, espera.
-- **Animaciones de textura** (`0x2abdc` en `level_prepare`, `sub_00010508`): cada objeto de clase 0xfa define los
-  fotogramas con sus caras texturizadas iniciales (hasta la primera no texturizada): mosaicos de 64×64
-  (`u, v & ~0x3fff`, página `extra & 0xffff0000`); un fotograma que repite un mosaico anterior no recibe caras. Cada
-  cara texturizada del mundo (misma regla) con la página igual y sus tres u/v en `[u, u+0x4000] × [v, v+0x4000]`
-  pertenece a ese fotograma. `sub_00010a00` mueve las caras del fotograma i al mosaico del fotograma `(i + n) mod
-  fotogramas` (n desde 1). `collisions_pass` suma 1 a `[0x1feef0]` por fotograma y al llegar a `0xc4598[pista]`
-  (CANADA 6, USA 20, CARIB 2, BRAZIL 4, AUSTRIA 12, ICELAND 9, JAPAN 12) da un paso y resta el periodo. CANADA 7
-  animaciones (179 caras), USA 3 (302), BRAZIL 7 (177), CARIB 1 (868, el mar), ICELAND 3 (32).
-- **Mensajes del HUD** (`[0x1fefb8]`, 5 × 0x78 B: activo, texto, `+0x68` duración, `+0x6c` medio periodo de parpadeo,
-  `+0x70` edad, `+0x74` vista): `0x4c7c0` usa la primera libre; `0x4c858` (en `collisions_pass`) los envejece y los
-  libera al pasar su duración; `0x4c89c` los dibuja mientras `fmod(edad, 2·parpadeo) ≤ parpadeo`. Encolan
-  "LAP RECORD"/"TRACK RECORD" (`car_update 0x2f43a`/`0x2f548`, 6 idiomas) y "%s IS OUT" (`0x2e100`), 80 fotogramas,
-  parpadeo 8.
-- **Humo de eliminación** (`sub_0004fcf0`, `collisions_pass` en modo 3 con el reloj de carrera < 0): el coche en
-  carrera cuya posición es `[0x1fed78]` (el último) suelta por la trasera (`car+0x5b8`) dos sprites EXSMOKE (ranura 7,
-  tamaño 250, crecimiento −6, vida 14) y, la mitad de los fotogramas, uno DARKSMOK (ranura 5, vida 25).
-- **Desviaciones**: los desplazamientos de `0x3383c`/`0x32dc8` se resuelven antes del tick del coche (en el original,
-  dentro de `car_update`, con el suelo de ese tick); `car+0x584` al nivelarse toma el balanceo en las unidades del
-  port; el render solo aplica la altura del aplastamiento (`body_stretch`), no x·1,2 / z·1,6; la IA no invierte la
-  dirección al estar aplastada (`ai.c`); los mensajes no se dibujan (`hud.c`), usan "PLAYER/CPU n" en lugar de los
-  nombres y no hay "TRACK RECORD" (el port no guarda récords de pista); con un objeto especial `0x32dc8` deja en el
-  resultado la clase y los puntos con la posición del objeto (el original escribe la posición y los vértices crudos);
-  más de 8 caras en `0x32dc8` se descartan (el original desborda). En `sub_000346cc` el float `jB0 = −1,25·j0` (masas
-  10 y 2) puede caer en el punto medio de dos floats y el x87 desempata con su redondeo de 80 bits de `1/(mA+mB)`:
-  41 de 1 500 casos difieren en 1 ulp.
-- **Verificación LE** (`tests/contact_original.py`, semilla 0x350f0): 11 303 casos, todos dentro de tolerancia y
-  11 262 exactos — polígonos 1 503, impulsos 1 500 (1 459 exactos), reflexión 1 500, vuelo 1 500, rebote 1 500,
-  `sub_0003383c` 1 500 y `sub_00032dc8` 1 500 sobre listas sintéticas (`0x58c1c` sustituida por un `ret`), lista del
-  motor `sub_00058c1c` 300 (rejillas sintéticas con cadenas y capas) y `sub_00010a00` 500. Corrigió dos errores del
-  port: la comparación del par más alejado y `r·k` en float32.
+**Arranque del menú** (`menu_load_gfx` `0x126be..0x12762`): `btz_menu_defaults` `0x1a864` rellena la copia (lo que no
+toca queda a cero: BSS), copia los 25 valores iniciales de los controles de opciones y la tabla de récords de fábrica
+`0xbf628`; después lee los 4 primeros bytes de `ign_dos.btz` y solo si valen **30** (versión) carga el fichero entero.
+Luego fija `+0x103 = 3 − +0x107` y limita `+0x00c ≤ +0x587`. Al principio (`0x115f8`) lee solo el idioma
+(`+0x593`) si la versión es 30.
+
+| Offset | Tipo | Destino / significado | Defecto `0x1a864` |
+|---|---|---|---|
+| `+0x000` | `i32` | versión: 30 | 30 |
+| `+0x004` | `i32` | `[0x1fef14]` jugadores humanos − 1 (`[0x1feea0]` = valor + 1) | 0 |
+| `+0x008` | `i32` | modo `[0x1feefc]` (salto `0x2292c`): 0 campeonato, 1 ¿carrera suelta?, 2 contrarreloj, 3 eliminación | 0 |
+| `+0x00c` | `i32` | clase del campeonato `[0x1fedd8]` 0..3 (5, 6, 7 y 7 pistas): fila de `0xc45b4`; ≤ `+0x587` | 0 |
+| `+0x010` | `i32` | `[0x1fee4c]` fantasma; a 0 fuera de contrarreloj o si más de un participante tiene `+0x04 ≠ 1` | 1 |
+| `+0x014`, `+0x018` | `i32` | `[0x1fed64]` (1 en campeonato), ¿? | 1, 1 |
+| `+0x01c` | `i32[9]` | participante `+0x00` (modelo de coche) | 0 2 3 4 5 7 8 8 0 |
+| `+0x040`, `+0x044` | `i32` | coche elegido en el menú por los jugadores 1 y 2 (limitado a los disponibles, `0x167df`) | 0 |
+| `+0x048` | `i32[9]` | participante `+0x0c` | 1 |
+| `+0x06c` | `char[9][15]` | nombres, `sprintf("%s")` a participante `+0x3c` | `PL1` … `PL2` |
+| `+0x0f3` | `i32` | pista (`[0x1fef10]`); en campeonato, ronda: pista = `0xc45b4[clase][ronda]` | 0 |
+| `+0x0f7` | `i32` | `[0x1feed8]`: 0 = valor de la pista `0xc3fd8` (tope `[0x25a934]`), −1 = aleatorio, otro = fijo | 0 |
+| `+0x0fb`, `+0x0ff` | `i32` | `[0x1feef4]`, `[0x1fee94]` = valor × 10 (`[0x1fee28]` = `[0x1fee94] != 0`) | 5, 10 |
+| `+0x103` | `i32` | `3 − +0x107` (menú) | 3 |
+| `+0x107`, `+0x10b` | `i32` | `[0x1fef08]`/`[0x1fefdc]` y `[0x1fefcc]`; `0x2cf60` los reescribe | 0, 0 |
+| `+0x10f`, `+0x113`, `+0x117` | `i32` | `[0x1fee84]`, `[0x1fed80]`, `[0x1fed70]` | 0, 1, 1 |
+| `+0x11b`, `+0x11f` | `i32` | solo menú | 2, 2 |
+| `+0x123`, `+0x12b` | `i32[2]` | participante `+0x08` y `+0x18` de los humanos; `cheat_check` pone `+0x123/+0x127` a 1, 2 o 3 | 0 |
+| `+0x133` | `i32[8]` | orden de salida `0xc33d0` | 0 … 7 |
+| `+0x153` | `i32` | coches en carrera `[0x1fefe4]` | 1 |
+| `+0x15b` | `i32` | `[0x1fee48]` | 0 |
+| `+0x15f` | `i32[8]` | participante `+0x04` (1 = ¿ordenador?) | 0 1 1 1 1 1 1 1 |
+| `+0x17f` | `u8[2][8]` | códigos de tecla DOS de los humanos → participante `+0x1c..+0x23` (los dos primeros se cruzan si clase ≥ 3); jugador 1 con flechas | `cb cd c8 d0 35 34 36 28`, `2e 30 21 2f 2b 2a 2c 1f` |
+| `+0x18f`, `+0x193`, `+0x197` | `i32` | solo menú, solo menú, `[0x1febe0]` | 0 |
+| `+0x19b`, `+0x1aa` | `char[15]` | cadenas del menú ¿? | `"G1"`, `"12"` |
+| `+0x1bf` | 7 × `0x78` | **récords por pista** (`g_track_records` = `0x1ff317`), índice = id de pista del GST (0 CANADA … 6 JAPAN) | `0xbf628` |
+| `+0x507` | `i32[25]` | valores de los controles de opciones (`+0x14` de los controles de `0xea47c`) | 0, salvo el 10 = 1 |
+| `+0x57f`, `+0x583` | `i32` | pantalla de récords `0x1911c`: pista mostrada y tabla (carrera/vuelta) | 0 |
+| `+0x587` | `i32` | `[0x1ff6df]` clase más alta desbloqueada | 0 |
+| `+0x58b` | `i32` | `[0x1ff6e3]` 1 tras ganar la clase 3 | 0 |
+| `+0x58f` | `i32` | solo menú | 0 |
+| `+0x593` | `i32` | idioma `[0x1ff6eb]`: 0 inglés, 1 alemán, 2 italiano, 3 español, 4 sueco, 5 francés | 0 |
+
+Récords de fábrica (`0xbf628`, carrera / vuelta, el primero de cinco): CANADA OSK 145 / 48, USA PEZ 118 / 39,
+CARIB JIG 175 / 58, BRAZIL EMP 203 / 67, AUSTRIA PQL 203 / 67, ICELAND SHR 175 / 58, JAPAN KOT 233 / 77 s.
+
+Bloque de récords de una pista (`0x78` B): `char[5][4]` nombres de carrera, `double[5]` tiempos de carrera (`+0x14`,
+segundos), `char[5][4]` nombres de vuelta (`+0x3c`), `double[5]` tiempos de vuelta (`+0x50`), el mejor primero.
+`reset_race_times` `0x2a442` siembra `g_best_lap` (`0x1fb390`) con la vuelta 0 de la pista. Avisos en carrera
+(`car_update`): "LAP RECORD" (`0x2f43a`, 6 idiomas) cuando una vuelta mejora `g_best_lap`; "TRACK RECORD"
+(`0x2f548`) al completar la vuelta 3 fuera de eliminación con `car+0x3a4` < tiempo de carrera 0. Inserción
+(`render_main` `0x45938..0x45f20`, una vez por coche con `car+0x528 == 1`, solo humanos): si `t <` hueco 4 (`fcomp`
++ `jae`: empate o NaN no entran) se escribe en el hueco 4 con `sprintf("%s", nombre)` y se hace una pasada de
+burbuja 4→1 intercambiando mientras el inferior sea estrictamente menor. Lo mismo para la tabla de vueltas con los
+tres huecos `car+0x3bc/+0x3c4/+0x3cc`.
+
+**Campeonato** (modo 0). `render_main` `0x44a2a`: clasificado si el coche 0 (o el 1 con dos jugadores) acaba entre
+los 4 primeros (`car+0x3a0 < 4`; el bucle no avanza el puntero, así que solo mira esos dos coches). `0x44a66`: la
+ronda 4 de la clase 0, la 5 de la 1 o la 6 de las clases 2/3 completa la clase ("YOU HAVE COMPLETED THIS
+DIFFICULTY LEVEL"); si no, "WELL DONE!" y `[0x1fee54] = pista + 1`. `race_end_save` `0x2ccc8`: con
+`[0x1fee54] > pista`, ronda `+0x0f3` + 1 (máx. 6), suma los puntos de `0xc548c[puesto]` a `[0x1aebb0]` (fuera del
+BTZ) y escribe `+0x133[i] = 6 − puesto`. Desbloqueos (`0x44fd2..0x45095`, solo con un jugador y el coche 0 primero
+en la clasificación): ronda 6 y clase 3 → `+0x58b = 1`; ronda 6 y clase ≤ 2 → `+0x587 ≥ 3`, clase 3; ronda 5 y
+clase ≤ 1 → `+0x587 ≥ 2`, clase 2; ronda 4 y clase 0 → `+0x587 ≥ 1`, clase 1. `btz_save` `0x2cf60`: fuera del
+campeonato con más de un coche hace `ncoches` intercambios del orden de salida con dos índices
+`floor(rand01 × ncoches)` y reescribe `+0x107`/`+0x10b`.
+
+**Contrarreloj** (`[0x1feefc] == 2` y `[0x1fee4c] == 1`): `ghost_load` `0x2adf8` lee `GHOSTS\<nombre>.GST`; si
+falla, `[0x1fee4c] = 0` y `[0x1fee04] = 3 000 000`; si no, `[0x1fee04]` = tiempo de la cabecera (antes de mirar la
+pista), `[0x1fed84]` = modelo, nombre a `0x1fb4b8`, y si la pista de la cabecera no es `[0x1fef10]` no copia las
+muestras y pone `[0x1fee00] = 1` (por tanto no se guardará). Al terminar, `0x2ccc8` graba el fantasma solo si
+`[0x1fee00] == 0` y `[0x1fee04] × 0.01 > car+0x3a4`. Sin la opción de fantasma, `[0x1fee04]` no tiene otro
+escritor (BSS a 0 ¿?) y nunca se graba.
+
+**Port**: `IgnBtz` conserva la imagen como bytes. `tools/btz.py roundtrip` reconstruye desde cero los 1 397 bytes
+mapeados y no queda ningún byte no nulo opaco en el fichero distribuido. `ign_btz_default` es la imagen del menú
+recién arrancado y `tests/btz_defaults_original.py` (opcional, Unicorn) la compara byte a byte con
+`0x1a864` + controles + `0xbf628` ejecutados sobre el original. Verificado: el `IGN_DOS.BTZ` real carga, decodifica,
+recodifica y guarda idéntico (`save_btz`); tras una carrera sin récord el fichero escrito es idéntico; una
+eliminación terminada solo baraja los huecos del orden de salida (`time_trial`). Persistencia en
+`SDL_GetPrefPath("UDS", "Ignition")` (o `IGN_SAVE_DIR`): `IGN_DOS.BTZ` (si falta o su versión no es 30, el fichero del
+juego, que solo se lee, o la imagen por defecto) y `GHOSTS/<nombre>.GST` (primero ahí, luego en la carpeta del juego).
+La ventana la usa siempre; sin ventana solo con `--time-trial` o `IGN_SAVE_DIR`. Al terminar el jugador se insertan
+los récords y se guarda (como `render_main`); cuando todos han terminado se aplica `0x2ccc8`/`0x2cf60` y se guarda
+otra vez. **Desviaciones**: nombres de récord truncados a 3 letras (el original desbordaría al hueco siguiente); un
+coche eliminado o una vuelta vacía (0) no entran en las tablas; el nombre del jugador es el participante 0; los
+récords se guardan ya al terminar el jugador (el original espera al final de la carrera); los desbloqueos
+(`ign_champ_unlock`) no se llaman porque el port no lleva la clasificación por puntos del campeonato (`[0x1aebb0]`,
+fuera del BTZ) ni encadena pistas; el modo de la carrera es el de la línea de órdenes, no `+0x008`; contrarreloj
+sin rivales; la comparación `× 0.01` se hace en `double`, no en x87 de 80 bits; `rand01` es `rand()` de C.
+
+## Frontend (portado a `src/frontend/`)
+
+Flujo (`sub_00020d60`): `[0x1fede8]==1` → `menu_load_gfx` `0x11504` (pantalla LOADING, `MENU.COL`, `MENU.TAB` como LUT
+de sprites `[0x257e48]`, imágenes, valores por defecto `0x1a864` + `IGN_DOS.BTZ`, arranque del motor de menús) →
+`menu_frame` `0x12bb8` cada fotograma (1 seguir, 2 carrera, 3 salir) → `menu_shutdown` `0x13a5c`. Tras una carrera se
+vuelve a cargar el menú; con `[0xbed18]==0` la página de idioma se confirma sola (Enter inyectado) y en lugar de la
+intro hay un iris de apertura.
+
+**Tiempo.** El menú cuenta en *ticks* de 1/36 s (`timer_ms·0,036`), con `dt` 0 → 0,01 y > 10,8 → 10,8, en pasos
+enteros más uno fraccionario (que puede valer 0). Los contadores de animación suman 27 por paso aunque el paso sea 0.
+El motor de menús tiene su propio reloj a 25 Hz (`timer_ms·0,04`, máximo 12) y su bloqueo de entrada resta 25 por paso.
+
+**Intro (primera entrada).** Enter en la página de idioma carga `IGN1`, `IGN2`, `IGN3_0..3.CDP` (150, 129, 97, 60, 40
+y 46 fotogramas) a 15,04 fps (2,3931 ticks); paleta negro→blanco (0–28,8), blanco→vídeo (28,8–57,6), vídeo→blanco
+desde 1249,2 (= 522 fotogramas), blanco→`MENU.COL` desde 1306,8; entrada desbloqueada a 1312,56, fin a 1335,6.
+`3_INTRO.WAV` suena dos veces a 22 050 Hz. Cualquier tecla salta a 1278. Al terminar empieza el pase de créditos.
+
+**Créditos (inactividad).** Tras 1080 ticks (30 s) sin teclas: 16 diapositivas de 168 ticks (`0xbf57c`:
+`{título, nombre c, b, a}`, nombres `0xbf538`), la 1 y la 2 son imágenes de `N_SYSGFX.PIC`; "PRESS ANY KEY" parpadea
+500 de cada 809 ms. El reloj vuelve de 3780 a 1080.
+
+**Motor de menús "Baltazar"** (`0x51b20`–`0x539f8`, `gui.c`). Página 0x18 B `{dibujo 0x170ac, teclas 0x160c4, keymap
+0xbee1c, n, items, sel}`; ítem 0x1c B empaquetado `{int *valor (en g_cfg), min, max, Element *, i16 callback (>0
+acción 1-based en 0xbf01c, −1 = volver), i32 arg, EditDesc *, i16 habilitado}`; elemento 0x18 B `{sprite (siempre
+NULL), texto, x/y de texto relativos al centro, fuente}`. Índices: etiqueta `sel^1` (+2, +2n si deshabilitado), valor
+`etiqueta + 2 + 2·(v − min)`. EditDesc 0x16 B: destino, x/y, fuentes, longitud, cursor `|`, tipo (1 texto, 2 texto al
+entrar, 3 tecla). La navegación no está en los ítems: la tabla `0xbe514` (25 filas × 16 `{i16 coincide, i16 acción}`
+por profundidad; coincide 0 = cualquiera, si no `sel+1`; acción ≥ 0 id de menú en `0xaeb6c + idioma·0x3110`, < 0
+acción −acción) decide por el camino recorrido, así que los modos de juego reutilizan las páginas de coche y pista.
+Keymap: Esc/Retroceso −6, Enter +6, ↑ −1, ↓ +1, ← −3, → +3 (los ±3 rotan el valor). El callback de teclas devuelve
+`0x441` para consumir. Las 25 páginas × 6 idiomas, textos, tablas de teclas, nombres de tecla, créditos y récords por
+defecto se extraen del ejecutable con `tools/gen_menu_data.py` a `src/frontend/menu_data.c`.
+
+Páginas (índice `k` de `0xea47c`): 0 principal, 1 opciones, 2 multijugador, 3 modo de juego, 4/5 coche J1/J2,
+6 pista, 7/8 red (inaccesibles), 9 gráficos, 10 sonido, 11/12 opciones de jugador, 13/14 teclas, 15 opciones de juego,
+16 récords, 17–20 calibración de joystick y pedales, 21 idioma (raíz), 22–24 confirmaciones SALIR/RESTAURAR/BORRAR.
+
+**Dibujo de página** (`0x170ac` con `0x155d0` en línea). Capa de texto 320×200 (`[0xea408]`) que solo se rehace
+cuando algo cambia: cajas de `MenuBkg.dat` (etiquetas estilo 0, valores y campos estilo 1; caja = `x−13`, fila
+`y/19`, desplazamiento `y%19−12`) y textos con la LUT identidad `[0x1fec0c]` (`lut[s<<8|d] = s`: los glifos son
+opacos y su fondo es el color de la caja). Cada fotograma: fondo PFM (17 fps) copiado al búfer, logo en (75,2), capa
+de texto mezclada con `MENU.TAB` en un rectángulo por página, banderas (la alemana nunca se dibuja), rótulo del coche
+(186×61 de `BILAR.PIC`) que encoge y crece al cambiar, carrusel de tres coches 3D (x 78/159/240, escala 1,01/1,61,
+una vuelta en 3,4/1,9 s), miniatura de pista (115×99 de `TRK_SPR.PIC`) y esquinas de 20×20 de `N_SYSGFX.PIC`.
+
+**Callback de teclas** (`0x160c4`): trucos (`BANARNE`, `SURMULE` dificultad MIRROR, `SLASKTRATT` los 11 coches,
+`FILMJOLK`, `SKUNK`, `SVINPOLE`, `STRINGS`) en `0x1fb2f0`; fin de créditos; salto de la intro; sonidos 1_FLIP (±1…±5,
+50 000) y 0_SEL (±6); CONTROLS: solo un jugador con joystick/pedales; confirmar idioma (páginas del idioma, lista de
+coches con los bloqueados `{10, 9, 6, 1}` según `[0xea183]`/`[0xea187]`, intro o iris); KEY ALREADY ASSIGNED (bloqueo
+1100, 2_NO); animaciones de coche (bloqueo 400) y de pista.
+
+**IGN_DOS.BTZ**: el menú edita la imagen descrita en
+[Configuración y récords](#configuración-y-récords-ign_dosbtz-portado-en-savec-toolsbtzpy) (`settings.c` sobre
+`save.c`) y la escribe al salir o al empezar una carrera, después de `0x198bc` (cursores → carrera: 6 corredores salvo
+contrarreloj, coches 2..7 fijos, etiquetas de piloto `0xbf5fc`, pista `+0xf3` en el orden CANADA, USA, CARIB, BRAZIL,
+AUSTRIA, ICELAND, JAPAN). El port la guarda en la carpeta de usuario, como la carrera, y solo lee la del juego.
+
+**MenuBkg.dat** (0x9358 B, raíz del juego): atlas de baldosas almacenadas de abajo arriba, 16×19 (esquinas `0x000`,
+`0x130`, `0x260`, `0x390`; remates `0x8e80`, `0x8fb0`, `0x90e0`, `0x9210`) y 32×19 (uniones izquierda `0x4c0+d·0x260`,
+`0x2600+(d−1)·0x260`, derecha `0x44e0+…`, `0x6ae0+…`), color 0 transparente, y 24 colores de relleno en `0x9340`. El
+estilo 1 remapea `c1→f5 c3→bd c4→be d5→b4 d6→bb fd→bc c0→bd c2→f4`. Una caja une sus esquinas con la de la fila de
+arriba si los bordes distan ≤ 13 (izquierda) o ≤ 15 (derecha).
+
+**CDP**: `"CDP\0"`, `u16 100`, `u16 fotogramas`, `u16 bucle`, `u16 320`, `u16 200`, `u16`, paleta 768 B de 8 bits,
+fotogramas desde `0x310`. Códigos: `00–f5` píxel, `f6 b` píxel escapado, `f7–fa` saltar 2–5, `fb n8` y `fc n16` saltar,
+`fd n8 v` repetición (0 = 256), `fe n16 v` repetición de 16 bits, `ff` fin. El primer fotograma de cada clip es
+`fe 00 fa v` (pantalla lisa) seguido de cambios.
+
+**PSQ / PFM** (fondo del menú). PSQ: `{u32 primer, u32 cuántos, u32 0}` en bucle (`DEFAULT2`: 11 tramos, fotogramas
+0–208). PFM: trozos `{tag[4], u32 tamaño}` hasta `lixx`; `li01` vértices `{s16 x, y}` (×16 → 24.8, 1/16 de píxel),
+`li00` fotograma `{u8 tipo, u8 n, registros}` hasta `ff` (7 sprite escalado = dos triángulos 18, 11 línea, 13 se
+ignora, 15 triángulo plano con `MENU.TAB[c<<8]`, 17 texturizado opaco, 18 texturizado por tabla de sombra
+`sh[t<<8|d]`, 19 plano por tabla de sombra), `li02` texturas globales `{u16 u0..v2 (8.8), u32 página}`, `li03` sprites.
+Páginas: 1 MB de `CANADA.TEX`, `CARS.TEX` y una de cada efecto (29); tablas: `CANADA.SHD` y una generada (fila 0
+identidad, fila r sólida). El búfer de fondo no se borra nunca entre fotogramas. Los rasterizadores (tramos de
+derecha a izquierda, UV solo en el borde derecho con tabla de 1/8 de píxel, acarreo de v hacia la fracción de u,
+recorte solo por arriba, abajo y derecha) se portaron literalmente y se compararon con el código original ejecutado en
+un emulador: los 209 fotogramas y 4 900 primitivas aleatorias sin un píxel distinto. La prueba `menu_background`
+fija el hash de los 209 fotogramas.

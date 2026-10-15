@@ -190,6 +190,15 @@ void ign_render_track(IgnFrame *fb, const IgnLevel *lv, const IgnCamera *cam) {
     }
 }
 
+void ign_render_object(IgnFrame *fb, const IgnModel *mdl, int obj, const float rotation[9], const IgnCamera *cam) {
+    static const float id[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    static const float zero[3] = {0, 0, 0};
+    if (obj < 0 || obj >= mdl->nobj) return;
+    const IgnObject *o = &mdl->objs[obj];
+    const float shift[3] = {(float)-o->pos[0], (float)-o->pos[1], (float)-o->pos[2]};
+    draw_object(fb, mdl, o, cam, id, zero, rotation, shift);
+}
+
 static void mat_mul(const float a[9], const float b[9], float out[9]) {
     for (int r = 0; r < 3; r++)
         for (int c = 0; c < 3; c++)
