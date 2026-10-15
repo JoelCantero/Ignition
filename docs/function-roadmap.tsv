@@ -67,7 +67,7 @@ address	function	status	instructions	roadmap
 0001ccd0	sub_0001ccd0	unknown	48	unmapped
 0001cd6c	sub_0001cd6c	unknown	39	unmapped
 0001cdfa	sub_0001cdfa	unknown	24	unmapped
-0001ce30	load_tri	identified	1079	phase1.ai-route
+0001ce30	load_tri	partial	1079	phase1.ai-route
 0001dcc4	sub_0001dcc4	unknown	12	unmapped
 0001dcfc	sub_0001dcfc	unknown	146	unmapped
 0001decc	ai_find_section	partial	94	phase1.ai-route

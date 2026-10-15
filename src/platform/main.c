@@ -13,10 +13,12 @@
 #include "../game/ghost.h"
 #include "../game/pos.h"
 #include "../game/race.h"
+#include "../game/save.h"
 #include "../game/track.h"
 #include "../render/camera.h"
 #include "../render/hud.h"
 #include "../render/raster.h"
+#include "music.h"
 #include "sound.h"
 
 #define DEFAULT_DATA_DIR "/Users/Shared/Epic Games/Ignition/ignition"
@@ -73,6 +75,10 @@ static int track_id;
 /* Post-race view of sub_000420cc: [0x1fb4d0] frames since the player finished, camera [0x1fee80] (0-2 fixed,
  * 3 = following a car) and the followed car [0xc0b34] with its switch delay [0xc0b38]. */
 static double finish_clock;
+/* Records, IGN_DOS.BTZ and time-trial ghosts in the user folder: always in the window; headless with --time-trial
+ * or IGN_SAVE_DIR. */
+static IgnSession session;
+static int session_on, session_saved;
 static int tv_index = 3, spectated, spectate_wait;
 static IgnSkids skids;
 static IgnFx fx;
@@ -256,6 +262,7 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
     }
     /* car_update 0x2f37f: the player's finish restarts [0x1fb4d0] and selects the car-following camera. */
     if (player->out && !was_out) finish_clock = 0, tv_index = 3, spectate_wait = 100;
+    if (session_on) session_hooks(all, nrivals + 1, t, best_lap, was_out);
     /* sub_00047f94 runs once per rendered frame for every car; the original renders at most 36 frames per second. */
     if (ghost_tick % 2 == 0) {
         for (int i = 0; i <= nrivals; i++) ign_chase_update(&cams[i], all[i], lv, t, started);
@@ -292,6 +299,22 @@ static void race_view(const IgnCar *player, int rear, IgnCamera *cam) {
     ign_chase_view(&cams[0], player, rear, cam);
 }
 
+/* Race data read by the HUD (sub_0004a320); all[0] is the player. */
+static IgnHudState hud_state(const IgnLevel *lv, const IgnCar *const *all) {
+    return (IgnHudState){.cars = all, .ncars = nrivals + 1, .level = lv, .track = hud_track, .mode = race.mode,
+                         .remaining = race.remaining, .difficulty = ign_get_difficulty(), .clock = race.clock,
+                         .total = race.total, .best_lap = race.best_lap,
+                         .shake = cams[0].shake, .track_id = track_id};
+}
+
+/* Per-frame HUD counters, advanced from the race clock so headless runs see the same frames. */
+static void hud_tick(const IgnLevel *lv, const IgnCar *car) {
+    const IgnCar *all[MAX_RIVALS + 1] = {car};
+    for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
+    const IgnHudState hs = hud_state(lv, all);
+    ign_hud_update(&hud, &hs);
+}
+
 static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     ign_frame_clear(&frame);
     ign_render_track(&frame, lv, cam);
@@ -308,7 +331,10 @@ static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_render_fx(&frame, lv, &fx, all, nrivals + 1, cam);
     ign_render_weather(&frame, lv, &weather, cam);
-    ign_hud_draw(&hud, &frame, car, nrivals + 1);
+    const IgnHudState hs = hud_state(lv, (const IgnCar *const *)all);
+    ign_hud_update(&hud, &hs);
+    ign_hud_draw(&hud, &frame, &hs);
+    if (hud_debug) ign_hud_draw_debug(&hud, &frame, cam->x, cam->y, cam->z, cam->yaw, cam->pitch);
 }
 
 static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
@@ -362,6 +388,8 @@ int main(int argc, char **argv) {
     IgnCamera cam = {0};
     int fixed_cam = 0;
     const char *ghost_out = NULL, *ghost_in = NULL;
+    /* [0x1ff253] music volume 0..10 and [0x1ff24f] track setting (0 level, -1 random, n fixed). */
+    int music_on = 1, music_volume = 10, music_mode = IGN_MUSIC_BY_LEVEL;
     ign_frame_init(&frame, 640, 480);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--shot") && i + 1 < argc)
@@ -377,6 +405,13 @@ int main(int argc, char **argv) {
             frame.perspective = 1;
         } else if (!strcmp(argv[i], "--countdown")) {
             countdown = 1;
+        } else if (!strcmp(argv[i], "--no-music")) {
+            music_on = 0;
+        } else if (!strcmp(argv[i], "--music-volume") && i + 1 < argc) {
+            music_volume = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--music-track") && i + 1 < argc) {
+            i++;
+            music_mode = !strcmp(argv[i], "random") ? IGN_MUSIC_RANDOM : atoi(argv[i]);
         } else if (!strcmp(argv[i], "--rear")) {
             rear_view = 1;
         } else if (!strcmp(argv[i], "--record-ghost") && i + 1 < argc)
@@ -426,6 +461,8 @@ int main(int argc, char **argv) {
             ign_set_difficulty(atoi(argv[++i]));
         } else if (!strcmp(argv[i], "--car") && i + 1 < argc) {
             car_id = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--time-trial")) {
+            race_mode = IGN_MODE_TIME_TRIAL;
         } else if (!strcmp(argv[i], "--elimination")) {
             race_mode = IGN_MODE_ELIMINATION;
         } else if (!strcmp(argv[i], "--rivals") && i + 1 < argc) {
@@ -467,6 +504,10 @@ int main(int argc, char **argv) {
             level = argv[i];
     }
 
+    if (race_mode == IGN_MODE_TIME_TRIAL && ghost_in) {
+        fprintf(stderr, "--time-trial loads its own ghost; use --ghost without it\n");
+        return 1;
+    }
     if (sim_ticks >= 0 && !shot) {
         fprintf(stderr, "--sim-ticks requires --shot\n");
         return 1;
@@ -484,11 +525,11 @@ int main(int argc, char **argv) {
         return 1;
     }
     ign_track_gates(&track, &lv);
-    if (ign_track_ai_records(&track, &lv))
+    if (ign_track_ai_records(&track, &lv, ign_ghost_track_id(level)))
         fprintf(stderr, "warning: cannot build TRI AI records; using track-gate fallback\n");
     ign_ai_set_track(level);
     IgnCar car;
-    int want = want_rivals >= 0 ? want_rivals : (shot ? 0 : 3);
+    int want = race_mode == IGN_MODE_TIME_TRIAL ? 0 : want_rivals >= 0 ? want_rivals : (shot ? 0 : 3);
     if (want > MAX_RIVALS) want = MAX_RIVALS;
     float sx, sz, sh;
     grid_pose(&lv, &track, 0, want + 1, &sx, &sz, &sh);
@@ -526,12 +567,26 @@ int main(int argc, char **argv) {
             return 1;
         ghost_on = 1;
     }
-    if (ign_hud_init(&hud, data_dir, &lv.palette)) {
+    hud_track = &track;
+    if (ign_hud_init(&hud, data_dir, level, frame.w, frame.h)) {
         fprintf(stderr, "cannot load HUD panel or fonts from %s\n", data_dir);
         ign_free_level(&lv);
         return 1;
     }
     ign_race_init(&race, race_mode, nrivals + 1);
+    /* Headless runs keep the user folder untouched unless --time-trial or an explicit IGN_SAVE_DIR. */
+    if ((race_mode == IGN_MODE_TIME_TRIAL || !shot || getenv("IGN_SAVE_DIR")) &&
+        !session_setup(data_dir, level, car.id, race_mode == IGN_MODE_TIME_TRIAL) &&
+        session.ghost_state == IGN_TRIAL_GHOST && !ign_car_init(&ghost_car, &lv, ghost.car, sx, sz, sh))
+        ghost_on = 1;
+    if (session_on) {
+        /* The HUD's TRACK RECORD and languages come from the session's IGN_DOS.BTZ ([0x1ff32b], [0x1ff6eb]). */
+        IgnTrackRecords rec;
+        if (track_id >= 0 && track_id < 7 && ign_btz_records(&session.btz, track_id, &rec) == 0)
+            hud.track_record[track_id] = rec.race[0];
+        int language = ign_btz_i32(&session.btz, IGN_BTZ_LANGUAGE);
+        if (!getenv("IGN_LANG") && language >= 0 && language < 6) hud.language = language;
+    }
     /* Headless runs start at once unless --countdown; the game window always counts down. */
     if (shot && !countdown) ign_race_skip_countdown(&race);
     ign_set_race_started(ign_race_started(&race));
@@ -602,6 +657,7 @@ int main(int argc, char **argv) {
                 ign_pos_step(&lv.pos, &lv.track);
                 pos_ticks = 0;
             }
+            hud_tick(&lv, &car);
             if (full_trace) trace_car(++trace_tick, &car, &in);
             if (!ign_race_started(&race)) continue;
             if (ghost_out && !car.out) ign_ghost_record(&rec, &car, track.count);
@@ -630,6 +686,7 @@ int main(int argc, char **argv) {
                    ghost_in, ghost.car, ghost.track, ghost.time_cs / 100.0, ghost.name, n, n ? dev_sum / n : 0.0,
                    dev_max);
         }
+        if (session_on && session.time_trial && !session.finished) printf("time trial: not finished\n");
         if (ghost_out) {
             ign_ghost_finish(&rec, car.race_elapsed);
             if (ign_ghost_save(ghost_out, &rec)) {
@@ -691,6 +748,8 @@ int main(int argc, char **argv) {
         for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
         if (ign_sound_start(data_dir, level, &lv, all, nrivals + 1, &weather))
             fprintf(stderr, "audio: %s\n", SDL_GetError());
+        else if (music_on)
+            ign_music_start(data_dir, level, music_mode, music_volume);
     }
 
     bool free_cam = false;
@@ -708,12 +767,15 @@ int main(int argc, char **argv) {
                 (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE))
                 running = false;
             if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) {
-                if (ev.key.key == SDLK_F1) free_cam = !free_cam;
+                if (ev.key.key == SDLK_F1) free_cam = !free_cam, hud_debug = free_cam;
                 else if (ev.key.key == SDLK_M) manual_gear = !manual_gear;
                 else if (!free_cam && ev.key.key == SDLK_Q) pending_gear_shift = -1;
                 else if (!free_cam && ev.key.key == SDLK_E) pending_gear_shift = 1;
                 /* sub_0002b9e4 0x2c017: TAB (scancode 0x0f) steps the post-race camera 0, 1, 2, 3. */
                 else if (ev.key.key == SDLK_TAB) tv_index = (tv_index + 1) % 4;
+                /* sub_0002b9e4 0x2c1cb/0x2c29a: left/right on the pause menu's music line; F5/F6 here (deviation). */
+                else if (ev.key.key == SDLK_F5) ign_music_step(-1);
+                else if (ev.key.key == SDLK_F6) ign_music_step(1);
             }
             /* Cheat words are typed during play (0x160c4); BANARNE toggles 3x tall bodies. */
             if (ev.type == SDL_EVENT_TEXT_INPUT) {
@@ -774,6 +836,7 @@ int main(int argc, char **argv) {
             SDL_SetWindowTitle(win, title);
         }
 
+        ign_music_poll(now / 1000.0, car.out ? car.finish_position : 0);
         draw(&lv, &car, &cam);
         IgnPalette shown;
         ign_fx_palette(&fx, &lv.palette, &shown);
@@ -784,6 +847,7 @@ int main(int argc, char **argv) {
         SDL_RenderPresent(ren);
     }
 
+    ign_music_stop();
     ign_sound_stop();
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);

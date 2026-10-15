@@ -1,8 +1,8 @@
-functions: 1112 (unknown=519, identified=46, understood=0, port-pending=2, partial=12, ported=40, verified=5, native=0, library=488)
+functions: 1112 (unknown=519, identified=45, understood=0, port-pending=2, partial=13, ported=40, verified=5, native=0, library=488)
 library (C runtime / DOS4G) unique instructions: 20323, to exclude from game review
 unique instructions: 128832
 game instructions marked ported/verified: 17334/108509 (16.0%)
-game instructions marked partial: 9537 (excluded from ported/verified)
+game instructions marked partial: 10616 (excluded from ported/verified)
 game functions linked to roadmap tasks: 95/624 (15.2%)
 all functions linked to roadmap tasks (including library): 95/1112
 code bytes covered: 474981/482383 (98.5%)
@@ -75,7 +75,7 @@ address  status      instructions  function
 0001ccd0  unknown     48            sub_0001ccd0
 0001cd6c  unknown     39            sub_0001cd6c
 0001cdfa  unknown     24            sub_0001cdfa
-0001ce30  identified  1079          load_tri
+0001ce30  partial     1079          load_tri
 0001dcc4  unknown     12            sub_0001dcc4
 0001dcfc  unknown     146           sub_0001dcfc
 0001decc  partial     94            ai_find_section

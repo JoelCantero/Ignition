@@ -55,7 +55,7 @@ class RespawnOriginal(InputOriginal):
         for name in ("EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "EBP"):
             self.uc.reg_write(getattr(self.reg, "UC_X86_REG_" + name), 0)
         self.uc.reg_write(self.reg.UC_X86_REG_ESP, ESP)
-        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, 0x037F)
+        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, self.fpcw)
         self.uc.reg_write(self.reg.UC_X86_REG_FPTAG, 0xFFFF)
 
     def start_reset(self, v):

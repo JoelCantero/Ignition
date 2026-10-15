@@ -10,9 +10,9 @@
 
 typedef struct {
     int32_t point[6]; /* load_tri +0x02..+0x16: left xyz followed by right xyz */
-    int object;
-    int plc;
-    uint8_t plc_type;
+    int object; /* section object: PLC index, not an engine-pool index */
+    int plc;    /* same PLC identity retained for asset validation */
+    int8_t surface;   /* +0x01: byte 0 of the TRI block ([0xeb780][plc]), signed t_surface_grip index */
     uint8_t tri_type;
     uint8_t valid;
     float heading[3]; /* load_tri +0x2a/+0x2e/+0x32: left, integer centre, right */
@@ -30,7 +30,7 @@ typedef struct IgnTrack {
     float (*center)[3];
     int count;         /* [0x1ff004] */
     int start_obj, dir_obj;
-    int *section_obj;  /* main route: object of each section */
+    int *section_obj;  /* main route: PLC object of each section */
     int *section_next_obj; /* exact next PLC object on the main route */
     int *section_next_obj_b; /* exact next PLC object on branch B */
     int *section_obj_b; /* branch B object of each signed section */
@@ -44,11 +44,12 @@ typedef struct IgnTrack {
 /* Road edges per section from the TRI blocks (vertex indices at +1 and +0x17). */
 void ign_track_gates(IgnTrack *t, const IgnLevel *lv);
 /* load_tri 0x1ce30: rebuilds the ordered gate records, including TRI split types 1 and 2. */
-int ign_track_ai_records(IgnTrack *t, const IgnLevel *lv);
+int ign_track_ai_records(IgnTrack *t, const IgnLevel *lv, int track_id);
+/* Two original slots: a split main gate, otherwise main gate and unsplit branch B. */
+const IgnAiRouteRecord *ign_track_ai_record(const IgnTrack *t, int section, int slot);
 /* load_tri 0x1d80a..0x1da22 / 0x1da75..0x1dc8c, for two valid records. */
-void ign_track_ai_geometry(IgnAiRouteRecord *record, const IgnAiRouteRecord *next,
-                           int secondary);
-/* Object of a signed section: g_sections+0 on the main route, +0xc (branch B object) for negative sections. */
+void ign_track_ai_geometry(IgnAiRouteRecord *record, const IgnAiRouteRecord *next);
+/* PLC object of a signed section: g_sections+0 on main, +0xc (branch B) for negative sections. */
 int ign_track_section_object(const IgnTrack *t, int s);
 /* ai_find_section 0x1decc: select a route record, applying branch fallback and invalid-record advancement. */
 int ign_track_find_section(const IgnTrack *t, int section, int branch, int step, int track_id,

@@ -116,7 +116,7 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   divide la puerta en 2 registros (1 = mitad central→derecha y luego izquierda→central; 2 = izquierda→central y luego central→derecha).
   Las coordenadas X/Z de estos registros son vértice + posición PLC + `0x6400`; Y es vértice + posición PLC sin ese origen
   (`0x1d30b..0x1d392`). `track.c` extrae estas coordenadas y subdivisiones. `track_real_assets` verifica en las siete
-  pistas que los registros TRI conservan la identidad engine→PLC y se asignan a una topología de ruta válida; esto es
+  pistas que los registros TRI conservan el índice PLC de la sección y se asignan a una topología de ruta válida; esto es
   una prueba estructural del port, no una comparación runtime exhaustiva con las tablas del original ni equivalencia del
   selector completo de carril.
 - **GST** (fantasma, `GHOSTS\<nombre>.GST`; lector `0x2adf8`, grabador `0x51204`, escritor `0x2ccc8`; portado en `ghost.c`):
@@ -137,16 +137,21 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 - Parámetros en `0xbfb30` (0x48 B = 9 `double` por coche), iguales para todos:
   `{0.8, 0.4, 0.6, 0.75, 0.5, 5, 0.6, 0.6, 0.9}` ↔ campos de `CARS/TEST.AIS` (acc, carebed, caresight, careother,
   maintain, aggr, sight, curveinflu, slopeinflu). `TEST.AIS` no se lee en el juego.
-- **Desviación**: `src/game/ai.c` es una aproximación propia (sigue las puertas TRI, frena según la curvatura en los
-  próximos 5+ tramos, marcha atrás si no avanza 150 u en 1,5 s). La ley de control original sigue pendiente.
+- **Desviación**: `src/game/ai.c` sigue siendo parcial: usa los registros TRI y sus ángulos float32, pero el objetivo
+  y parte de la ley de control conservan aproximaciones. El atasco ya usa el contador original por turnos, no una
+  distancia o espera inventada; el recorte del objetivo por interiores ya se aplica; faltan pendiente y controlador completo.
 - **Carril (`t_ai_lanes`, `0xbf9a0`)**: portadas las cuatro filas por configuración y la permutación de pistas
   `{1,2,3,6,4,0,5}`. En cada fila coincidente se escribe `selector` en `+0x66`, se consume un `rand()` y se guarda
   `r = (rand() & 0x7fff) / 32768` en `+0x6c`; la elección `+0x64` es 0 si `chance=0`, 1 si `chance=100`, o
   `(s20 * 0.7 + 0.3) * r * chance * 0.01 > 0.125`. Las filas repetidas (incluidas las de sección 2) se
   procesan y consumen RNG por separado. En el port, `ign_fx_rand15` usa el LCG `seed = seed * 1103515245 + 12345`
   (`rand`, `0x64774`), compartido con el estado de `IgnFx`.
-- `load_tri` se integra al arrancar: registros geométricos extraídos por objeto engine→PLC, incluidas subdivisiones TRI
-  de tipo 1/2. `ign_build_track` replica ahora las reglas observadas de `build_sections` para buscar vecinos por origen
+- `load_tri` se integra al arrancar: las secciones contienen índices **PLC**, no índices del pool del motor.
+  `0x1d246..0x1d261` multiplica directamente ese índice por 20 para acceder al PLC; no aplica `engine_to_plc`.
+  Hay dos slots canónicos: un principal TRI1/2 ocupa ambos y omite B; con principal normal, B ocupa el segundo
+  **sin dividirse**, aunque su propio tipo TRI sea 1/2. Los dos globals `[0xeb7c4]`/`[0xeb7e0]` reciben el mismo
+  puntero (`0x1d0b3/0x1d0b8`), no son dos tablas independientes de mitades de A y B.
+  `ign_build_track` replica las reglas observadas de `build_sections` para buscar vecinos por origen
   PLC (distancia euclídea con ΔY×2), contar avances excluyendo el merge de clase 6, conservar el merge alcanzado por B
   y mapear el objeto de bifurcación en paralelo en ambas rutas. También conserva los objetos siguientes explícitos para
   calcular los ángulos de ambas ramas. La prueba `track_topology` cubre selección por origen frente a centroide,
@@ -158,13 +163,111 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   según el signo del paso. En CANADA (`track_id=0`), las secciones `0xab..0xad` fuerzan el avance en ese caso.
   `ai.c` usa el helper al consultar los registros/puertas de lookahead. La prueba `track_route_selection` cubre fallback,
   aceptación/avance, wrap y excepción de CANADA. El enlace de ramas y los objetos siguientes conservan la topología
-  observada; `track_real_assets` valida la estructura generada y el mapeo engine→PLC de TRI para las siete pistas, pero
+  observada; `track_real_assets` valida la estructura generada y los índices PLC de TRI para las siete pistas, pero
   no coteja la tabla runtime original ni la correspondencia exacta de cada registro dividido con los carriles. Por tanto,
   esto no acredita aún la selección de ruta completa equivalente.
-- Al construir puertas, el índice de objeto del motor se traduce a índice PLC mediante
-  `surface.engine_to_plc` antes de leer el bloque TRI (`4 + plc_index * 500`). No se presupone que ambos índices
-  coincidan; los índices ausentes o bloques fuera de rango usan el centro del objeto como fallback. La prueba
-  `track_gates` usa un mapeo no idéntico para verificar esta correspondencia.
+- **Discrepancia pendiente fuera del cargador IA**: `object_gate`/`ign_track_gates` todavía aplican
+  `surface.engine_to_plc` a los índices de sección, con centroide como fallback. Se conserva ese comportamiento
+  anterior para las puertas usadas por progreso/reaparición; `track_gates` caracteriza esa implementación,
+  **no demuestra su fidelidad**. El cargador IA ya no hace esa segunda conversión errónea. El mapeo
+  engine→PLC sigue siendo necesario donde la entrada realmente sea un índice del pool del motor (p. ej. SRF).
+
+### Geometría derivada de `load_tri` y mezcla de rumbo: verificación por fragmentos
+
+El registro original mide `0x4b` bytes: invalidez `+0`, byte 0 del bloque TRI `+1` (`[0xeb780][plc]`,
+`0x1d2eb..0x1d2f1`; índice con signo de `t_surface_grip`, no el tipo PLC), bordes L/R xyz i32
+`+0x02..+0x16`, cuatro puntos interiores L/R xz i32 `+0x1a..+0x26`, tres rumbos float32
+`+0x2a/+0x2e/+0x32`, tres pendientes float32 `+0x36/+0x3a/+0x3e`, dos ángulos transversales
+float32 `+0x42/+0x46` y tipo TRI `+0x4a`. El sucesor se resuelve con `ai_find_section`,
+incluyendo su slot y el ID real de pista.
+
+Los rumbos son `atan2(Δz, Δx)`; las pendientes son **`atan2(Δy, Δx)`**, no la pendiente
+respecto a la distancia horizontal. El centro entero de cada componente es
+`a + trunc((b-a)/2)`, también para diferencias negativas impares. Los ángulos transversales
+se calculan con las restas directas L→R y R→L, idénticas en ambos slots. Los interiores
+son `trunc(borde + 18*cos/sin(ángulo_float32))` (`0x1d9d0..0x1da22`). Con el control word del
+runtime `0x127f` (`[0xe6be0]`, 53 bits), `fcos/fsin` no se redondean por la precisión, pero
+`fmul` y `faddp` sí redondean a binary64 antes de `__CHP`: el port usa esa suma binary64 directa.
+Una versión anterior conservaba el residuo de 64 bits; sólo coincidía con el oracle ejecutado
+con `0x037F` y fallaba con `0x127f` en 297 comparaciones (20 registros reales).
+
+`tests/ai_geometry_original.py` ejecuta los dos fragmentos sin parchear
+`0x1d80a→0x1da25` y `0x1da75→0x1dc8f`, con los helpers reales `atan2` y `__CHP` y CW `0x127f`.
+Compara bits de los ocho float32 y los cuatro enteros: **4 920 comparaciones exactas**,
+902 fixtures sintéticos y 1 558 registros reales, cada uno contra ambos fragmentos.
+Los registros reales proceden del constructor del port: se verifica su geometría derivada,
+**no** la selección completa de registros ejecutando todo el cargador DOS. Se comprueban
+frontera de ejecución, escrituras permitidas, entradas intactas, pila y estado x87.
+Los sintéticos incluyen coordenadas ±100 000; no se acredita todo el dominio i32.
+
+`ign_ai_drive` consume el rumbo central almacenado, el centro entero y la puerta completa
+reconstruida para su ratio lateral, incluso al resolver hacia una sección dividida.
+`ai_route_choice` prueba esos consumidores y las transiciones split/normal; son pruebas
+del port, no un oracle de todo `ai_drive`.
+
+El fragmento `0x1be03→0x1bf60` mezcla rumbo con dirección del movimiento:
+`travel = wrap(heading + 0.15*wrap(motion-heading))`, con constantes originales
+π=`3.1415926535898` y 2π=`6.2831853071796`. Si la separación sin envolver supera π,
+se sustituye por `2π-separación`; si supera `0.78539816339745`, devuelve el rumbo
+original **sin wrap posterior**. En reposo la dirección de movimiento es cero.
+Con CW `0x127f` la suma ya está redondeada a binary64 al compararla, así que el port compara
+directamente el double (el residuo extendido anterior sólo coincidía con `0x037F`).
+**1 184 casos** (umbrales y vecinos binary64, más 500 aleatorios), tolerancia absoluta
+`2e-15` y error máximo medido 0; no se afirma igualdad bit a bit: con `motion` subnormal el rango
+de exponente x87 puede dar `-0.0` donde binary64 da `+0.0`.
+
+### Recorte del objetivo y curvatura (`0x1b1a5..0x1b823`): verificación por fragmento
+
+- **Lookahead** (`0x1b1a5..0x1b278`): seis registros en `s + {1,2,3,4,6,8}` (tabla i16 `0xbf994`),
+  guardados en `[esp+0..0x14]`. Índice con un único wrap (`≥ count → −count`) y después, si
+  `índice ≥ count−3`, se fuerza a `count−1`. Ruta: `+0x64` si la sección no tiene segundo slot,
+  si no la elección de carril `[esp+0x178]`; búsqueda con `ai_find_section(índice, ruta, 1)`.
+  El port reproduce el índice (`ign_ai_lookahead_section`), pero el registro/carril sigue saliendo de
+  sus helpers de ruta: **no** se verifica la selección original de registros.
+- `[esp+0x40]` (`0x1b4a2..0x1b4e9`): `rumbo_centro(r0) − rumbo_centro(actual)` (float32 `+0x2e`),
+  con un wrap de una pasada (primero `< −π` suma 2π, luego `> π` suma −2π; constantes
+  `3.1415926535898`/`6.2831853071796`).
+- **Recorte** (`0x1b4f1..0x1b6f6`): para `k = 5…1`, centro entero de `r[k]` (`a + (b−a)/2` en 32 bits,
+  truncando hacia cero), guardado en `[esp+0xe8]/[esp+0xe0]`, y `aim = atan2(cz − coche_z, cx − coche_x)`
+  en `[esp+0xf0]`. Para cada `j = 0…k`: `dL = wrap(atan2(cz − Lz_in, cx − Lx_in) − aim)`,
+  `dR = wrap(atan2(cz − Rz_in, cx − Rx_in) − aim)` con los interiores `+0x1a..+0x26`. Si `0 > dL·dR`
+  la línea de visión pasa entre ambos interiores; si no (incluido 0 o NaN), el candidato queda bloqueado,
+  `[esp+0x144] = 0 > dL ? −1 : 1` y se prueba `k−1`. Se acepta el primer `k` sin bloqueo; si todos se
+  bloquean, `esi = 0` pero el centro guardado es el de `r[1]` (último probado). `[esp+0x144]` vale 0 sólo si
+  `k = 5` pasa a la primera. El bucle `0x1b4e9..0x1b4ef` es código muerto.
+- `[esp+0x130] = {1,2,3,4,6,8}[esi]`; `ebp = s + offset` con un wrap (entrada de la pendiente, aún no portada).
+- **Agarre** (`0x1b721..0x1b75d`): `max(0, (8 − t_surface_grip[(int8) actual+1]) · 0.125)` con el byte
+  TRI del registro actual. En las siete pistas aparecen índices fuera de la tabla de 30: −21, 79, 90 y 97
+  (BRAZIL 205/206 incluidos); leen datos estáticos de sólo lectura que, como double, son 0 o subnormales,
+  así que el agarre es exactamente 1.0. El port copia esos cuatro patrones de bits; otro índice fuera de la
+  tabla devolvería 0 (desviación no alcanzada por los TRI incluidos).
+- **Curvatura** (`0x1b764..0x1b821`): `n = min(esi+1, 5)`; para `j < n`,
+  `t = |rumbo(r[j]) − rumbo(r[j+1])|`, si `t > π` entonces `t = |t − 2π|`; `w = (s38·0.4 + 0.6)·1.6`;
+  `suma = t·(w·t)/n + suma`. Luego (`0x1b823..0x1b86b`) `a8 = 1 + (agarre + 0.8)·suma`.
+- Consumidores leídos (sin oracle propio): el acelerador divide por `s10·6/(3·esi+6) + 1` (`0x1b995..0x1b9cf`);
+  la dirección recalcula el mismo `aim` con `[esp+0xe0/0xe8]` (`0x1bde2..0x1bdfc`); el ajuste hacia el
+  interior exige `[esp+0x144] = ∓1`, `esi > 2`, `a8 < 2` y `|[esp+0x40]| < 0.3` (`0x1c40d..0x1c5be`);
+  el turbo usa `[esp+0x130] > 3`. Divisor del ajuste: con signo −1, `side·2.5` si `0 ≤ side`, si no 2.5;
+  con signo +1, 2.5 si `side > 0`, si no `side·−2.5` (`0x1c57a..0x1c5a4`; el port lo tenía invertido y daba
+  un divisor negativo). Antes el port usaba un bucle inventado que paraba al cambiar el signo
+  de la curva y el tipo de superficie del coche para el agarre; ambos se sustituyeron.
+- Las coordenadas de los registros son SRF (mundo + 25600) y el original las compara con `car+0x00/+0x10`;
+  el port suma `IGN_SRF_ORIGIN` a la posición del coche antes del recorte.
+
+`tests/ai_target_original.py` ejecuta `0x1b4a2→0x1b823` sin parchear, con `atan2` real (`0x647ef`) y
+CW `0x127f`; sólo permite escrituras en la pila y comprueba registros, punteros, pila x87 y `ebp`.
+**7 562 casos**: 1 830 sintéticos (carreteras curvas, rumbos con ruido y en ±π, 300 colineales
+exactos con `coche = 2·interior − centro`, 300 enteros aleatorios ±100 000, bytes de agarre 0–29 y los
+cuatro fuera de tabla) y 5 432 de las siete pistas (registros slot 0 en los índices recortados, cuatro
+posiciones del coche por sección). Índice, offset, signo, centros, `aim`, cambio inicial, agarre y suma
+coinciden bit a bit. Cubre 224/228 instrucciones; no ejecuta el wrap de `ebp` ni el recorte de agarre
+negativo (inalcanzable: la tabla tiene máximo 4.5). Mutaciones del port (bucle `j < k`, signo desde `dR`,
+`(t·t)·w`, aceptar producto cero, π redondeado, centro con `floor`) se detectan; `t·w·t` frente a `t·(w·t)` y
+el valor exacto de los subnormales fuera de tabla son equivalentes y no se distinguen.
+
+Pendientes de la IA completa: término de pendiente Y (`0x1b86b..0x1b970`, entra en el acelerador como
+`x90`), giro por solape, ganancias control 5/8, signo de esquiva según el lateral del rival y cotejo integral
+de selección de carril/registros y del controlador.
 
 ## Fin de carrera y eliminación (portado a `src/game/race.c`)
 
@@ -275,8 +378,8 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 
 ## Caja de cambios y dificultad
 
-- `sub_000502c4(coche)` (automático): `idx = min(abs(trunc_x87(v_long·3.6)), 199)`, producto con el
-  `double` original 3.6. Usa curvas **compartidas del modelo 0** en `0x1fb6d8` (marcha 1) y `0x1fb868`
+- `sub_000502c4(coche)` (automático): `idx = min(abs(trunc(v_long·3.6)), 199)`, producto con el
+  `double` original 3.6 redondeado a binary64 por la palabra de control `0x127f`. Usa curvas **compartidas del modelo 0** en `0x1fb6d8` (marcha 1) y `0x1fb868`
   (marcha 2), comparación `int16` con signo, sin dividir el índice por dificultad.
   Si `par1[idx] > par2[idx]`, objetivo 1; en caso contrario objetivo 2 dentro del intervalo estricto
   `(-1.5707963267949, 1.5707963267949)` o por encima de `4.7123889803847`; fuera, objetivo 1.
@@ -564,14 +667,14 @@ esa aproximación se descartó hasta reconstruir la selección de registros/carr
   Reversa en `43.2<contador<97.19999999999997`, sin giro antes de `53.99999999999999`;
   `97.19999999999997<contador<108` anula la dirección. Se conserva la anulación en el aire.
   El port ya no añade edad/espera artificial. El error original mezcla rumbo y velocidad con factor 0.15 y
-  usa el ángulo TRI `record+0x2e`; el port aún reconstruye geométricamente ese ángulo. El oracle suministra
-  el error, por lo que no verifica esa geometría.
+  usa el ángulo TRI `record+0x2e`, ya calculado y consumido por el port. El oracle de atasco suministra
+  el error; la geometría y mezcla se verifican por separado, sin probar el controlador completo.
 - Turbo: si `car+0x534/538` == 100.0 (turbo lleno), sin `car+0x270`, `+0x20·[0xa7bb8]+[0xa7bc0] > curva` y la curva lejana > 3, se
   llama a `car_input` con turbo = 1 (`0x1cb12`), salvo exclusiones por pista/sección.
 - Salida: `car_input(coche, ecx=turbo, edx=freno/atrás, ebx=dirección, …)` en `0x1cbf9`; al final `+0x58 = trunc(acelerador)`.
-- Pendiente de portar: búsqueda de carril (`0x1decc`, tablas `[0xeb7c4]/[0xeb7e0]`), velocidad objetivo por curvatura (bucle
-  de 6 secciones `0xbf992`, `t_surface_grip`), registro por sección con ángulos `+0x2a..+0x46` calculados en `load_tri`
-  (`atan2` entre bordes de secciones consecutivas, y puntos de carril `+0x1a..+0x26` = borde + `cos/sin·[0xa7c18]`).
+- Pendiente de completar y verificar en conjunto: búsqueda de carril (`0x1decc`) y consumo de los dos slots,
+  pendiente y esquiva. El recorte del objetivo por interiores y la suma de curvatura ya siguen el original
+  (véase «Recorte del objetivo y curvatura»); el resto del controlador no está verificado en conjunto.
 
 ## Planificador de IA y replay de controles (`cars_update_all`, parcial)
 
@@ -632,13 +735,28 @@ planificador cambia deliberadamente la conducción de IA. No se regenera ese bas
   Analógico y rivales fijan directamente el ángulo; rivales usan límites del perfil 11.
   Dirección visual `visual += (10·0.01·entrada·4−visual)·0.1`.
 
+### Palabra de control x87
+
+La tabla XI de Watcom registra en `0xe706e` la entrada `00 01 94 62 05 00` (cercana, prioridad 1):
+`0x56294` salta a `0x6f634`, que hace `fninit` y en `0x6f651` `fldcw [0xe6be0]`, con `[0xe6be0] = 0x127f`:
+precisión de 53 bits (double), redondeo al más cercano y excepciones enmascaradas. La otra lectura
+(`0x6f8bb`, vía `sub_000821d0`) carga el mismo valor y nadie lo escribe. `__CHP` (`0x55f9c`) usa `0x1f7f`
+(truncar, 64 bits) solo alrededor de `frndint` y lo restaura; el operando ya llega redondeado a double.
+La cola compartida del rasterizador (`0x7616c`/`0x765c3`, llamada por unas 60 rutinas de spans) baja a
+**24 bits** (`and ax, 0xfcff`) mientras dibuja y restaura la palabra al salir.
+
+Todos los oracles fijan `0x127f`, comprueban que coincide con `[0xe6be0]` y que la rutina la conserva.
+Con `0x037f` (64 bits) cambiaban 1 435 de 1 658 ticks de `body_step`, 47 973 pasos del coche y 588 decisiones
+de la caja de cambios; reloj, reaparición, vueltas e IA no cambiaban. El port se compila con
+`-ffp-contract=off`: cada operación x87 se redondea a double y una multiplicación-suma fusionada no.
+
 ### Verificación ejecutable de `body_step`
 
 `tests/physics_original.py` carga los objetos LE reubicados mediante el parser existente `tools/le2elf.py`;
 no parchea ni ejecuta el archivo original como proceso del sistema. Identidad admitida:
 SHA-256 `179c654ba65281f08bbcda2b5943ab9f35c309ec718600f81104644d22db948c`.
 Se emula x86-32 con Unicorn 2.1.4, EAX = cuerpo, EDX = indicador de aire, `slope_k` double en ESP+4,
-retorno centinela y palabra de control x87 `0x037f`. El cuerpo Watcom se serializa por offsets, incluidos
+retorno centinela y palabra de control x87 `0x127f` (véase [Palabra de control x87](#palabra-de-control-x87)). El cuerpo Watcom se serializa por offsets, incluidos
 los doubles no alineados a partir de `+0xac`; nunca se copia la estructura C nativa.
 
 - Constantes originales comprobadas en `0xa7c6c..0xa7c94`: `1.570798`, `1/72`, `9.81`, `0.2`, `2`, `3`.
@@ -665,9 +783,12 @@ los doubles no alineados a partir de `+0xac`; nunca se copia la estructura C nat
 con semilla fija, junto con límites `nextafter`, signos, cuatro cuadrantes, reposo y agarre cero.
 Se exige ejecutar ramas de giro limitado en ambos sentidos, giro directo, derrape en reposo/movimiento,
 recorte motriz/lateral, aire, `FPATAN` y los cinco `D9 D8` del integrador.
-Tolerancia por salida: `2e-11 + 2e-12·|original|` (redondeo x87 frente a double/libm);
+Tolerancia por salida: `2e-14 + 1e-14·|original|` (transcendentes x87 frente a libm);
 indicadores y campos inmutables exactos. En macOS ARM64 el mayor error observado fue aproximadamente
-`3.64e-12` en fuerza y `1.14e-13` en posición. El informe en `build/physics-original-report.json`
+`3.64e-12` en fuerza (relativo `2e-16`) y `1.07e-14` en posición. Unicorn 2.1.4 calcula `FSIN`, `FCOS`,
+`FPTAN`, `FPATAN` y `FSINCOS` con `double` del host (los 11 bits bajos de la mantisa extendida quedan a cero)
+e ignora la precisión de la palabra de control en ellas, así que este oracle no reproduce el último bit de un
+387 real y no puede exigir igualdad exacta. El informe en `build/physics-original-report.json`
 registra el resultado y su procedencia; una ejecución fallida no mantiene un informe de éxito anterior.
 
 No se necesitó alterar la fórmula del port. Esta evidencia solo cubre los estados finitos probados,
@@ -685,11 +806,12 @@ de agarre termina en `0x30874`.
 
 | Límite | Casos | Pasos | Mayor error absoluto observado |
 |---|---:|---:|---:|
-| `car_steer`, `0x500f0` | 732 | 5 856 | `7.11e-15` |
-| Agarre, `0x3070a..0x30874` | 672 | 1 536 | `1.78e-15` |
-| Aritmética vertical, `0x2e234` | 252 | 1 008 | `1.43e-14` |
+| `car_steer`, `0x500f0` | 732 | 5 856 | `0` |
+| Agarre, `0x3070a..0x30874` | 672 | 1 536 | `0` |
+| Aritmética vertical, `0x2e234` | 252 | 1 008 | `0` |
 
-Total: **1 656 casos / 8 400 pasos**, con tolerancia `2e-11 + 2e-12·|original|` e indicadores exactos.
+Total: **1 656 casos / 8 400 pasos**, con tolerancia cero bajo `0x127f`. El objetivo de dirección agrupa
+`5/agarre · (entrada·0,01 · límite)` como `0x501e8..0x50203`; otra asociación difiere en el último bit.
 Incluye los 12 modelos, ambos controladores, cuatro dificultades, velocidades con signo, límites de velocidad,
 rebote y caída, entradas aleatorias con semilla fija, y secuencias válido→inválido→válido en cada rueda.
 El oracle exige ramas concretas, límites de ejecución, pila/control x87 conservados y escrituras solo en
@@ -705,7 +827,7 @@ sin alterar el integrador corporal ni regenerar la instantánea de regresión. L
 Estos tres bloques **no** verifican todo `car_update`, consultas geométricas, acelerador/turbo, daños de aterrizaje, efectos,
 colisiones ni una carrera DOS. Excluye la desviación declarada de subidas con `level_change` (comprobada
 separadamente como contrato del port). El umbral `suelo+30 < altura` pertenece al caller `car_update`, no al
-kernel vertical. Son estados finitos muestreados bajo x87 emulado `0x037f`, no equivalencia para cualquier entrada.
+kernel vertical. Son estados finitos muestreados bajo x87 emulado `0x127f`, no equivalencia para cualquier entrada.
 
 ### Verificación ejecutable de aceleración, freno y turbo
 
@@ -717,22 +839,22 @@ Se ejecuta la conversión `__CHP` original y se comprueban frontera, ESP, contro
 
 | Límite | Casos | Pasos | Mayor error absoluto observado |
 |---|---:|---:|---:|
-| Aceleración, `0x4db90..0x4dfbe` | 6 829 | 30 174 | `1.82e-12` |
+| Aceleración, `0x4db90..0x4dfbe` | 6 829 | 30 174 | `0` |
 | Freno, `0x4e1bc` | 72 | 288 | `0` |
-| Aritmética de turbo, `0x4e3a7..0x4e656` | 2 016 | 96 768 | `9.32e-10` |
+| Aritmética de turbo, `0x4e3a7..0x4e656` | 2 016 | 96 768 | `0` |
 
 Nuevos bloques: **8 917 casos / 127 230 pasos**. Suite de seis kernels: **10 573 / 135 630**.
-La tolerancia sigue siendo `2e-11 + 2e-12·|original|`; indicadores y contadores son exactos, con controles
-negativos para cada modo. El informe conserva hashes del original, fuentes, runner y entradas, además de
+La tolerancia es cero para todos los campos, con controles negativos para cada modo. El informe conserva hashes del original, fuentes, runner y entradas, además de
 cobertura por bloque. Incluye modelos, controladores, dificultades, marchas, límites `nextafter` de índices
 de par, patinaje, catch-up y freno, y secuencias de carga/agotamiento/recarga del turbo.
 
 Correcciones verificadas:
 
-- El índice de par trunca primero `v_fwd*3.6` en precisión extendida x87, toma el valor absoluto, divide por
-  `[1, 1.15, 1.3, 1.3]`, trunca y limita a 199. Redondear antes el producto a binary64 puede cambiar el índice
-  (por ejemplo, `10/3.6`). El port usa el residuo FMA y el umbral de redondeo extendido, también en la división,
-  sin depender de que `long double` tenga precisión x87. Se prueban ambos signos y vecinos de índices 0..210.
+- El índice de par trunca `v_fwd*3.6`, toma el valor absoluto, divide por `[1, 1.15, 1.3, 1.3]`, trunca y
+  limita a 199. Con la palabra de control del juego (`0x127f`) el producto y el cociente se redondean a binary64
+  antes de `__CHP`, igual que en C. Una versión anterior emulaba la truncación del producto extendido: era un
+  artefacto del oracle con `0x037f` y cambiaba el índice en fronteras como `10/3.6`. Se prueban ambos signos y
+  vecinos de índices 0..210; el control negativo con `0x037f` exige diferencias en ese barrido.
 - Patinaje: límites estrictos originales `1.5707963267949` y `4.7123889803847`, no `PI/2` y `3*PI/2`;
   con velocidad en km/h > 2 y acelerador positivo se usa índice cero y derrape 10. Saturación 1 en suelo
   fija derrape 30. El suavizado de fuerza del 20 % ocurre tras la salida: reloj original negativo (−1 en
@@ -892,6 +1014,156 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   decorados, así que solo en USA y CANADA coinciden los índices. Se reconstruye la correspondencia asignando a cada objeto
   del motor el siguiente PLC cuya malla admite todos sus desplazamientos de cara: autocoincidencia 88–98 % en todas las pistas.
 
+## HUD de carrera, fuentes y sprites (portado a `src/render/hud.c`, `font.c`, `sprite.c`)
+
+- **LFT** (`sub_00061399`, verificado con las 12 fuentes): `strcmp(archivo, "LFT")`, `u16 100` en `+4`, `u16`
+  glifos en `+6`, ancho de celda `+8`, alto `+0x0a`; 224 offsets `u32` (−1 = sin glifo) desde `+0x0c`, 224 anchos
+  **con signo** (`movsx`) desde `+0x68c`, bitmaps (ancho × alto, índices de 8 bits) desde `+0x84c`. El glifo `j` de
+  `MINI.LFT` mide −6 y apunta al final del archivo: solo retrocede la pluma. Cada fuente ocupa una ranura de `0x63e` B
+  en `0x24c214` (30 ranuras, `sub_00061220`): `+0x04` alineación (0 izquierda, 1 centrada, 2 a la derecha),
+  `+0x08` desactivada (ancho y dibujo devuelven 2), `+0x0c` proporcional, `+0x10` separación (1), `+0x1e` presencia,
+  `+0xfe` sprites, `+0x47e` anchos. Ancho del texto (`0x616db`): celdas fijas `ancho_celda + separación` por glifo o
+  espacio; proporcional, `ancho_glifo + separación` y el espacio `trunc((ancho_celda << 8)·0,35/256)`; los caracteres
+  sin glifo no avanzan. Dibujo (`0x61959`): la alineación resta el ancho o su mitad; en celdas fijas el glifo se centra
+  con `(ancho_celda − ancho_glifo)/2`. Los glifos son sprites, así que pasan por la tabla PAN como el resto del HUD.
+  Las fuentes del HUD (`load_fonts` `0x240f4`) son de celdas fijas; las del menú y `MINI`/`SMALL`
+  (`load_system_gfx` `0x21985`) son proporcionales con separación 1.
+- **FNT** (`IGNITION.FNT`, `[0x1feff4]`, solo lo usa la superposición de depuración `0x49fdc` vía `sub_00053d60`):
+  `u16` glifos (56), `u16` alto (10), `i16` separación (−1), anchos `u8` desde `+6`, mapa carácter → glifo `u8[256]` en
+  `+0xc6` (255 = sin glifo), offsets `u32` en `+0x1c6`, bitmaps en `+0x546`. Un texel no nulo se escribe como
+  `texel + color`; la pluma avanza `ancho + separación`.
+- **Sprites** (`geputget.c`, `sub_000771e0` vía `[0x20a088]`): `{?, w, h, ?, píxeles, stride, hotspot x, y}`; el HUD crea
+  todos con hotspot 0, así que la posición es la esquina superior izquierda. Cada sprite se copia a una página de
+  textura de 256 × 256 (`0x68e4c`); `sub_00062310` arma el manejador `{hx, hy, u0, v0, u1, v1, página, lut}` (8.8,
+  `lut = [0x257e48]`). Sin matriz (`0x791c9`) recorta contra la ventana de `sub_00055958` y escribe
+  `dst = lut[src·256 + dst]`; en carrera la tabla es la **PAN** del nivel. Filas 160–255 de PAN son constantes (en
+  general = fila: colores opacos compartidos con la paleta de pista, aunque no siempre, p. ej. USA fila 0xc4 = 146), la
+  fila 0 es casi identidad (≈205/256: transparente), 1–15 son vidrios/sombras y 16–159 valen 0. Los PIC del HUD usan
+  esos índices directamente; no hay conversión de paleta.
+- **Sprites con matriz** (`sub_00062184` con `{escala, ángulo}` → `sub_00082950`, verificado): `S = trunc(escala·65536.0f)`,
+  matriz `{S cos, S sin, S sin, S cos}`; esquinas `pos`, `pos + (u1 − 16 − u0)·(m0, m1)`, `pos + (v1 − 16 − v0)·(m2, m3)`
+  y su suma (productos `>> 16` de 64 bits), dos triángulos con texturas afines: `sub_00078304` (ordena por y, va a
+  `0x78ac0` si sale de la ventana 8.8), gradientes `0x90a80` (du/dx y dv/dx desde el punto del lado largo a la altura del
+  vértice medio, anchos −2..2 forzados a ±4, tabla de difuminado `k·(−d/dx >> 3)` por los 3 bits altos de la fracción
+  de x), bordes `0x914d0` (alto ≤ 64 en 8.8 pasa a 65, o a 3 si |dx| > 1,0; prepaso `256 − (y & 0xff)`) recorridos con
+  u, v enteros (`0x911e0`, lado izquierdo) o 8.8 difuminados (`0x91220`, lado derecho), y tramos de derecha a izquierda
+  (`0x82862`) con u.fracción y v 8.8 empaquetados en 32 bits (el acarreo de v entra en la fracción de u) y el texel del
+  extremo izquierdo tomado del borde entero. La variante recortada (`0x78ac0`) recorta los bordes en y y por la derecha
+  (`0x91270`, partiendo el borde en un tramo vertical en x = derecha) y por la izquierda en el tramo (`0x828b7`).
+- **Triángulo plano** (primitiva `0x0f`, `0x729f3`, verificado): bordes 16.16 con pendiente `(dx ± 1)·recip(dy)`,
+  `recip(n) = 65536/(n+1) − 1` (tabla `0xc9168`), fracción inicial 0 o `0xffff` y un paso adelantado según el lado y el
+  sentido (cada borde decide el caso dx = 0 a su manera), tramos con ambos extremos incluidos, mitad inferior con el
+  paso antes de cada fila, ventana inclusiva `x1 − 1`/`y1 − 1`. El color sale de la tabla de estado `[0xc484c]`
+  (`sombra[color·256 + byte +0x2d]`), que el HUD apunta a la PAN: la aguja (0xc4) y el turbo (0xd7) son
+  `PAN[0xc400]` y `PAN[0xd700]`.
+- **Recortes** (`sub_00028000`, tablas `{x, y, w, h}` × 36 en `0xc3618` (320×200, `S_PANGFX.PIC`, stride `0x7b`),
+  `0xc3858` (640×480, `N_PANGFX.PIC`, `0xe3`) y `0xc3a98` (800×600, `H_PAN1.PIC`/`H_PAN2.PIC`, `0x100`)): 0 TOTAL TIME,
+  1 LAP TIME, 2 POS, 3 esfera, 4–12 palanca de cambios (de `[0x1fef64]`, `H_PAN2` en 800×600), 26 tapa de la aguja,
+  27 marco del turbo, 28–29 piloto del turbo, 33 semáforo (siempre de `N_PANGFX`, 4 estados apilados), 34 señal
+  (rejilla 4 × 4 de `*_SIGNS.PIC`, stride `0x38`/`0x70`/`0x100`). Fijos: marcadores de coche 12 × 17 en
+  `(9 + 12f, 139 + 17c)` de `N_PANGFX` (índice `4f + c` = modelo), explosión 24 × 23 en `(83 + 24c, 23f)` (10
+  fotogramas), barra de eliminación 7 × 120 en `(0, 139)` de `N_PANGFX` o 7 × 300 en `(225, 0)` de `H_PAN2`, corona
+  17 × 12 en `(11, 207)` y lugares 1–3 (89 × 84) de `N_SYSG_2.PIC` en `(153, 0)`, `(0, 88)`, `(89, 88)`.
+- **Ventanas** (`sub_00049724`): con un jugador, centrada con los factores `0xc0b80[tamaño]` (1×1, 0,8×1, 0,6×1,
+  0,5×0,83); con dos, la mitad del ancho: jugador 0 a la derecha (`x0 = 3W/4 − w/2 + 1`, `x1 = 3W/4 + w/2`) y jugador 1
+  a la izquierda (`x0 = W/4 − w/2`, `x1 = W/4 + w/2 − 1`). `x1`/`y1` son exclusivos para la ventana de recorte.
+- **Colocación** (`[0x1fef20]`, 28 `int` en `0xc3d48`/`0xc3db8`/`0xc3e28`, relativos a las esquinas de la ventana
+  `[0x1fefd0]+0x2c..0x38` del jugador) y **texto** (`[0x1fef1c]`, 8 `int` en
+  `0xc3ce8`/`0xc3d08`/`0xc3d28`). En 640×480: paneles en `(x0+7, y0+7)` y `(x0+7, y0+33)`; tiempos en `x0+7`, filas
+  `y0+20/46/59/72`; POS en `(x0+8, y1−55)` y su número en `(x0+8, y1−40)`; esfera en `(x1−73, y1−88)`, pivote de la aguja
+  `(x1−56, y1−37)`, media anchura 3 y longitud 26; velocidad `"%.3d"` en `(x1−44, y1−29)`; palanca en `(x1−28, y1−73)`;
+  marco del turbo `(x1−23, y1−130)`, piloto `(x1−23, y1−150)`, barra de `x1−19` a `x1−7` desde `y1−79`; semáforo
+  centrado con ancho 96 en `y0+30`; señal centrada en `y0+1`.
+- **Estados** (`sub_0004a320`, por fotograma): si la cámara tiembla (`+0x38`), la ventana se desplaza `±0,04·temblor`
+  con signo aleatorio. Fuera de eliminación: reloj total `car+0x3a4` y vuelta 1 (`+0x3ac` en la vuelta 0, si no
+  `+0x3bc`) solo con `[0x1fb4e8] == −1` (si no, `--:--:--`); las filas 2 y 3 aparecen al llegar a esa vuelta con el
+  tiempo en curso y luego `+0x3c4`/`+0x3cc`. Con más de un coche, `"%d"` del puesto (`+0x3a0` al terminar);
+  eliminación: `"%d/%d"` puesto/coches restantes. Formato de tiempo (`0x4bdf4`): minutos `trunc(t/60)` hasta 99,
+  `trunc(t) − 60·min`, centésimas `trunc((t − trunc t)·100)`. Esfera (`0x4be7c`): `car+0x290 += (rpm·2,7 − car+0x290)·0,25`
+  limitado a 270; triángulo de color `0xc4` con puntos a `n+180°` y `n°` (media anchura) y punta a `n+90°`.
+  Palanca: `car+0x280` se acerca a `4·marcha` a 0,5 por fotograma y elige el recorte `4 + trunc`. Turbo: dos triángulos
+  de color `0xd7` de altura `carga/{4,2; 2,1; 1}`; piloto fijo con carga en `[20, 100)`, parpadeo de 15 fotogramas
+  (`car+0x540`, 7 encendido) lleno, y alterno cada fotograma con el turbo activo o por debajo de 20. Señal: tipo PLC
+  `>> 24` del objeto del tramo (`[0x1fef7c]+8`), tabla `0xc3e94[dificultad·20 + min(tipo, 16)]` (la dificultad 3
+  intercambia izquierda/derecha); parpadea `(n/4) % 2` los primeros 24 fotogramas (`car+0x5f8`). `WRONG WAY` (señal
+  15) si `car+0x580 > 25` y el tramo ha bajado (`car+0x364 < car+0x368`); `sub_0004a150` suma el `dt` del fotograma
+  a `car+0x580` (máx. 120) mientras el rumbo difiere del ángulo del tramo − π/2 entre 2π/3 y 4π/3, y lo resta si no.
+  Semáforo: recorte 0 con `[0x1fb4e8]` en `[50, 100)`, 1 en `[100, 150)`, 2 en `[150, 200)` y 3 (GO) en carrera
+  mientras `[0x1fb4d8] < 250`. Eliminación: barra con el marcador de cada coche a `|tramo|/n_tramos` (0 antes de 250),
+  la corona del líder y la explosión `car+0x60c` (0,3 por fotograma hasta 10, `cars_body_sway`) de los eliminados; en
+  la vista del segundo jugador su marcador se vuelve a dibujar encima (`0x4b648`).
+  Tras la meta: lugar 1–3 (eliminación: solo 1) durante 120 fotogramas (`[0x1fed9c]`), escalado `car+0x5d4·0,04`
+  mientras crece (25 fotogramas) con la esquina en el centro de la ventana; el HUD desaparece cuando
+  `[0x1fb4d0] > 120` (`sub_000420cc` `0x4310c`).
+- **Mensajes** (`sub_0004c7c0`/`0x4c858`/`0x4c89c`): 5 ranuras de `0x78` B; cada fotograma `temporizador++` y la
+  ranura se libera al pasar la duración; se ven mientras `fmod(t, 2·periodo) < periodo`, centrados en la pantalla
+  (ventana −1) o en la ventana del mensaje, con `MINI.LFT` (320×200) o `SMALL.LFT` y `(ranura + 1)·8|16` píxeles por
+  encima del borde inferior de la ventana 0. «%s IS OUT» (eliminación, `0x2e085`, duración 80, periodo 8, uno por
+  ventana, nombre de 3 letras `0xc3350` por modelo: COO, BAN, VAC, ENF, RED, BUS, MON, BUG, SMO, VEG, IGN), «LAP RECORD»
+  (vuelta de un jugador por debajo de `[0x1fb390]`, `0x2f43a`), «TRACK RECORD» (tercera vuelta de un jugador fuera de
+  eliminación con `car+0x3a4` por debajo del récord guardado, `0x2f548`) y, desde el propio HUD, «WARNING, YOU'RE
+  LAST!» cada fotograma con duración 0 y periodo 1. Ventana: −1 con un jugador, la del jugador con dos. Idioma
+  `[0x1ff6eb]`: 0 inglés, 1 alemán, 2 italiano, 3 español, 4 sueco, 5 francés (en el port, `IGN_LANG`).
+- **Récords guardados** (`IGN_DOS.BTZ`): volcado de `0x597` B de `0x1ff158..0x1ff6ef` (`0x2b4f6`, `sub_00061078`); el
+  récord de carrera de la pista t es el `double` en `0x1ff32b + t·0x78` (desplazamiento `0x1d3 + t·0x78` del archivo) y
+  el de vuelta 0x3c más allá. En el archivo de GOG: USA 135,436 s, CANADA 110,258, … JAPAN 233.
+- **Superposición de depuración** (`sub_00049fdc`, `[0xc0b4c]` nunca activo en la versión publicada): «X %.0f»,
+  «Y %.0f», «Z %.0f», «X VIN %.2f», «Y VIN %.2f» de la cámara de depuración (`[0x1fb380]`, `[0x1fb330]`, `[0x1fb388]`,
+  `[0x1fb320]`, `[0x1fb328]`) con `IGNITION.FNT` en color 0x14, filas 0, 10, 20, 30, 40. El port la muestra con la
+  cámara libre (F1).
+- **Verificación ejecutable** (`tests/hud_original.py`, con `IGN_VERIFY_ORIGINAL`): ejecuta los bytes originales del
+  triángulo (`0x60e3d` tras las tablas de `0x60dc4` y `0x729e4`) y de `sub_00082950` en Unicorn y compara píxel a píxel
+  con `sprite.c`: 6 009 triángulos (aleatorios, recortados, planos, degenerados) y 624 sprites (escalas 0,05–2,5,
+  rotaciones, posiciones fuera de pantalla, ventanas) idénticos, pasando por todas las ramas de recorte.
+- **Desviaciones del port**: `main.c` solo usa una ventana (el HUD admite dos); los contadores por fotograma avanzan una
+  vez por cada 1/36 s de `[0x1fb4d8]` en lugar de por fotograma dibujado; el primer fotograma pone aguja y palanca en
+  su objetivo; el temblor usa un generador propio en vez de `sub_00051714`; los eventos de mensajes se detectan
+  comparando el estado entre fotogramas y los pilotos usan el código de su modelo como nombre; la capa de layout se
+  elige por el ancho del fotograma (la tabla `0x1d5eb0` se rellena en ejecución); cada sprite escalado ocupa su propia
+  página de textura en el origen (los vecinos de la página original solo se verían con muestras fuera del sprite);
+  no se emiten el sonido del lugar al terminar (`0x4bc54`, audio) ni el bucle de «fuegos» de `0x4bca8`, que solo
+  consume `rand` y no dibuja.
+
+## Música de CD (portada a `src/platform/music.c`)
+
+El original toca las pistas de audio del CD con MSCDEX: `int 0x2f` en modo real a través de DPMI `0x300`
+(`0x64559` AX=`0x1500` comprueba MSCDEX, `0x645e1` AX=`0x1510` envía la petición de dispositivo del búfer DOS
+`[0x25ade8]` reservado en `0x6442f`). `0x64659` monta la cabecera (`al` = orden): `0x84` PLAY AUDIO (`0x64332`, inicio
+y longitud en *frames*), `0x85` STOP (`0x64391`) e IOCTL `3`/`0xc` (lectura/escritura). `0x640b3` lee la TOC: última
+pista en `[0x25a934]`, inicio y longitud por pista en `[0x25a938+4n]`/`[0x25ab90+4n]` (MSF → *frames*
+`m*4500 + s*75 + f - 150`, `0x64710`; IOCTL `0x0a` da primera `+0x21`, última `+0x22` y *lead-out* `+0x23`, e IOCTL
+`0x0b` con la pista en `+0x21` su inicio en `+0x22`; `[0x25a934]` = última − primera + 1). `0x64241(n)` toca la
+pista `n` si `1 ≤ n ≤ [0x25a934]`. Antes de usar el CD se llama a `0x63d56`: IOCTL `4` (volumen del canal 0 →
+`[0x25adf0]`), `6` (bit 0 = puerta abierta → `[0x25adf4] = 0`; si no, 1), `9` (cambio de disco → `[0x25adf8]`) y
+`0xc` (ocupado → `[0x25ae08]`, inicio/fin de reanudación en `[0x25ae00]`/`[0x25adfc]`); `0x63cf3` repite solo la
+consulta de ocupado.
+
+La pista 1 del CD es de datos; la versión GOG trae las de audio como `MUSIC/Track02–08.ogg` (Vorbis, estéreo,
+44,1 kHz).
+
+| Momento | Dirección | Pista |
+|---|---|---|
+| Carga del nivel (`level_prepare`) | `0x2249c` → `0x224b4` | `[0x1feed8]` |
+| Elección (`0x2293c`) | `0x22adf` | `[0x1ff24f]` = 0: `0xc3fd8[[0x1fef10]]` = {CANADA 2, USA 3, CARIB 4, BRAZIL 5, AUSTRIA 6, ICELAND 6, JAPAN 7}, acotada a `[0x25a934]`; −1: `1 + rand·[0x25a934]` (`0x51714`); n: pista n |
+| Bucle de carrera | `0x212f8`–`0x2132e` | cada 5 s de `[0x1fb540]` (`[0xc0b30]`), si `[0x1ff253] ≠ 0` y `0x63cf3` dice que el CD está parado, vuelve a tocar `[0x1feed8]` (bucle) |
+| Menú de pausa, línea de música (`[0x1fed90] == 3`, dibujada en `0x43cc8`), teclas ←/→ (`0xcb`/`0xcd`) | `0x2c1cb`, `0x2c29a` | `[0x1ff24f] − 1` si es > −1, `+ 1` si es < `[0x25a934]`; se recalcula como arriba y se toca |
+| Joystick | `0x4d228`–`0x4d36a` | lo mismo que las teclas |
+| Resultados (`render_main` con `5 < [0x1fee34] < 8` y posición final `car+0x3a0 < 4`) | `0x460c1`, `0x464d8` | pista 8 una vez (`[0x1fed54]`, a 0 en `0x2aaa1`); al acabar, el bucle de carrera vuelve a la pista del nivel |
+| Menú (`0x12bb8`) | `0x13309`, `0x13717` | `[0xe9cf3]` = 0: pista 7; −1: `rand()·[0x25a934] >> 15 + 1`; n: n. Se reintenta cada `0x7d0/0x1b` ≈ 74 fotogramas si `0x63cf3` = 0 |
+
+Volumen (`0x63f3e`, 0..255 en los cuatro canales): `game_init` pone 255 (`0x21833`); la carrera
+`[0x1feef4] · 2,55` (`0x2a4f5`, `[0x1feef4] = [0x1ff253] · 10`); el menú `[0xe9cf7] · 25,5` (`0x13697`). Parar:
+opciones `0x13a5c`, `0x2b430` y apagado `0x2b6b4` (`0x64391` + `0x644c5`).
+
+Port: `ign_music_track` (tabla `0xc3fd8`), `ign_music_play` (`0x64241`), `ign_music_set_volume` (`0x63f3e`),
+`ign_music_start` (`level_prepare`), `ign_music_poll` (bucle de 5 s `0x212f8` y pista 8 del podio) e
+`ign_music_step` (←/→ del menú de pausa). Opciones `--no-music`, `--music-volume 0..10` (`[0x1ff253]`, 10 por
+defecto) y `--music-track N|random` (`[0x1ff24f]`). Ganancia: volumen 255 = el 0,4 de una muestra a `0x10000`
+(RMS medio de las pistas 0,09–0,14; motores 0,10–0,37). Desviaciones: el modo aleatorio no elige la pista de
+datos 1; mezcla mono como el resto del mezclador; el reloj del sondeo es el tiempo real de la ventana; sin menú de
+pausa, ←/→ son F5/F6; sin pantalla de resultados, la pista 8 suena al terminar en los tres primeros puestos; aún no
+hay menú principal (pista 7).
+
 ## Pendiente / desviaciones
 
 - Suelo del coche (`car_update` 0x2eea4–0x30d98, portado): una consulta por esquina de la caja de la carrocería ×1,1
@@ -928,7 +1200,7 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   par\u00e1metro de IA `+0x28` del modelo `= 0,19\u00b7dificultad + 0,4`. Usan el perfil 11 para el l\u00edmite de direcci\u00f3n (40 km/h,
   /90) y la fijan sin suavizar (como la entrada anal\u00f3gica), la fuerza del turbo (145) y las velocidades punta de las
   revoluciones.
-- **Acelerador** (`car_throttle` 0x4db90): índice = `min(199, trunc(|trunc_x87(v*3.6)| / 0xc5450[dificultad]))`; con patinaje
+- **Acelerador** (`car_throttle` 0x4db90): índice = `min(199, trunc(|trunc(v*3.6)| / 0xc5450[dificultad]))`; con patinaje
   contra el movimiento \u00edndice 0. Si la curva da \u2264 3, `car+0x520` cuenta y cada `8\u00b7car+0x51c + 15` ticks sube
   `car+0x51c`; si no, se divide entre 2. El humano recibe cada 182 fotogramas `car+0x594 = (posici\u00f3n \u2212 1)\u00b71,5`
   (`[0xc0b50] = 1`). Objetivo = `(par + 0x51c + 0x594 + 0x524)\u00b71000\u00b7acelerador/100`, o \u221225000 con la marcha atr\u00e1s
@@ -971,18 +1243,9 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   `vy = −1`, tamaño 50–100, vida 40. Como la fuerza se limita al agarre delantero, al arrancar casi no se nota.
 - **PIC de pista** (`USA.PIC` etc.): imagen 320×200 de la pista, no el fondo de la vista 3D.
 - **TRI**: significado de los `double`s y de los registros que no coinciden (¿objetos animados?). **SRF**: campos 2–4 de los triángulos (¿plano/altura?) y el tercer valor de cada celda.
-- **LFT** (port parcial verificado): cabecera `"LFT\0"`, `u16 100`, `u16` cantidad de glifos en `+6`,
-  `u16` ancho y alto en `+8/+0x0a`; 224 offsets `u32` desde `+0x0c`, 224 anchos `u16` desde `+0x68c` y
-  bitmaps desde `+0x84c`. Cada bitmap es una matriz de índices de 8 bits (ancho × alto); índice 0 no pinta.
-  `src/render/hud.c` valida los rangos y dibuja los glifos `YELLOW`, `SPEED` y `POS_S` sobre el panel original.
-  **FNT**: `u16 56`, `u16 10`, `0xffff`, anchos por glifo.
-- **HUD de carrera** (port parcial de `sub_0004a320`): la composición añade recortes de `H_PAN1.PIC` después de
-  pista, coches, efectos y clima. Presenta el reloj total (`IgnRace.total`, unidades de 1/36 s), el tiempo de vuelta
-  desde la salida, la posición y la velocidad. El panel usa píxel 0 como transparente y mapea su paleta a la de la
-  pista por color más cercano. Aún no reproduce las coordenadas/condiciones originales, la aguja ni el llenado dinámico
-  del turbo, los avisos de `H_PAN2.PIC` ni los estados multilingües.
+- **LFT/FNT y HUD de carrera**: véase la sección «HUD de carrera, fuentes y sprites».
 - **CDP**: vídeo, `"CDP\0"`, `u16 100`, `u16 frames`, …, `u16 320`, `u16 200`, paleta.
-- **PSQ**, **PFM** (`"li01"`), **BTZ** (config `i32`), **AIS** (texto de IA).
+- **PSQ**, **PFM** (`"li01"`), **BTZ** (véase la sección `IGN_DOS.BTZ` más abajo), **AIS** (texto de IA).
 - Audio: WAV PCM 8 bits mono 22050 Hz, PAT (GUS), XI (FastTracker II); música en pistas CD (`MUSIC/Track02-08.ogg`).
 
 ## Objetos de colisión, contacto, objetos especiales y `collisions_pass`
