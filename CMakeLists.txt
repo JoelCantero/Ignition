@@ -115,6 +115,11 @@ if(IGN_VERIFY_ORIGINAL)
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:track_ai_records_test>
             --assets-runner $<TARGET_FILE:track_real_assets_test> --data "${GAME_DIR}"
             --report ${CMAKE_BINARY_DIR}/ai-geometry-original-report.json)
+  add_test(NAME ai_target_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_target_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:ai_route_choice_test>
+            --assets-runner $<TARGET_FILE:track_real_assets_test> --data "${GAME_DIR}"
+            --report ${CMAKE_BINARY_DIR}/ai-target-original-report.json)
   add_test(NAME ai_schedule_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_schedule_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:ai_schedule_test>

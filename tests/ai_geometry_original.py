@@ -11,7 +11,7 @@ import random
 import struct
 import subprocess
 
-from physics_original import Original, ORIGINAL_SHA256, ESP, STACK
+from physics_original import Original, ORIGINAL_SHA256, ESP, STACK, FPCW
 
 CURRENT = 0x430000
 NEXT = CURRENT + 0x100
@@ -57,14 +57,14 @@ class GeometryOriginal(Original):
         self.uc.reg_write(self.reg.UC_X86_REG_ECX, CURRENT)
         self.uc.reg_write(self.reg.UC_X86_REG_EBX, NEXT)
         self.uc.reg_write(self.reg.UC_X86_REG_ESP, ESP)
-        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, 0x037F)
+        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, FPCW)
         self.uc.reg_write(self.reg.UC_X86_REG_FPTAG, 0xFFFF)
         entry, self.boundary = ((0x1DA75, 0x1DC8F) if secondary else (0x1D80A, 0x1DA25))
         self.uc.emu_start(entry, self.boundary + 1, timeout=1_000_000, count=2000)
         if (self.uc.reg_read(self.reg.UC_X86_REG_EIP) != self.boundary or
                 self.uc.reg_read(self.reg.UC_X86_REG_ESP) != ESP or
                 self.uc.reg_read(self.reg.UC_X86_REG_FPTAG) != 0xFFFF or
-                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != 0x037F):
+                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != FPCW):
             raise ValueError("Original geometry boundary/stack/x87 contract failed")
         raw = self.uc.mem_read(CURRENT, 0x4B)
         if raw[:0x1A] != initial[:0x1A] or raw[0x4A:] != initial[0x4A:]:
@@ -81,14 +81,14 @@ class GeometryOriginal(Original):
         initial = bytes(self.uc.mem_read(CURRENT, 0x108))
         self.uc.reg_write(self.reg.UC_X86_REG_EDX, CURRENT)
         self.uc.reg_write(self.reg.UC_X86_REG_ESP, ESP)
-        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, 0x037F)
+        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, FPCW)
         self.uc.reg_write(self.reg.UC_X86_REG_FPTAG, 0xFFFF)
         self.boundary = 0x1BF60
         self.uc.emu_start(0x1BE03, self.boundary + 1, timeout=1_000_000, count=200)
         if (self.uc.reg_read(self.reg.UC_X86_REG_EIP) != self.boundary or
                 self.uc.reg_read(self.reg.UC_X86_REG_ESP) != ESP or
                 self.uc.reg_read(self.reg.UC_X86_REG_FPTAG) != 0xFFFF or
-                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != 0x037F):
+                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != FPCW):
             raise ValueError("Original travel boundary/stack/x87 contract failed")
         if bytes(self.uc.mem_read(CURRENT, 0x108)) != initial:
             raise ValueError("Original travel changed car input")
@@ -184,7 +184,8 @@ def verify(original_path, runner, assets_runner, data):
                                 for p in (Path(__file__).resolve(),
                                           Path(__file__).resolve().parents[1] / "src/game/track.c",
                                           Path(__file__).resolve().parents[1] / "src/game/ai.c")},
-                scope="load_tri geometry, both slots, actual atan2/__CHP; ai_drive travel blend",
+                scope="load_tri geometry, both slots, actual atan2/__CHP; ai_drive travel blend; x87 CW 0x127f",
+                fpcw=hex(FPCW),
                 cases=len(cases) * 2, synthetic_records=synthetic_count,
                 real_records=len(cases) - synthetic_count,
                 travel_cases=len(travels), travel_max_error=max_error,

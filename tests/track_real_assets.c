@@ -13,6 +13,43 @@ static int check(int condition, const char *track, const char *message) {
     return 1;
 }
 
+static void print_target_record(const IgnAiRouteRecord *record) {
+    uint32_t bits;
+    memcpy(&bits, &record->heading[1], sizeof bits);
+    for (int k = 0; k < 6; k++) printf("%" PRId32 " ", record->point[k]);
+    for (int k = 0; k < 4; k++) printf("%" PRId32 " ", record->inset[k]);
+    printf("%" PRIu32 " %d ", bits, record->surface);
+}
+
+/* Inputs for tests/ai_target_original.py: slot-0 records at the clamped lookahead indices of
+ * 0x1b1a5..0x1b1f3 and car positions around the current gate (SRF coordinates). */
+static void print_target_fixtures(const IgnTrack *track) {
+    static const int offsets[6] = {1, 2, 3, 4, 6, 8};
+    for (int s = 0; s < track->count; s++) {
+        const IgnAiRouteRecord *current = ign_track_ai_record(track, s, 0), *ahead[6];
+        int complete = current && current->valid && current->geometry_valid;
+        for (int k = 0; k < 6 && complete; k++) {
+            int sk = s + offsets[k];
+            if (sk >= track->count) sk -= track->count;
+            if (sk >= track->count - 3) sk = track->count - 1;
+            ahead[k] = ign_track_ai_record(track, sk, 0);
+            complete = ahead[k] && ahead[k]->valid && ahead[k]->geometry_valid;
+        }
+        if (!complete) continue;
+        const int32_t *p = current->point, *in = current->inset;
+        double cx = p[0] + (p[3] - p[0]) * 0.5, cz = p[2] + (p[5] - p[2]) * 0.5;
+        double cars[4][2] = {{cx + 0.375, cz - 0.625}, {in[0] + 0.25, in[1] + 0.5},
+                             {in[2] - 0.75, in[3] + 0.125},
+                             {p[3] + (p[3] - p[0]) * 0.25, p[5] + (p[5] - p[2]) * 0.25}};
+        for (int c = 0; c < 4; c++) {
+            printf("%.17g %.17g %.17g ", c & 1 ? 0.0 : 5.0, cars[c][0], cars[c][1]);
+            print_target_record(current);
+            for (int k = 0; k < 6; k++) print_target_record(ahead[k]);
+            printf("\n");
+        }
+    }
+}
+
 static int validate_track(const char *data_dir, const char *name, int oracle) {
     IgnLevel level = {0};
     IgnTrack track = {0};
@@ -117,7 +154,7 @@ static int validate_track(const char *data_dir, const char *name, int oracle) {
                     for (int k = 0; k < 2; k++)
                         failed |= check(isfinite(record->across[k]), name,
                                         "TRI transverse angles are finite");
-                    if (oracle && record->geometry_valid) {
+                    if (oracle == 1 && record->geometry_valid) {
                         int ns, slot, requested = path == 0 && count > 1 ? r : path;
                         if (!ign_track_find_section(&track, s + 1, requested, 1,
                                                     ign_ghost_track_id(name), &ns, &slot, NULL)) {
@@ -148,6 +185,7 @@ static int validate_track(const char *data_dir, const char *name, int oracle) {
                         "every main-route section retains its ordered PLC object, including repeated terminal entries");
         failed |= check(branch_objects > 0 && records > 0, name,
                         "track has branch-B and TRI records");
+        if (oracle == 2) print_target_fixtures(&track);
         if (!oracle) printf("%-8s objects=%d sections=%d main=%d main_gaps=%d first_gap=%d branch_b=%d tri_records=%d\n",
                name, track.nobj, track.count, main_objects, main_gaps, first_main_gap,
                branch_objects, records);
@@ -162,9 +200,10 @@ int main(int argc, char **argv) {
     static const char *const tracks[] = {
         "USA", "CANADA", "AUSTRIA", "BRAZIL", "CARIB", "ICELAND", "JAPAN",
     };
-    int oracle = argc == 3 && strcmp(argv[2], "--geometry-oracle") == 0;
-    if (argc != 2 && !oracle) {
-        fprintf(stderr, "usage: %s GAME_DATA_DIRECTORY [--geometry-oracle]\n", argv[0]);
+    int oracle = argc != 3 ? 0 : strcmp(argv[2], "--geometry-oracle") == 0 ? 1 :
+                 strcmp(argv[2], "--target-fixtures") == 0 ? 2 : -1;
+    if (argc != 2 && oracle <= 0) {
+        fprintf(stderr, "usage: %s GAME_DATA_DIRECTORY [--geometry-oracle|--target-fixtures]\n", argv[0]);
         return 2;
     }
 

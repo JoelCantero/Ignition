@@ -12,7 +12,7 @@ typedef struct {
     int32_t point[6]; /* load_tri +0x02..+0x16: left xyz followed by right xyz */
     int object; /* section object: PLC index, not an engine-pool index */
     int plc;    /* same PLC identity retained for asset validation */
-    uint8_t plc_type;
+    int8_t surface;   /* +0x01: byte 0 of the TRI block ([0xeb780][plc]), signed t_surface_grip index */
     uint8_t tri_type;
     uint8_t valid;
     float heading[3]; /* load_tri +0x2a/+0x2e/+0x32: left, integer centre, right */
