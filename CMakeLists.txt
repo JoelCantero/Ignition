@@ -24,6 +24,13 @@ add_library(ignition_core STATIC
   src/render/raster.c
   src/render/hud.c
   src/render/camera.c
+  src/frontend/cdp.c
+  src/frontend/frontend.c
+  src/frontend/gfx2d.c
+  src/frontend/gui.c
+  src/frontend/menu_data.c
+  src/frontend/pfm.c
+  src/frontend/settings.c
 )
 target_include_directories(ignition_core PUBLIC src)
 if(NOT MSVC)
@@ -133,3 +140,17 @@ if(IGN_VERIFY_ORIGINAL)
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
             --report ${CMAKE_BINARY_DIR}/lap-original-report.json)
 endif()
+# Frontend (needs the game data): menu background animation and a full menu run up to a race start.
+add_executable(menu_shot tests/menu_shot.c)
+target_link_libraries(menu_shot PRIVATE ignition_core)
+add_executable(pfm_frames tests/pfm_frames.c)
+target_link_libraries(pfm_frames PRIVATE ignition_core)
+add_test(NAME menu_background COMMAND pfm_frames "${GAME_DIR}" --hash)
+set_tests_properties(menu_background PROPERTIES PASS_REGULAR_EXPRESSION "frames 209 hash c5d5aca8")
+# Language page, intro (skipped), credits (ended), SINGLE PLAYER, SINGLE RACE, car, track: the race must start.
+add_test(NAME menu_flow COMMAND ${CMAKE_COMMAND} -E env IGNITION_SAVE=${CMAKE_BINARY_DIR}/menu-flow.btz
+  $<TARGET_FILE:menu_shot> "${GAME_DIR}" ${CMAKE_BINARY_DIR}/menu-flow
+  w5 k1c w20 k39 w100 k39 w300 k1c w60 k1c w60 kd0 w5 k1c w60 k1c w60 kd0 w12 k1c w80 r)
+set_tests_properties(menu_flow PROPERTIES FIXTURES_REQUIRED menu_flow_clean)
+add_test(NAME menu_flow_clean COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_BINARY_DIR}/menu-flow.btz)
+set_tests_properties(menu_flow_clean PROPERTIES FIXTURES_SETUP menu_flow_clean)

@@ -32,18 +32,21 @@ El port implementa **carreras de 3 vueltas** en las 7 pistas: física, choques c
 parrilla de salida y coches bien montados (sombra y dirección incluidas), contra hasta 7 rivales. Hay fin de carrera y
 clasificación básicos; los rivales usan una **IA aproximada**. POS ya carga y anima los objetos de pista, con rotación
 aproximada. El HUD de carrera ya usa el panel y fuentes LFT originales para tiempos, posición y velocidad; faltan la
-reproducción exacta de sus estados, aguja/medidores dinámicos y avisos. También faltan colisiones móviles completas, la
-IA fiel, el sombreado original, los menús, la música y el multijugador.
+reproducción exacta de sus estados, aguja/medidores dinámicos y avisos. El **frontend original está portado**: pantalla
+de idioma, intro en vídeo CDP, menús en 6 idiomas con su motor de páginas, fondo vectorial animado (idéntico al píxel al
+original), carrusel de coches 3D, récords, créditos y configuración en `IGN_DOS.BTZ`; al elegir pista y coche arranca la
+carrera y al salir de ella se vuelve al menú. Faltan colisiones móviles completas, la IA fiel, el sombreado original,
+los modos de campeonato/contrarreloj/persecución, la música y el multijugador.
 
 | Métrica | Valor |
 |---|---|
 | Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 488 clasificadas como runtime) |
 | Instrucciones únicas desensambladas | **128 832** (20 323 de runtime/libc/DOS/4G) |
-| Código del juego marcado como portado/verificado | **17 334 de 108 509 instrucciones (16,0 %)**; **45 de 624 funciones (7,2 %)** |
-| Código del juego marcado como parcial | **9 537 instrucciones en 12 funciones**; excluido del numerador portado |
-| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **95 de 624 (15,2 %)**; runtime excluido y `unmapped` no significa fuera de alcance |
-| Formatos de datos propios descifrados | 10 de 21 (TRI, POS y TAB solo en parte) |
-| Código del port | ≈ 4 865 líneas de C (`src/`) |
+| Código del juego marcado como portado/verificado | **33 086 de 108 509 instrucciones (30,5 %)**; **120 de 624 funciones (19,2 %)** |
+| Código del juego marcado como parcial | **11 785 instrucciones en 14 funciones**; excluido del numerador portado |
+| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **202 de 624 (32,4 %)**; runtime excluido y `unmapped` no significa fuera de alcance |
+| Formatos de datos propios descifrados | 15 de 21 (TRI, POS y TAB solo en parte) |
+| Código del port | ≈ 10 400 líneas de C (`src/`, sin contar las tablas generadas `menu_data.c`) |
 
 Los totales anteriores se regeneran con `disasm.py coverage`; el detalle completo está en
 [`docs/function-coverage.txt`](docs/function-coverage.txt) y el inventario conciliable por función en
@@ -61,8 +64,15 @@ Requisitos en macOS: `brew install cmake sdl3`.
 ```sh
 cmake -S . -B build
 cmake --build build
-./build/ignition USA
+./build/ignition          # frontend: idioma, intro, menús; la carrera sale de lo elegido
+./build/ignition USA      # carrera directa, como antes
 ```
+
+Sin argumentos (o con `--menu`) arranca el **frontend** del original. La configuración se lee y se guarda, como en el
+DOS, en `IGN_DOS.BTZ` del directorio del juego; `IGNITION_SAVE=/ruta/archivo.btz` usa otro archivo. La opción
+*RESET GHOST CAR* borra de verdad los `GHOSTS/*.GST`. Del menú pasan a la carrera la pista, el coche del jugador, el
+número de corredores (6, o 1 en contrarreloj), la dificultad y la caja de cambios; Esc en carrera vuelve al menú.
+En el menú: flechas, Enter, Esc/Retroceso; cualquier tecla salta la intro o los créditos.
 
 Pistas: `USA`, `CANADA`, `AUSTRIA`, `BRAZIL`, `CARIB`, `ICELAND`, `JAPAN`. La ruta de datos se cambia con la variable
 `IGNITION_DATA=/ruta/al/juego`.
@@ -87,6 +97,8 @@ Pistas: `USA`, `CANADA`, `AUSTRIA`, `BRAZIL`, `CARIB`, `ICELAND`, `JAPAN`. La ru
 
 | Opción | Uso |
 |---|---|
+| `--menu` | arranca el frontend (lo mismo que sin argumentos) |
+| `--manual` | empieza con cambio manual (GEARBOX = MANUAL en el menú) |
 | `--rivals N` | número de rivales (0–7; 3 por defecto en ventana) |
 | `--car N` | modelo del jugador (0–10 de `CARS.PLC`; 0 por defecto) |
 | `--shot out.ppm` | modo sin ventana: simula y guarda un fotograma (a la resolución de `--res`) |
@@ -396,11 +408,12 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | TAB | tabla de sombreado `color×nivel` (64 niveles) | 🟡 significado conocido; no se usa |
 | PAN / SHD | tablas 256×256 de 64 KB | � SHD fila 0x28 = sombra; PAN desconocida |
 | CARS | 11 coches × (carrocería + 4 ruedas) | ✅ portado y montado como en `cars_init` |
-| LFT / FNT | fuentes | 🔴 solo cabeceras |
-| CDP | vídeos de introducción | 🔴 solo cabecera |
-| PSQ / PFM | coche 3D del menú | 🔴 |
+| LFT / FNT | fuentes | ✅ LFT (`gfx2d.c`: alineación, proporcional, espaciado); FNT solo cabecera |
+| CDP | vídeos de introducción | ✅ portado (`cdp.c`) |
+| PSQ / PFM | animación vectorial del fondo del menú ("Script Player") | ✅ portado al píxel (`pfm.c`) |
+| DAT (`MENUBKG.DAT`) | atlas de las cajas de resaltado del menú | ✅ portado (`gfx2d.c`) |
 | GST | coches fantasma | 🟡 leer, escribir y reproducir (`ghost.c`, `tools/gst.py`); falta la contrarreloj |
-| BTZ | configuración y récords | 🔴 |
+| BTZ | configuración y récords | ✅ bloque de 0x597 bytes (`settings.c`) |
 | INF | curvas del sonido del motor por coche | � 4 tablas de 200 B: tono y volumen de `00_A`/`01_A` por régimen (`sound.c`) |
 | WAV / PAT / XI / OGG | sonido (PCM, Gravis, FastTracker, pistas de CD) | 🟢 WAV, PAT y XI (`audio.c`); falta OGG (música) |
 
@@ -433,9 +446,16 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Montaje del coche | `cars_init` `0x265f6` | `car.c` | fiel |
 | Pose: dirección visual, inclinación | `0x48a14`, `0x40ec8`, `0x2e6f8` | `car.c`, `raster.c` | fiel |
 | Sombra del coche | `0x48a14` | `raster.c` | geometría fiel; sombreado aproximado |
-| Truco BANARNE | `cheat_check` `0x160c4` | `main.c` | fiel |
+| Trucos (BANARNE, SURMULE, SLASKTRATT…) | `menu_page_key` `0x160c4` | `frontend.c`, `main.c` | fiel: se teclean en el menú; BANARNE también en carrera |
 | IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, registros `load_tri` con mapeo engine→PLC, selector `ai_find_section` y reglas observadas de topología/ramas implementados; la estructura de rutas y registros TRI pasa `track_real_assets` en las 7 pistas, pero falta una comparación independiente con la tabla runtime original y la asignación exacta de registros divididos a carriles; pendiente (Y), giro por solape y frenada de curva (heurística) |
 | Render 3D | motor Lisa 2 | `raster.c` | propio: z-buffer, sin sombreado TAB |
+| Frontend: carga, bucle por fotograma, cierre | `menu_load_gfx` `0x11504`, `menu_frame` `0x12bb8`, `menu_shutdown` `0x13a5c` | `frontend/frontend.c` | literal: intro, fundidos, créditos, iris, volúmenes; sin CD ni joystick |
+| Motor de menús "Baltazar" | `0x51b20`, `0x51c94`, `0x527c8`, `0x534cc`, `0x5383c` | `frontend/gui.c` | literal; tablas extraídas del EXE (`tools/gen_menu_data.py`) |
+| Callbacks de página y acciones | `0x160c4`, `0x170ac`, `0x155d0`, `0x16f18`–`0x17054` | `frontend/frontend.c` | literal; prueba `menu_flow` |
+| Fondo animado PSQ/PFM | `0x549b0`, `0x54df8`, `0x60e3d` (tipos 7, 11, 15, 17, 18, 19) | `frontend/pfm.c` | **al píxel**: 209 fotogramas iguales al original emulado; prueba `menu_background` |
+| Fuentes, sprites, cajas, CDP | `0x61959`, `0x55968`, `0x541d4`–`0x54864`, `0x55384` | `frontend/gfx2d.c`, `cdp.c` | literal; rotozoom aproximado |
+| Coches 3D del menú | `0x19508`, `0x1aaf8` | `frontend/frontend.c` | modelos y giro fieles; proyección con el rasterizador del port (cámara aproximada) |
+| Configuración y récords | `0x1a864`, `0x198bc`, `IGN_DOS.BTZ` | `frontend/settings.c` | literal |
 
 ---
 
@@ -446,21 +466,21 @@ instrucciones está en `docs/function-coverage.txt`):
 
 | Estado | Funciones | Interpretación |
 |---|---:|---|
-| `unknown` | 519 | Sin identificación fiable; requiere análisis |
-| `identified` | 46 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
+| `unknown` | 412 | Sin identificación fiable; requiere análisis |
+| `identified` | 71 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
 | `understood` | 0 | Comportamiento entendido, todavía no implementado |
 | `port-pending` | 2 | Pendiente explícita y priorizada: `car_ground_contact`, `collisions_pass` |
-| `partial` | 12 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
-| `ported` | 40 | Implementada en el port, sin afirmar verificación completa |
+| `partial` | 14 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
+| `ported` | 115 | Implementada en el port, sin afirmar verificación completa |
 | `verified` | 5 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
-| `native` | 0 | Sustitución nativa explícita; no se asigna por inferencia |
+| `native` | 5 | Sustitución nativa explícita: `main`, `main_step` y el temporizador PIT/BIOS (`0x10010`–`0x1034c`) → SDL |
 | `library` | 488 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
 
 El inventario de 1 112 filas se puede regenerar con
 `.venv/bin/python tools/disasm.py roadmap -o docs/function-roadmap.tsv`; la cobertura con
 `.venv/bin/python tools/disasm.py coverage > docs/function-coverage.txt`. En el TSV, `unmapped` significa que aún no
-se ha asociado la función a una tarea concreta, no que esté fuera de alcance. La conciliación cubre **95 de 624
-funciones de juego (15,2 %)**; el informe conserva también el recuento bruto de 95/1 112 para que no se confunda con
+se ha asociado la función a una tarea concreta, no que esté fuera de alcance. La conciliación cubre **202 de 624
+funciones de juego (32,4 %)**; el informe conserva también el recuento bruto de 202/1 112 para que no se confunda con
 una proporción del código de juego. Las tareas `roadmap=` usadas son identificadores estables de subsistema; las
 sustituciones de la biblioteca estándar, DOS/4G y el motor gráfico se deben decidir por separado, no contabilizar
 automáticamente como porte literal.
@@ -468,7 +488,7 @@ automáticamente como porte literal.
 La libc y DOS/4G se agrupan en `library` mediante la clasificación heurística del desensamblador. El motor Lisa 2
 no se mezcla con esa categoría: el port usa SDL3 y un rasterizador nativo propio, así que no necesita replicar
 literalmente cada rutina interna del motor original. `native` se reserva para sustituciones función-a-función
-explícitas; actualmente hay cero, para no confundir una sustitución de subsistema con equivalencia de cada rutina.
+explícitas (hoy solo el bucle principal y el temporizador), para no confundir una sustitución de subsistema con equivalencia de cada rutina.
 Las tareas de render sí siguen registradas por separado cuando afectan al comportamiento visible del juego.
 
 Las etiquetas de roadmap se agrupan así: `phase1.*` carrera, controles, física y rutas; `phase2.*` mundo, efectos y
@@ -516,8 +536,14 @@ crear clima `0x26154` · pantalla de carga `0x21d68` · nombres de pista `0x22f3
 `0x4bdf4` · dígitos `0x4be7c` · depuración XYZ *¿?* `0x49fdc` · pausa `0x4395c` · salir o reiniciar `0x43e48` ·
 captura TGA `0x515f8` · fondo del menú `0x541d4`.
 
-**Frontend**: `menu_load_gfx` `0x11504` · opciones y BTZ *¿?* `0x12bb8` · idioma y menú principal *¿?* `0x170ac` ·
-lista de fantasmas `0x17054` · `menu_load_car` `0x1aaf8` · trucos `0x160c4`.
+**Frontend** (portado en `src/frontend/`): `main` `0x10010` · `main_step` `0x10060` · `menu_load_gfx` `0x11504`
+(con `menu_init` `0x14000` en línea) · `menu_frame` `0x12bb8` · `menu_shutdown` `0x13a5c` · iris `0x15344` · capa de
+texto `0x155d0` · callback de teclas de página y trucos `0x160c4` · acciones SALIR/CARRERA/VÍDEO/RESTAURAR/BORRAR
+FANTASMAS `0x16f18`–`0x17054` · callback de dibujo de página `0x170ac` · récords `0x1911c` · coche 3D `0x19508` ·
+aplicar menús a la carrera `0x198bc` · valores por defecto `0x1a864` · `menu_load_car` `0x1aaf8` · tabla del iris
+`0x2ac28`. Motor de menús "Baltazar" `0x51b20`–`0x539f8`; cajas MenuBkg `0x541d4`–`0x54864`; *Script Player* PSQ/PFM
+`0x549b0`–`0x54df8`; CDP `0x552fc`/`0x55384`. Animación de texturas de objetos PLC `0xfa` `0x10390`–`0x10cf8`
+(carrera, sin portar) y utilidades de paleta `0x10d34`–`0x114f4` (casi todas muertas).
 
 **Fantasmas y persistencia**: cargar o crear fantasma `0x2adf8` · guardar fantasma `0x2ccc8` · mover fantasma
 `0x50e94` · guardar configuración `0x2b430`, `0x2cf60` · apagado `0x2b6b4`.
@@ -538,8 +564,8 @@ pulsada `0x55c28` · palabra tecleada `0x55cd0` · `atan2` `0x647ef` · `pow` `0
   `LEVELS/<pista>/SOUND/*.PAT|WAV`: ambiente por pista.
 - `MUSIC/Track02–08.ogg`: música (pistas de CD).
 - `FONTS/*.LFT`, `IGNITION.FNT`; `*_PANGFX.PIC`, `H_PAN*.PIC`, `*_SIGNS.PIC`, `POKAL.PIC`: HUD, señales y trofeo.
-- `BALTAZAR/DATA`: menú (MENU.COL/TAB, MENUCAR.*, BILAR/CAR_SEL/DEMOCAR/DEMOTRK/FLAGGOR/IGN_LOGO/MARK/CONSPR/TRK_SPR.PIC,
-  `*.LFT`, `IGN*.CDP`, `DEFAULT2.PSQ`, `TEST2.PFM`).
+- `BALTAZAR/DATA`: ya usados por el frontend salvo `DEMOCAR.PIC`, `DEMOTRK.PIC`, `MARK.PIC` y `CONSPR.PIC` (no los
+  carga `MAINDOS.EXE`).
 - `LEVELS/<pista>/<pista>.{PAN,SHD,TAB,POS}`.
 - Nombres internos de las pistas: ICELAND = CAPETHOR, CANADA = MOOSEJAW (Moosejaw Falls), USA = GOLDRUSH,
   CARIB = SNAKEISL, AUSTRIA = YODELPEA, JAPAN = TOKYOBUL, BRAZIL = LOSTRUIN.
@@ -619,6 +645,13 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    sus spans estáticos, por lo que la consulta de suelo y las colisiones de objetos trasladados no son completas.
 10. **Sonido**: mezclador propio en SDL3 (mono, 44,1 kHz) en lugar del driver GUS/Sound Blaster; volumen 0..`0x10000`
    y frecuencia en Hz como en `0x625f4`. Sin panorama estéreo, sin música y sin los sonidos de objetos móviles.
+11. **Frontend**: el menú corre a 320×200 como el DOS. No hay CD (el original tocaba pistas de audio con MSCDEX; la
+   versión GOG trae `MUSIC/Track02–08.ogg`, que el port aún no decodifica), ni joystick/volante (sus páginas de
+   calibración no terminan solas), ni la espera "NO SOUNDCARD FOUND". Los coches 3D del carrusel usan el rasterizador
+   del port con una cámara que reproduce posición y objetivo pero no la focal exacta del motor Lisa 2. El escalado de
+   sprites (rótulo del coche, miniatura de pista) usa muestreo propio. El reloj del menú es `SDL_GetTicks` (el original
+   iba un 1,15 % rápido). La carrera aún no usa el modo de juego, los nombres, las teclas configuradas ni las opciones
+   gráficas del menú.
 
 ---
 
@@ -800,13 +833,16 @@ implementado.
 - [ ] **P1** Pantallas de resultados y puntuación (`render_main` `0x43fe0`: TRACK RESULTS, TRACK SCORE, TOTAL SCORE)
       y trofeo `POKAL.PIC`.
 - [ ] **P1** Pausa, continuar, salir y reiniciar (`0x4395c`, `0x43e48`).
-- [ ] **P1** Menús: `menu_load_gfx` `0x11504`, menú principal e idioma `0x170ac`, opciones `0x12bb8`, selección de
-      coche (`BILAR.PIC`, `CAR_SEL.PIC`, coche 3D del menú `0x1aaf8` con **PSQ/PFM**), selección de pista
-      (`DEMOTRK.PIC`, `TRK_SPR.PIC`), fondo `MENUBKG.DAT` (`0x541d4`).
+- [x] **P1** Menús: `menu_load_gfx` `0x11504`, `menu_frame` `0x12bb8`, callbacks `0x160c4`/`0x170ac`, motor de menús
+      `0x51b20`–`0x539f8` con las 25 páginas × 6 idiomas, intro CDP, fondo PSQ/PFM al píxel, carrusel 3D `0x19508`,
+      récords, créditos, cajas `MENUBKG.DAT` y `IGN_DOS.BTZ`. Pruebas `menu_flow` y `menu_background`.
+- [ ] **P1** Llevar a la carrera el resto de la configuración del menú: modos (`[0xe9c04]`), nombres, teclas de
+      `IGN_DOS.BTZ`, opciones gráficas, fantasma y obstáculos.
 - [ ] **P2** Modos de juego (campeonato, contrarreloj, práctica…), desbloqueos y flujo entre pistas.
 - [ ] **P2** Pantallas de carga (`0x21d68`) e idiomas (inglés, alemán, francés, italiano, español y sueco).
-- [ ] **P2** Configuración y récords en **BTZ** (`0x2b430`, `0x2cf60`, `IGN_DOS.BTZ`).
-- [ ] **P3** Vídeos **CDP** (`IGN1.CDP`, `IGN2.CDP`, `IGN3_*.CDP`) y *Script Player* `0x549b0`.
+- [ ] **P2** Récords al terminar la carrera en **BTZ** (`0x2b430`, `0x2cf60`); el formato y la carga/guardado del menú
+      ya están portados (`settings.c`).
+- [x] **P3** Vídeos **CDP** (`IGN1.CDP`, `IGN2.CDP`, `IGN3_*.CDP`) y *Script Player* `0x549b0`.
 - [ ] **P3** Capturas TGA `0x515f8` y superposición de depuración `0x49fdc`.
 
 ### Fase 5 — Sonido y música

@@ -30,6 +30,8 @@ typedef struct {
 void ign_frame_init(IgnFrame *fb, int w, int h);
 void ign_frame_clear(IgnFrame *fb);
 void ign_render_track(IgnFrame *fb, const IgnLevel *lv, const IgnCamera *cam);
+/* One object of `mdl` at the world origin, turned by `rotation` about its own origin (menu cars, sub_00019508). */
+void ign_render_object(IgnFrame *fb, const IgnModel *mdl, int obj, const float rotation[9], const IgnCamera *cam);
 void ign_render_car(IgnFrame *fb, const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam);
 /* Skid marks of sub_0003731c; call after the track and before the cars. */
 void ign_render_skids(IgnFrame *fb, const IgnLevel *lv, const IgnSkids *s, const IgnCamera *cam);

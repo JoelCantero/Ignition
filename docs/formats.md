@@ -981,6 +981,91 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   desde la salida, la posición y la velocidad. El panel usa píxel 0 como transparente y mapea su paleta a la de la
   pista por color más cercano. Aún no reproduce las coordenadas/condiciones originales, la aguja ni el llenado dinámico
   del turbo, los avisos de `H_PAN2.PIC` ni los estados multilingües.
-- **CDP**: vídeo, `"CDP\0"`, `u16 100`, `u16 frames`, …, `u16 320`, `u16 200`, paleta.
-- **PSQ**, **PFM** (`"li01"`), **BTZ** (config `i32`), **AIS** (texto de IA).
+- **CDP**, **PSQ**, **PFM**, **BTZ** y **MenuBkg.dat**: descifrados y portados, véase [Frontend](#frontend-portado-a-srcfrontend).
+- **AIS** (texto de IA).
 - Audio: WAV PCM 8 bits mono 22050 Hz, PAT (GUS), XI (FastTracker II); música en pistas CD (`MUSIC/Track02-08.ogg`).
+
+## Frontend (portado a `src/frontend/`)
+
+Flujo (`sub_00020d60`): `[0x1fede8]==1` → `menu_load_gfx` `0x11504` (pantalla LOADING, `MENU.COL`, `MENU.TAB` como LUT
+de sprites `[0x257e48]`, imágenes, valores por defecto `0x1a864` + `IGN_DOS.BTZ`, arranque del motor de menús) →
+`menu_frame` `0x12bb8` cada fotograma (1 seguir, 2 carrera, 3 salir) → `menu_shutdown` `0x13a5c`. Tras una carrera se
+vuelve a cargar el menú; con `[0xbed18]==0` la página de idioma se confirma sola (Enter inyectado) y en lugar de la
+intro hay un iris de apertura.
+
+**Tiempo.** El menú cuenta en *ticks* de 1/36 s (`timer_ms·0,036`), con `dt` 0 → 0,01 y > 10,8 → 10,8, en pasos
+enteros más uno fraccionario (que puede valer 0). Los contadores de animación suman 27 por paso aunque el paso sea 0.
+El motor de menús tiene su propio reloj a 25 Hz (`timer_ms·0,04`, máximo 12) y su bloqueo de entrada resta 25 por paso.
+
+**Intro (primera entrada).** Enter en la página de idioma carga `IGN1`, `IGN2`, `IGN3_0..3.CDP` (150, 129, 97, 60, 40
+y 46 fotogramas) a 15,04 fps (2,3931 ticks); paleta negro→blanco (0–28,8), blanco→vídeo (28,8–57,6), vídeo→blanco
+desde 1249,2 (= 522 fotogramas), blanco→`MENU.COL` desde 1306,8; entrada desbloqueada a 1312,56, fin a 1335,6.
+`3_INTRO.WAV` suena dos veces a 22 050 Hz. Cualquier tecla salta a 1278. Al terminar empieza el pase de créditos.
+
+**Créditos (inactividad).** Tras 1080 ticks (30 s) sin teclas: 16 diapositivas de 168 ticks (`0xbf57c`:
+`{título, nombre c, b, a}`, nombres `0xbf538`), la 1 y la 2 son imágenes de `N_SYSGFX.PIC`; "PRESS ANY KEY" parpadea
+500 de cada 809 ms. El reloj vuelve de 3780 a 1080.
+
+**Motor de menús "Baltazar"** (`0x51b20`–`0x539f8`, `gui.c`). Página 0x18 B `{dibujo 0x170ac, teclas 0x160c4, keymap
+0xbee1c, n, items, sel}`; ítem 0x1c B empaquetado `{int *valor (en g_cfg), min, max, Element *, i16 callback (>0
+acción 1-based en 0xbf01c, −1 = volver), i32 arg, EditDesc *, i16 habilitado}`; elemento 0x18 B `{sprite (siempre
+NULL), texto, x/y de texto relativos al centro, fuente}`. Índices: etiqueta `sel^1` (+2, +2n si deshabilitado), valor
+`etiqueta + 2 + 2·(v − min)`. EditDesc 0x16 B: destino, x/y, fuentes, longitud, cursor `|`, tipo (1 texto, 2 texto al
+entrar, 3 tecla). La navegación no está en los ítems: la tabla `0xbe514` (25 filas × 16 `{i16 coincide, i16 acción}`
+por profundidad; coincide 0 = cualquiera, si no `sel+1`; acción ≥ 0 id de menú en `0xaeb6c + idioma·0x3110`, < 0
+acción −acción) decide por el camino recorrido, así que los modos de juego reutilizan las páginas de coche y pista.
+Keymap: Esc/Retroceso −6, Enter +6, ↑ −1, ↓ +1, ← −3, → +3 (los ±3 rotan el valor). El callback de teclas devuelve
+`0x441` para consumir. Las 25 páginas × 6 idiomas, textos, tablas de teclas, nombres de tecla, créditos y récords por
+defecto se extraen del ejecutable con `tools/gen_menu_data.py` a `src/frontend/menu_data.c`.
+
+Páginas (índice `k` de `0xea47c`): 0 principal, 1 opciones, 2 multijugador, 3 modo de juego, 4/5 coche J1/J2,
+6 pista, 7/8 red (inaccesibles), 9 gráficos, 10 sonido, 11/12 opciones de jugador, 13/14 teclas, 15 opciones de juego,
+16 récords, 17–20 calibración de joystick y pedales, 21 idioma (raíz), 22–24 confirmaciones SALIR/RESTAURAR/BORRAR.
+
+**Dibujo de página** (`0x170ac` con `0x155d0` en línea). Capa de texto 320×200 (`[0xea408]`) que solo se rehace
+cuando algo cambia: cajas de `MenuBkg.dat` (etiquetas estilo 0, valores y campos estilo 1; caja = `x−13`, fila
+`y/19`, desplazamiento `y%19−12`) y textos con la LUT identidad `[0x1fec0c]` (`lut[s<<8|d] = s`: los glifos son
+opacos y su fondo es el color de la caja). Cada fotograma: fondo PFM (17 fps) copiado al búfer, logo en (75,2), capa
+de texto mezclada con `MENU.TAB` en un rectángulo por página, banderas (la alemana nunca se dibuja), rótulo del coche
+(186×61 de `BILAR.PIC`) que encoge y crece al cambiar, carrusel de tres coches 3D (x 78/159/240, escala 1,01/1,61,
+una vuelta en 3,4/1,9 s), miniatura de pista (115×99 de `TRK_SPR.PIC`) y esquinas de 20×20 de `N_SYSGFX.PIC`.
+
+**Callback de teclas** (`0x160c4`): trucos (`BANARNE`, `SURMULE` dificultad MIRROR, `SLASKTRATT` los 11 coches,
+`FILMJOLK`, `SKUNK`, `SVINPOLE`, `STRINGS`) en `0x1fb2f0`; fin de créditos; salto de la intro; sonidos 1_FLIP (±1…±5,
+50 000) y 0_SEL (±6); CONTROLS: solo un jugador con joystick/pedales; confirmar idioma (páginas del idioma, lista de
+coches con los bloqueados `{10, 9, 6, 1}` según `[0xea183]`/`[0xea187]`, intro o iris); KEY ALREADY ASSIGNED (bloqueo
+1100, 2_NO); animaciones de coche (bloqueo 400) y de pista.
+
+**IGN_DOS.BTZ** = volcado del bloque `g_cfg` `0xe9bfc`, 0x597 bytes, se acepta si el primer `int` es 30. Campos en
+`src/frontend/settings.h`: modo, dificultad (máximo = nivel desbloqueado `+0x587`), fantasma, obstáculos, coche por
+plaza `+0x1c`, coches de menú J1/J2 `+0x40/+0x44`, cambio `+0x48`, nombres `+0x6c` (9 × 15), pista `+0xf3`, pista
+CD/volúmenes `+0xf7/+0xfb/+0xff`, opciones gráficas `+0x103..+0x117`, controles `+0x123..+0x12f`, orden de salida
+`+0x133`, corredores `+0x153`, humano/IA `+0x15f`, teclas J1/J2 `+0x17f/+0x187`, récords `+0x1bf` (7 pistas ×
+`{char nombre[5][4]; double total[5]; char nombre[5][4]; double vuelta[5]}`), cursores de las 25 páginas `+0x507`,
+pantalla de récords `+0x57f/+0x583`, desbloqueos `+0x587/+0x58b`, idioma `+0x593`. Se escribe al salir o al empezar
+una carrera, después de `0x198bc` (cursores → carrera: 6 corredores salvo contrarreloj, coches 2..7 fijos,
+etiquetas de piloto `0xbf5fc`). La pista `+0xf3` usa el orden CANADA, USA, CARIB, BRAZIL, AUSTRIA, ICELAND, JAPAN
+(`0x22f38`).
+
+**MenuBkg.dat** (0x9358 B, raíz del juego): atlas de baldosas almacenadas de abajo arriba, 16×19 (esquinas `0x000`,
+`0x130`, `0x260`, `0x390`; remates `0x8e80`, `0x8fb0`, `0x90e0`, `0x9210`) y 32×19 (uniones izquierda `0x4c0+d·0x260`,
+`0x2600+(d−1)·0x260`, derecha `0x44e0+…`, `0x6ae0+…`), color 0 transparente, y 24 colores de relleno en `0x9340`. El
+estilo 1 remapea `c1→f5 c3→bd c4→be d5→b4 d6→bb fd→bc c0→bd c2→f4`. Una caja une sus esquinas con la de la fila de
+arriba si los bordes distan ≤ 13 (izquierda) o ≤ 15 (derecha).
+
+**CDP**: `"CDP\0"`, `u16 100`, `u16 fotogramas`, `u16 bucle`, `u16 320`, `u16 200`, `u16`, paleta 768 B de 8 bits,
+fotogramas desde `0x310`. Códigos: `00–f5` píxel, `f6 b` píxel escapado, `f7–fa` saltar 2–5, `fb n8` y `fc n16` saltar,
+`fd n8 v` repetición (0 = 256), `fe n16 v` repetición de 16 bits, `ff` fin. El primer fotograma de cada clip es
+`fe 00 fa v` (pantalla lisa) seguido de cambios.
+
+**PSQ / PFM** (fondo del menú). PSQ: `{u32 primer, u32 cuántos, u32 0}` en bucle (`DEFAULT2`: 11 tramos, fotogramas
+0–208). PFM: trozos `{tag[4], u32 tamaño}` hasta `lixx`; `li01` vértices `{s16 x, y}` (×16 → 24.8, 1/16 de píxel),
+`li00` fotograma `{u8 tipo, u8 n, registros}` hasta `ff` (7 sprite escalado = dos triángulos 18, 11 línea, 13 se
+ignora, 15 triángulo plano con `MENU.TAB[c<<8]`, 17 texturizado opaco, 18 texturizado por tabla de sombra
+`sh[t<<8|d]`, 19 plano por tabla de sombra), `li02` texturas globales `{u16 u0..v2 (8.8), u32 página}`, `li03` sprites.
+Páginas: 1 MB de `CANADA.TEX`, `CARS.TEX` y una de cada efecto (29); tablas: `CANADA.SHD` y una generada (fila 0
+identidad, fila r sólida). El búfer de fondo no se borra nunca entre fotogramas. Los rasterizadores (tramos de
+derecha a izquierda, UV solo en el borde derecho con tabla de 1/8 de píxel, acarreo de v hacia la fracción de u,
+recorte solo por arriba, abajo y derecha) se portaron literalmente y se compararon con el código original ejecutado en
+un emulador: los 209 fotogramas y 4 900 primitivas aleatorias sin un píxel distinto. La prueba `menu_background`
+fija el hash de los 209 fotogramas.

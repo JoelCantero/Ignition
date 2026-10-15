@@ -25,10 +25,11 @@ typedef struct {
     int vol, freq, loops, gen;
 } Channel;
 
-static Sample banks[3][MAX_SUBS][MAX_SAMPLES];
+static Sample banks[4][MAX_SUBS][MAX_SAMPLES];
 static Channel channels[MAX_CHANNELS];
 static SDL_AudioStream *stream;
 static int next_gen = 1;
+static int master = 0x10000; /* [0x25a8d8], sub_00062740 */
 
 static uint32_t rd32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
@@ -138,6 +139,8 @@ static void load_dir(const char *dir, Sample *bank) {
     closedir(dp);
 }
 
+static int open_device(void);
+
 static void SDLCALL mix(void *user, SDL_AudioStream *st, int additional, int total) {
     (void)user;
     (void)total;
@@ -150,7 +153,7 @@ static void SDLCALL mix(void *user, SDL_AudioStream *st, int additional, int tot
             if (!ch->s) continue;
             const Sample *s = ch->s;
             double step = ch->freq / (double)OUT_RATE;
-            float g = (ch->vol > 0x10000 ? 0x10000 : ch->vol) / 65536.0f / 32768.0f * 0.4f;
+            float g = (ch->vol > 0x10000 ? 0x10000 : ch->vol) / 65536.0f * (master / 65536.0f) / 32768.0f * 0.4f;
             for (int i = 0; i < n && ch->s; i++) {
                 int p = (int)ch->pos;
                 if (p >= s->len || (ch->loops < 0 && s->loop_end > s->loop_start && p >= s->loop_end)) {
@@ -186,6 +189,18 @@ int ign_audio_open(const char *data_dir, const char *level, const char *const *m
         snprintf(dir, sizeof dir, "%s/CARS/%s/SOUND", data_dir, models[i]);
         load_dir(dir, banks[IGN_SND_CAR][i]);
     }
+    return open_device();
+}
+
+int ign_audio_open_menu(const char *data_dir) {
+    char dir[1024];
+    snprintf(dir, sizeof dir, "%s/BALTAZAR/DATA/SOUND/0_GRP0", data_dir);
+    load_dir(dir, banks[IGN_SND_MENU][0]);
+    return open_device();
+}
+
+static int open_device(void) {
+    master = 0x10000;
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return -1;
     SDL_AudioSpec spec = {SDL_AUDIO_F32, 1, OUT_RATE};
     stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, mix, NULL);
@@ -197,13 +212,14 @@ int ign_audio_open(const char *data_dir, const char *level, const char *const *m
 void ign_audio_close(void) {
     if (stream) SDL_DestroyAudioStream(stream);
     stream = NULL;
-    for (int g = 0; g < 3; g++)
+    memset(channels, 0, sizeof channels);
+    for (int g = 0; g < 4; g++)
         for (int b = 0; b < MAX_SUBS; b++)
             for (int i = 0; i < MAX_SAMPLES; i++) free(banks[g][b][i].pcm), banks[g][b][i].pcm = NULL;
 }
 
 int ign_audio_play(int group, int sub, int idx, int loops, int vol, int freq) {
-    if (!stream || group < 0 || group > 2 || sub < 0 || sub >= MAX_SUBS || idx < 0 || idx >= MAX_SAMPLES) return 0;
+    if (!stream || group < 0 || group > 3 || sub < 0 || sub >= MAX_SUBS || idx < 0 || idx >= MAX_SAMPLES) return 0;
     const Sample *s = &banks[group][sub][idx];
     if (!s->pcm) return 0;
     SDL_LockAudioStream(stream);
@@ -229,4 +245,29 @@ void ign_audio_set(int handle, int vol, int freq) {
         if (freq >= 0) ch->freq = freq;
     }
     SDL_UnlockAudioStream(stream);
+}
+
+void ign_audio_set_master(int vol) {
+    if (!stream) return;
+    SDL_LockAudioStream(stream);
+    master = vol < 0 ? 0 : vol > 0x10000 ? 0x10000 : vol;
+    SDL_UnlockAudioStream(stream);
+}
+
+void ign_audio_silence(void) {
+    if (!stream) return;
+    SDL_LockAudioStream(stream);
+    for (int c = 0; c < MAX_CHANNELS; c++) channels[c].s = NULL;
+    SDL_UnlockAudioStream(stream);
+}
+
+void ign_audio_free(int group, int sub, int idx) {
+    if (group < 0 || group > 3 || sub < 0 || sub >= MAX_SUBS || idx < 0 || idx >= MAX_SAMPLES) return;
+    if (stream) SDL_LockAudioStream(stream);
+    Sample *s = &banks[group][sub][idx];
+    for (int c = 0; c < MAX_CHANNELS; c++)
+        if (channels[c].s == s) channels[c].s = NULL;
+    free(s->pcm);
+    memset(s, 0, sizeof *s);
+    if (stream) SDL_UnlockAudioStream(stream);
 }

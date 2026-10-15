@@ -17,6 +17,9 @@
 #include "../render/camera.h"
 #include "../render/hud.h"
 #include "../render/raster.h"
+#include "../frontend/frontend.h"
+#include "../frontend/settings.h"
+#include "audio.h"
 #include "sound.h"
 
 #define DEFAULT_DATA_DIR "/Users/Shared/Epic Games/Ignition/ignition"
@@ -289,7 +292,18 @@ static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
     fputc('\n', stderr);
 }
 
-int main(int argc, char **argv) {
+/* A window shared with the frontend (menu mode); run_game creates its own otherwise. */
+static SDL_Window *shared_win;
+static SDL_Renderer *shared_ren;
+static bool quit_requested;
+
+static int run_game(int argc, char **argv) {
+    nrivals = 0;
+    memset(&race, 0, sizeof race);
+    ghost_on = ghost_tick = 0;
+    finish_clock = 0;
+    tv_index = 3;
+    spectated = spectate_wait = 0;
     const char *data_dir = getenv("IGNITION_DATA");
     if (!data_dir) data_dir = DEFAULT_DATA_DIR;
     const char *level = "USA";
@@ -297,6 +311,7 @@ int main(int argc, char **argv) {
     float sim_seconds = 0.0f, sim_steer = 0.0f;
     int autopilot = 0, want_rivals = -1, sim_turbo = 0, race_mode = 0, countdown = 0, rear_view = 0, car_id = -1;
     int sim_ticks = -1;
+    bool manual_start = false;
     IgnCamera cam = {0};
     int fixed_cam = 0;
     const char *ghost_out = NULL, *ghost_in = NULL;
@@ -364,6 +379,8 @@ int main(int argc, char **argv) {
             ign_set_difficulty(atoi(argv[++i]));
         } else if (!strcmp(argv[i], "--car") && i + 1 < argc) {
             car_id = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--manual")) {
+            manual_start = true;
         } else if (!strcmp(argv[i], "--elimination")) {
             race_mode = IGN_MODE_ELIMINATION;
         } else if (!strcmp(argv[i], "--rivals") && i + 1 < argc) {
@@ -435,6 +452,11 @@ int main(int argc, char **argv) {
         return 1;
     }
     spawn_rivals(&lv, &track, &car, want);
+    /* BANARNE typed in the menu (0x160c4 toggles 0x1fb2f0[0]): 3x tall bodies from the start. */
+    if (ign_frontend_cheat(0)) {
+        car.body_stretch = 3.0f;
+        for (int r = 0; r < nrivals; r++) rivals[r].body_stretch = 3.0f;
+    }
     ign_skids_init(&skids);
     ign_fx_init(&fx);
     ign_fx_emitters_init(&fx, &lv);
@@ -589,17 +611,18 @@ int main(int argc, char **argv) {
         return rc ? 1 : 0;
     }
 
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    SDL_Window *win = shared_win;
+    SDL_Renderer *ren = shared_ren;
+    bool own_window = !win;
+    if (own_window && !SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         ign_hud_destroy(&hud);
         ign_free_level(&lv);
         return 1;
     }
-    SDL_Window *win;
-    SDL_Renderer *ren;
-    if (!SDL_CreateWindowAndRenderer("Ignition", WINDOW_W,
-                                     WINDOW_W * 3 / 4, SDL_WINDOW_RESIZABLE, &win,
-                                     &ren)) {
+    if (own_window && !SDL_CreateWindowAndRenderer("Ignition", WINDOW_W,
+                                                   WINDOW_W * 3 / 4, SDL_WINDOW_RESIZABLE, &win,
+                                                   &ren)) {
         fprintf(stderr, "SDL: %s\n", SDL_GetError());
         ign_hud_destroy(&hud);
         ign_free_level(&lv);
@@ -620,7 +643,7 @@ int main(int argc, char **argv) {
     }
 
     bool free_cam = false;
-    bool manual_gear = false;
+    bool manual_gear = manual_start;
     int pending_gear_shift = 0;
     char typed[16] = {0};
     SDL_StartTextInput(win);
@@ -630,6 +653,7 @@ int main(int argc, char **argv) {
     for (bool running = true; running;) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
+            if (ev.type == SDL_EVENT_QUIT) quit_requested = true;
             if (ev.type == SDL_EVENT_QUIT ||
                 (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE))
                 running = false;
@@ -711,10 +735,174 @@ int main(int argc, char **argv) {
 
     ign_sound_stop();
     SDL_DestroyTexture(tex);
-    SDL_DestroyRenderer(ren);
-    SDL_DestroyWindow(win);
-    SDL_Quit();
+    SDL_StopTextInput(win);
+    if (own_window) {
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+    }
     ign_hud_destroy(&hud);
     ign_free_level(&lv);
     return 0;
+}
+
+/* ---- frontend (menu mode) --------------------------------------------------------------------------------------- */
+
+static SDL_Texture *menu_tex;
+static uint8_t menu_palette[768];
+
+static int host_timer(void) { return (int)SDL_GetTicks(); }
+static void host_palette(const uint8_t rgb[768]) { memcpy(menu_palette, rgb, 768); }
+
+static void host_present(const uint8_t *buf) {
+    static uint32_t rgb[IGN_FRONTEND_W * IGN_FRONTEND_H];
+    for (int i = 0; i < IGN_FRONTEND_W * IGN_FRONTEND_H; i++) {
+        const uint8_t *c = menu_palette + buf[i] * 3;
+        rgb[i] = 0xFF000000u | (uint32_t)c[0] << 16 | (uint32_t)c[1] << 8 | c[2];
+    }
+    SDL_UpdateTexture(menu_tex, NULL, rgb, IGN_FRONTEND_W * 4);
+    SDL_RenderClear(shared_ren);
+    SDL_RenderTexture(shared_ren, menu_tex, NULL, NULL);
+    SDL_RenderPresent(shared_ren);
+}
+
+static const char *menu_data_dir;
+static int host_sound_init(void) { return ign_audio_open_menu(menu_data_dir) == 0 ? 1 : 0; }
+static int host_sound_play(int sample, int vol, int rate) {
+    int h = ign_audio_play(IGN_SND_MENU, 0, sample, 0, vol, rate);
+    return h ? h : -1;
+}
+static void host_sound_stop_voice(int handle) {
+    if (handle > 0) ign_audio_set(handle, 0, 0);
+}
+static void host_sound_free(int sample) { ign_audio_free(IGN_SND_MENU, 0, sample); }
+
+/* SDL scancode -> DOS set-1 scancode as delivered by the keyboard ISR 0x55e04 (0xE0-prefixed keys + 0x80). */
+static int dos_scancode(SDL_Scancode sc) {
+    static const struct { SDL_Scancode sdl; uint8_t dos; } map[] = {
+        {SDL_SCANCODE_ESCAPE, 0x01}, {SDL_SCANCODE_1, 0x02}, {SDL_SCANCODE_2, 0x03}, {SDL_SCANCODE_3, 0x04},
+        {SDL_SCANCODE_4, 0x05}, {SDL_SCANCODE_5, 0x06}, {SDL_SCANCODE_6, 0x07}, {SDL_SCANCODE_7, 0x08},
+        {SDL_SCANCODE_8, 0x09}, {SDL_SCANCODE_9, 0x0a}, {SDL_SCANCODE_0, 0x0b}, {SDL_SCANCODE_MINUS, 0x0c},
+        {SDL_SCANCODE_EQUALS, 0x0d}, {SDL_SCANCODE_BACKSPACE, 0x0e}, {SDL_SCANCODE_TAB, 0x0f},
+        {SDL_SCANCODE_Q, 0x10}, {SDL_SCANCODE_W, 0x11}, {SDL_SCANCODE_E, 0x12}, {SDL_SCANCODE_R, 0x13},
+        {SDL_SCANCODE_T, 0x14}, {SDL_SCANCODE_Y, 0x15}, {SDL_SCANCODE_U, 0x16}, {SDL_SCANCODE_I, 0x17},
+        {SDL_SCANCODE_O, 0x18}, {SDL_SCANCODE_P, 0x19}, {SDL_SCANCODE_LEFTBRACKET, 0x1a},
+        {SDL_SCANCODE_RIGHTBRACKET, 0x1b}, {SDL_SCANCODE_RETURN, 0x1c}, {SDL_SCANCODE_LCTRL, 0x1d},
+        {SDL_SCANCODE_A, 0x1e}, {SDL_SCANCODE_S, 0x1f}, {SDL_SCANCODE_D, 0x20}, {SDL_SCANCODE_F, 0x21},
+        {SDL_SCANCODE_G, 0x22}, {SDL_SCANCODE_H, 0x23}, {SDL_SCANCODE_J, 0x24}, {SDL_SCANCODE_K, 0x25},
+        {SDL_SCANCODE_L, 0x26}, {SDL_SCANCODE_SEMICOLON, 0x27}, {SDL_SCANCODE_APOSTROPHE, 0x28},
+        {SDL_SCANCODE_GRAVE, 0x29}, {SDL_SCANCODE_LSHIFT, 0x2a}, {SDL_SCANCODE_BACKSLASH, 0x2b},
+        {SDL_SCANCODE_Z, 0x2c}, {SDL_SCANCODE_X, 0x2d}, {SDL_SCANCODE_C, 0x2e}, {SDL_SCANCODE_V, 0x2f},
+        {SDL_SCANCODE_B, 0x30}, {SDL_SCANCODE_N, 0x31}, {SDL_SCANCODE_M, 0x32}, {SDL_SCANCODE_COMMA, 0x33},
+        {SDL_SCANCODE_PERIOD, 0x34}, {SDL_SCANCODE_SLASH, 0x35}, {SDL_SCANCODE_RSHIFT, 0x36},
+        {SDL_SCANCODE_KP_MULTIPLY, 0x37}, {SDL_SCANCODE_LALT, 0x38}, {SDL_SCANCODE_SPACE, 0x39},
+        {SDL_SCANCODE_CAPSLOCK, 0x3a}, {SDL_SCANCODE_F1, 0x3b}, {SDL_SCANCODE_F2, 0x3c}, {SDL_SCANCODE_F3, 0x3d},
+        {SDL_SCANCODE_F4, 0x3e}, {SDL_SCANCODE_F5, 0x3f}, {SDL_SCANCODE_F6, 0x40}, {SDL_SCANCODE_F7, 0x41},
+        {SDL_SCANCODE_F8, 0x42}, {SDL_SCANCODE_F9, 0x43}, {SDL_SCANCODE_F10, 0x44},
+        {SDL_SCANCODE_NUMLOCKCLEAR, 0x45}, {SDL_SCANCODE_SCROLLLOCK, 0x46}, {SDL_SCANCODE_KP_7, 0x47},
+        {SDL_SCANCODE_KP_8, 0x48}, {SDL_SCANCODE_KP_9, 0x49}, {SDL_SCANCODE_KP_MINUS, 0x4a},
+        {SDL_SCANCODE_KP_4, 0x4b}, {SDL_SCANCODE_KP_5, 0x4c}, {SDL_SCANCODE_KP_6, 0x4d},
+        {SDL_SCANCODE_KP_PLUS, 0x4e}, {SDL_SCANCODE_KP_1, 0x4f}, {SDL_SCANCODE_KP_2, 0x50},
+        {SDL_SCANCODE_KP_3, 0x51}, {SDL_SCANCODE_KP_0, 0x52}, {SDL_SCANCODE_KP_PERIOD, 0x53},
+        {SDL_SCANCODE_F11, 0x57}, {SDL_SCANCODE_F12, 0x58}, {SDL_SCANCODE_KP_ENTER, 0x9c},
+        {SDL_SCANCODE_RCTRL, 0x9d}, {SDL_SCANCODE_KP_DIVIDE, 0xb5}, {SDL_SCANCODE_RALT, 0xb8},
+        {SDL_SCANCODE_HOME, 0xc7}, {SDL_SCANCODE_UP, 0xc8}, {SDL_SCANCODE_PAGEUP, 0xc9},
+        {SDL_SCANCODE_LEFT, 0xcb}, {SDL_SCANCODE_RIGHT, 0xcd}, {SDL_SCANCODE_END, 0xcf},
+        {SDL_SCANCODE_DOWN, 0xd0}, {SDL_SCANCODE_PAGEDOWN, 0xd1}, {SDL_SCANCODE_INSERT, 0xd2},
+        {SDL_SCANCODE_DELETE, 0xd3},
+    };
+    for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
+        if (map[i].sdl == sc) return map[i].dos;
+    return 0;
+}
+
+/* Menu, then the race it configures, then back to the menu (sub_00020d60). */
+static int run_frontend(const char *data_dir) {
+    menu_data_dir = data_dir;
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
+        return 1;
+    }
+    if (!SDL_CreateWindowAndRenderer("Ignition", WINDOW_W, WINDOW_W * 3 / 4, SDL_WINDOW_RESIZABLE, &shared_win,
+                                     &shared_ren)) {
+        fprintf(stderr, "SDL: %s\n", SDL_GetError());
+        return 1;
+    }
+    SDL_SetRenderVSync(shared_ren, 1);
+    IgnFrontendHost host = {
+        .timer_ms = host_timer,
+        .set_palette = host_palette,
+        .present = host_present,
+        .sound_init = host_sound_init,
+        .sound_play = host_sound_play,
+        .sound_stop_voice = host_sound_stop_voice,
+        .sound_silence = ign_audio_silence,
+        .sound_free = host_sound_free,
+        .sound_volume = ign_audio_set_master,
+        .sound_shutdown = ign_audio_close,
+    };
+    if (ign_frontend_init(data_dir, &host)) {
+        fprintf(stderr, "cannot load the frontend data from %s\n", data_dir);
+        return 1;
+    }
+    int rc = 0;
+    while (!quit_requested) {
+        menu_tex = SDL_CreateTexture(shared_ren, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING,
+                                     IGN_FRONTEND_W, IGN_FRONTEND_H);
+        SDL_SetTextureScaleMode(menu_tex, SDL_SCALEMODE_NEAREST);
+        /* 320x200 shown at 4:3, as on a CRT. */
+        SDL_SetRenderLogicalPresentation(shared_ren, IGN_FRONTEND_W, IGN_FRONTEND_W * 3 / 4,
+                                         SDL_LOGICAL_PRESENTATION_LETTERBOX);
+        memset(g_key_latch, 0, sizeof g_key_latch);
+        ign_frontend_load();
+        int result = IGN_FRONTEND_STAY;
+        while (result == IGN_FRONTEND_STAY) {
+            SDL_Event ev;
+            while (SDL_PollEvent(&ev)) {
+                if (ev.type == SDL_EVENT_QUIT) quit_requested = true;
+                if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) ign_frontend_key_down(dos_scancode(ev.key.scancode));
+            }
+            if (quit_requested) break;
+            result = ign_frontend_frame();
+        }
+        ign_frontend_shutdown();
+        SDL_DestroyTexture(menu_tex);
+        menu_tex = NULL;
+        if (result != IGN_FRONTEND_RACE) break;
+
+        /* The settings block (ign_dos.btz) drives the race: track, player car, field size, difficulty, gearbox. */
+        char car[16], rivals[16], difficulty[16];
+        snprintf(car, sizeof car, "%d", (int)ign_cfg_get(CFG_CAR_SLOT));
+        int racers = (int)ign_cfg_get(CFG_RACERS);
+        snprintf(rivals, sizeof rivals, "%d", racers > 1 ? racers - 1 : 0);
+        snprintf(difficulty, sizeof difficulty, "%d", (int)ign_cfg_get(CFG_DIFFICULTY));
+        char *argv[16];
+        int argc = 0;
+        argv[argc++] = "ignition";
+        argv[argc++] = "--car";
+        argv[argc++] = car;
+        argv[argc++] = "--rivals";
+        argv[argc++] = rivals;
+        argv[argc++] = "--difficulty";
+        argv[argc++] = difficulty;
+        if (ign_cfg_get(CFG_GEARBOX) == 0) argv[argc++] = "--manual";
+        argv[argc++] = (char *)ign_frontend_level((int)ign_cfg_get(CFG_TRACK));
+        argv[argc] = NULL;
+        rc = run_game(argc, argv);
+        if (rc) break;
+    }
+    ign_frontend_destroy();
+    SDL_DestroyRenderer(shared_ren);
+    SDL_DestroyWindow(shared_win);
+    SDL_Quit();
+    return rc;
+}
+
+int main(int argc, char **argv) {
+    int menu = argc == 1;
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "--menu")) menu = 1;
+    if (!menu) return run_game(argc, argv);
+    const char *data_dir = getenv("IGNITION_DATA");
+    return run_frontend(data_dir ? data_dir : DEFAULT_DATA_DIR);
 }
