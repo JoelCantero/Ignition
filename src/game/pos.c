@@ -275,3 +275,117 @@ void ign_coll_frame(IgnCollObjs *c, const IgnLevel *lv, IgnCar *const *cars, int
         if (!((float)o->period > o->frame)) o->frame = 0;
     }
 }
+
+/* 0x33aa8: crossing-number test of (px, pz) against a face's x/z (integer, as the original). */
+static int face_covers(const int32_t *v0, const int32_t *v1, const int32_t *v2, int32_t px, int32_t pz) {
+    const int32_t *v[3] = {v0, v1, v2};
+    int inside = 0;
+    for (int i = 0, j = 2; i < 3; j = i++) {
+        int32_t zi = v[i][2], zj = v[j][2];
+        if (!((pz >= zi && pz < zj) || (pz >= zj && pz < zi))) continue;
+        int32_t t = (int32_t)((uint32_t)(v[j][0] - v[i][0]) * (uint32_t)(pz - zi)) / (zj - zi) + v[i][0];
+        if (t > px) inside = !inside;
+    }
+    return inside;
+}
+
+int ign_special_query(const IgnLevel *lv, int32_t x, int32_t y, int32_t z, int jump) {
+    int32_t reach = jump ? 900 : 600;
+    int near_height = 0, found = -1;
+    /* The original walks the engine's object list after sub_00058c1c (a view from 500 above the car); the port takes
+     * every PLC object in order. */
+    for (int i = 0; i < lv->track.nobj; i++) {
+        const IgnObject *o = &lv->track.objs[i];
+        int type = (int)(int16_t)(o->type & 0xffff);
+        if (type < 0x12c || type >= 0x15e) continue;
+        int32_t dx = x - (o->pos[0] + IGN_SRF_ORIGIN), dy = y + o->pos[1], dz = z - (o->pos[2] + IGN_SRF_ORIGIN);
+        if (abs(dy) < 190) near_height = 1; /* 0x339d0: never cleared for the following objects */
+        if (abs(dx) >= reach || abs(dz) >= reach || !near_height) continue;
+        for (int f = 0; f < o->nf; f++) {
+            const int32_t *vs = o->verts;
+            const IgnFace *face = &o->faces[f];
+            if (face_covers(vs + face->v[0] * 3, vs + face->v[1] * 3, vs + face->v[2] * 3, dx, dz)) {
+                found = type;
+                break;
+            }
+        }
+    }
+    return found;
+}
+
+static int erupting_geyser(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car) {
+    /* 0x2f202: any list entry within 80 in x and z whose phase (+0xc, the geyser of sub_00036ce0) runs. */
+    for (int i = 0; i < fx->nemit; i++) {
+        const IgnObject *o = &lv->track.objs[fx->emit[i].obj];
+        if (fabs((double)o->pos[0] - car->body.px * IGN_WORLD_PER_METRE) < 80.0 &&
+            fabs((double)o->pos[2] - car->body.pz * IGN_WORLD_PER_METRE) < 80.0 && fx->emit[i].phase > 0)
+            return 1;
+    }
+    return 0;
+}
+
+int ign_special_probe(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car, int iceland, int *wreck) {
+    *wreck = 0;
+    double cx = car->body.px * IGN_WORLD_PER_METRE, cz = car->body.pz * IGN_WORLD_PER_METRE;
+    int type = -1;
+    for (int i = 0; i < lv->track.nobj; i++) {
+        const IgnObject *o = &lv->track.objs[i];
+        if (o->type < 0x12c || o->type >= 0x15e) continue;
+        double dx = cx - o->pos[0], dz = cz - o->pos[2];
+        if (!(fabs(dx) < 200.0) || !(fabs(dz) < 200.0)) continue;
+        if (iceland && o->type == 0x12c) {
+            /* 0x2f0cd: the 0x12c objects of ICELAND explode a car within 30. */
+            if (fabs(dx) < 30.0 && fabs(car->height + o->pos[1]) < 30.0 && fabs(dz) < 30.0) *wreck = 1;
+            continue;
+        }
+        /* 0x2f124: the query does not depend on the entry, so one call answers for all of them. */
+        type = ign_special_query(lv, (int32_t)trunc(cx + IGN_SRF_ORIGIN), (int32_t)trunc(car->height),
+                                 (int32_t)trunc(cz + IGN_SRF_ORIGIN), car->jump_mode);
+        if (type < 0x12c && iceland) continue;
+        break;
+    }
+    switch (type) {
+    case 0x12c: *wreck = 1; return IGN_SPECIAL_NONE;
+    case 0x12d: return IGN_SPECIAL_LAUNCH;
+    case 0x131: return erupting_geyser(lv, fx, car) ? IGN_SPECIAL_LAUNCH : IGN_SPECIAL_NONE;
+    case 0x12e: return IGN_SPECIAL_PUSH;
+    case 0x12f: return IGN_SPECIAL_MESH;
+    case 0x130: *wreck = 3; return IGN_SPECIAL_NONE;
+    default: return IGN_SPECIAL_NONE;
+    }
+}
+
+static int push_wait; /* [0x1fee3c] */
+
+void ign_special_apply(IgnCar *car, int special, int wreck, IgnFx *fx, float focus_x, float focus_z) {
+    if (wreck) ign_car_wreck(car, wreck); /* 0x30dbb: explosion (car+0x354) or slide (car+0x35c) */
+    if (special == IGN_SPECIAL_LAUNCH && !car->airborne && !car->launch) {
+        /* 0x30f66: 8 upwards (at most 10), the somersault starts, and a piece flies off. */
+        car->fall_speed += -8.0;
+        car->launch = 1;
+        if (car->fall_speed < -10.0) car->fall_speed = -10.0;
+        int32_t p[IGN_FX_WORDS] = {IGN_FX_PIECE};
+        p[1] = (int32_t)trunc(car->body.px * IGN_WORLD_PER_METRE * 1024.0);
+        p[2] = (int32_t)trunc(car->height * 1024.0);
+        p[3] = (int32_t)trunc(car->body.pz * IGN_WORLD_PER_METRE * 1024.0);
+        p[4] = (int32_t)trunc((ign_fx_rand(fx) * 4.0 + -2.0) * 1024.0);
+        p[5] = (int32_t)trunc((ign_fx_rand(fx) * 3.0 + 3.0) * 1024.0);
+        p[6] = (int32_t)trunc((ign_fx_rand(fx) * 4.0 + -2.0) * 1024.0);
+        p[7] = 0x400, p[8] = -460;
+        for (int a = 0; a < 3; a++) p[12 + a] = (int32_t)trunc((ign_fx_rand(fx) * 100.0 + -50.0) * 1024.0);
+        p[16] = 1, p[19] = 30;
+        ign_fx_add(fx, p, focus_x, focus_z);
+    } else if (special == IGN_SPECIAL_PUSH && !car->airborne && fabs(car->height - car->ground) < 50.0) {
+        /* 0x3113e: thrown up 4.5-7.5 and spun 2.5-4 rad/s clockwise, with GENERAL sample 8. */
+        car->fall_speed = car->fall_speed - (ign_fx_rand(fx) * 3.0 + 4.5);
+        car->body.yaw_rate = car->body.yaw_rate - (ign_fx_rand(fx) * 1.5 + 2.5);
+        car->airborne = 1;
+        if (car->fall_speed < -10.0) car->fall_speed = -10.0;
+        if (push_wait == 0) {
+            ign_fx_sound(fx, 1, 0, 8, 0x10000, 22000, (float)trunc(car->body.px * IGN_WORLD_PER_METRE),
+                         (float)trunc(car->body.pz * IGN_WORLD_PER_METRE));
+            push_wait = 15;
+        }
+    }
+    if (push_wait > 0) push_wait--;
+}

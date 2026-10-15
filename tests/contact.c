@@ -198,6 +198,95 @@ static void test_frame(void) {
     CHECK(!c.o[0].flying);
 }
 
+/* One special object: a 200 x 200 square (two faces) centred on its position, mesh y = 0. */
+static const int32_t SQUARE_V[12] = {-100, 0, -100, 100, 0, -100, 100, 0, 100, -100, 0, 100};
+static const IgnFace SQUARE_F[2] = {{.v = {0, 1, 2}}, {.v = {0, 2, 3}}};
+
+static IgnObject special_obj(uint32_t type, int32_t x, int32_t up, int32_t z) {
+    return (IgnObject){.type = type, .pos = {x, -up, z}, .nv = 4, .nf = 2, .verts = SQUARE_V, .faces = SQUARE_F};
+}
+
+static void test_special(void) {
+    const int32_t O = IGN_SRF_ORIGIN;
+    IgnObject objs[3] = {special_obj(0x12e, 1000, 50, 1000), special_obj(0x1ffff, 0, 0, 0),
+                         special_obj(0x130, 1150, 500, 1000)};
+    IgnLevel lv = {.track = {.nobj = 3, .objs = objs}};
+    /* Over the first square, in height: found; outside the square or 190 away in height: not. */
+    CHECK(ign_special_query(&lv, O + 1000, 60, O + 990, 0) == 0x12e);
+    CHECK(ign_special_query(&lv, O + 1000, 60, O + 1101, 0) == -1);
+    CHECK(ign_special_query(&lv, O + 1000, 240, O + 1000, 0) == -1);
+    CHECK(ign_special_query(&lv, O + 1000, -129, O + 1000, 0) == 0x12e);
+    /* Over both squares: the later object wins, even 450 above it once the first one passed the height gate. */
+    CHECK(ign_special_query(&lv, O + 1080, 60, O + 1000, 0) == 0x130);
+    /* Without the first object's gate, the second is too high. */
+    objs[0].type = 0x112e; /* the engine compares the low 16 bits */
+    CHECK(ign_special_query(&lv, O + 1080, 60, O + 1000, 0) == -1);
+    objs[0].type = 0x12e;
+    /* A translated (POS) object is found where it is now. */
+    objs[0].pos[0] = 3000;
+    CHECK(ign_special_query(&lv, O + 1000, 60, O + 990, 0) == -1);
+    CHECK(ign_special_query(&lv, O + 3000, 60, O + 990, 0) == 0x12e);
+    objs[0].pos[0] = 1000;
+
+    IgnFx fx;
+    ign_fx_init(&fx);
+    IgnCar car = {0};
+    car.body.px = 1000 / IGN_WORLD_PER_METRE, car.body.pz = 990 / IGN_WORLD_PER_METRE;
+    car.height = 60, car.ground = 50;
+    int wreck;
+    CHECK(ign_special_probe(&lv, &fx, &car, 0, &wreck) == IGN_SPECIAL_PUSH && !wreck);
+    ign_special_apply(&car, IGN_SPECIAL_PUSH, 0, &fx, 0, 0);
+    CHECK(car.airborne && car.fall_speed <= -4.5 && car.fall_speed > -7.5 && car.body.yaw_rate <= -2.5);
+    CHECK(fx.nsounds == 1 && fx.sounds[0].group == 1 && fx.sounds[0].idx == 8 && fx.sounds[0].vol == 0x10000);
+    /* Airborne cars are not pushed again, and the sample waits 15 car updates. */
+    double v = car.fall_speed;
+    ign_special_apply(&car, IGN_SPECIAL_PUSH, 0, &fx, 0, 0);
+    CHECK(car.fall_speed == v);
+    car.airborne = 0;
+    for (int i = 0; i < 13; i++) ign_special_apply(&car, IGN_SPECIAL_NONE, 0, &fx, 0, 0);
+    ign_special_apply(&car, IGN_SPECIAL_PUSH, 0, &fx, 0, 0);
+    CHECK(fx.nsounds == 2 && car.fall_speed == -10.0);
+
+    /* 0x130 under the car: slide wreck; 0x12c: explosion. */
+    car = (IgnCar){0};
+    car.body.px = 1200 / IGN_WORLD_PER_METRE, car.body.pz = 1000 / IGN_WORLD_PER_METRE;
+    car.height = 450;
+    CHECK(ign_special_probe(&lv, &fx, &car, 0, &wreck) == IGN_SPECIAL_NONE && wreck == 3);
+    objs[2].type = 0x12c;
+    CHECK(ign_special_probe(&lv, &fx, &car, 0, &wreck) == IGN_SPECIAL_NONE && wreck == 1);
+    ign_special_apply(&car, IGN_SPECIAL_NONE, wreck, &fx, 0, 0);
+    CHECK(car.wrecked && car.wreck_kind == 1);
+    /* ICELAND: a 0x12c object explodes a car within 30 of its origin only, without the face query. */
+    car = (IgnCar){0};
+    car.body.px = 1200 / IGN_WORLD_PER_METRE, car.body.pz = 1000 / IGN_WORLD_PER_METRE;
+    car.height = 450;
+    CHECK(ign_special_probe(&lv, &fx, &car, 1, &wreck) == IGN_SPECIAL_NONE && wreck == 0);
+    car.body.px = 1170 / IGN_WORLD_PER_METRE, car.height = 480;
+    CHECK(ign_special_probe(&lv, &fx, &car, 1, &wreck) == IGN_SPECIAL_NONE && wreck == 1);
+    /* More than 200 from every special object: nothing is queried. */
+    car.body.px = 1400 / IGN_WORLD_PER_METRE, car.height = 60;
+    objs[0].pos[0] = 1300;
+    CHECK(ign_special_probe(&lv, &fx, &car, 0, &wreck) == IGN_SPECIAL_NONE && wreck == 0);
+
+    /* Geyser 0x131: a launch only while an emitter within 80 erupts (phase > 0). */
+    IgnObject g[1] = {special_obj(0x131, 0, 0, 0)};
+    IgnLevel gl = {.track = {.nobj = 1, .objs = g}};
+    ign_fx_init(&fx);
+    ign_fx_emitters_init(&fx, &gl);
+    car = (IgnCar){0};
+    car.body.px = 50 / IGN_WORLD_PER_METRE, car.height = 10;
+    CHECK(ign_special_probe(&gl, &fx, &car, 0, &wreck) == IGN_SPECIAL_NONE);
+    fx.emit[0].phase = 1;
+    CHECK(ign_special_probe(&gl, &fx, &car, 0, &wreck) == IGN_SPECIAL_LAUNCH);
+    ign_special_apply(&car, IGN_SPECIAL_LAUNCH, 0, &fx, 0, 0);
+    CHECK(car.launch == 1 && car.fall_speed == -8.0);
+    int pieces = 0;
+    for (int i = 0; i < IGN_FX_SLOTS; i++) pieces += fx.r[i][0] == IGN_FX_PIECE && fx.r[i][19] == 30 && fx.r[i][8] == -460;
+    CHECK(pieces == 1);
+    ign_special_apply(&car, IGN_SPECIAL_LAUNCH, 0, &fx, 0, 0);
+    CHECK(car.fall_speed == -8.0); /* once per somersault */
+}
+
 static int read_obj(IgnCollObj *o) {
     return scanf("%d %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf", &o->flying, &o->pos[0], &o->pos[1], &o->pos[2],
                  &o->vel[0], &o->vel[1], &o->vel[2], &o->ang[0], &o->ang[1], &o->ang[2], &o->spin[0], &o->spin[1],
@@ -213,7 +302,8 @@ static void print_obj(const IgnCollObj *o) {
     printf("\n");
 }
 
-/* Line protocol: P na nb (x z)*  |  I bodyA bodyB cx cz theta  |  R n[3] v[3]  |  F obj  |  B obj hit. */
+/* Line protocol: P na nb (x z)*  |  I bodyA bodyB cx cz theta  |  R n[3] v[3]  |  F obj  |  B obj hit  |
+ * Q x y z jump n (type x y z nv nf verts faces)*. */
 static int runner(void) {
     char mode;
     while (scanf(" %c", &mode) == 1) {
@@ -259,6 +349,30 @@ static int runner(void) {
                 ign_coll_bounce(&o, &h);
             }
             print_obj(&o);
+        } else if (mode == 'Q') {
+            int32_t x, y, z;
+            int jump, n;
+            if (scanf("%d %d %d %d %d", &x, &y, &z, &jump, &n) != 5 || n < 0 || n > 16) return 1;
+            static IgnObject objs[16];
+            static int32_t verts[16][16 * 3];
+            static IgnFace faces[16][16];
+            for (int i = 0; i < n; i++) {
+                IgnObject *o = &objs[i];
+                int32_t ox, oy, oz;
+                if (scanf("%u %d %d %d %d %d", &o->type, &ox, &oy, &oz, &o->nv, &o->nf) != 6 || o->nv < 1 ||
+                    o->nv > 16 || o->nf < 0 || o->nf > 16)
+                    return 1;
+                o->pos[0] = ox - IGN_SRF_ORIGIN, o->pos[1] = -oy, o->pos[2] = oz - IGN_SRF_ORIGIN;
+                for (int k = 0; k < o->nv * 3; k++)
+                    if (scanf("%d", &verts[i][k]) != 1) return 1;
+                for (int f = 0; f < o->nf; f++) {
+                    faces[i][f] = (IgnFace){0};
+                    if (scanf("%d %d %d", &faces[i][f].v[0], &faces[i][f].v[1], &faces[i][f].v[2]) != 3) return 1;
+                }
+                o->verts = verts[i], o->faces = faces[i];
+            }
+            IgnLevel lv = {.track = {.nobj = n, .objs = objs}};
+            printf("%d\n", ign_special_query(&lv, x, y, z, jump));
         } else {
             return 1;
         }
@@ -273,6 +387,7 @@ int main(int argc, char **argv) {
     test_reflect();
     test_flight();
     test_frame();
+    test_special();
     if (failures) fprintf(stderr, "%d failures\n", failures);
     else printf("contact: all checks passed\n");
     return failures != 0;

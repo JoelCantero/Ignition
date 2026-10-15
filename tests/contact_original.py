@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Car contact and collision objects (car_ground_contact 0x350f0) against unchanged LE bytes.
 
-Replays sub_000349e8 (polygon crossings), sub_000346cc (impulse), sub_00035f38 (reflection) and the flying-object
+Replays sub_000349e8 (polygon crossings), sub_000346cc (impulse), sub_00035f38 (reflection), sub_0003383c (special object under a car, on a supplied
+object list) and the flying-object
 fragments 0x356b8-0x358ff (motion) and 0x35967-0x35c84 (bounce on a supplied ground-query result) under Unicorn,
 and compares them with `contact_test --runner`. Not a DOS/game emulator: the ground query, sounds, random numbers and
 effects of the full frame are outside these fragments.
@@ -24,6 +25,8 @@ ORIGINAL_SHA256 = "179c654ba65281f08bbcda2b5943ab9f35c309ec718600f81104644d22db9
 SCRATCH, STACK, RETURN = 0x400000, 0x500000, 0x600000
 ESP = STACK + 0x8000
 POLY_A, POLY_B, BODY_A, BODY_B, RECORD, HIT = (SCRATCH + o for o in (0, 0x100, 0x200, 0x300, 0x400, 0x500))
+VIEW, LIST, CARS, POOL, MESH = (SCRATCH + o for o in (0x600, 0x700, 0x800, 0x1000, 0x2000))
+VIEW_PTR, LIST_PTR, CAM_PTR, CARS_PTR, RESULT = 0x24C05C, 0x24C01C, 0x1FEF9C, 0x1FEFE0, 0x1FFCA8
 THETA, CX, CZ = 0x1FEE98, 0x1FEE9C, 0x1FEEA8
 CROSS_X, CROSS_Z = 0x207A80, 0x207A60
 COLL_LIST = 0x1FEFC0
@@ -58,11 +61,19 @@ class Original:
             raise ValueError(f"Unexpected car_ground_contact constants: {constants}")
         self.allowed_code = []
         self.writes = []
+        self.stub_view = False
         self.visited = set()
         self.uc.hook_add(unicorn.UC_HOOK_CODE, self.code)
         self.uc.hook_add(unicorn.UC_HOOK_MEM_WRITE, self.write)
 
     def code(self, uc, address, size, _):
+        if address == 0x58C1C and self.stub_view:
+            # sub_00058c1c builds the engine's object list from a view; the replay supplies that list itself.
+            esp = uc.reg_read(self.reg.UC_X86_REG_ESP)
+            ret, = struct.unpack("<I", uc.mem_read(esp, 4))
+            uc.reg_write(self.reg.UC_X86_REG_ESP, esp + 4)
+            uc.reg_write(self.reg.UC_X86_REG_EIP, ret)
+            return
         if not any(lo <= address <= hi for lo, hi in self.allowed_code):
             raise ValueError(f"Unexpected code execution at 0x{address:x}")
         self.visited.add(address)
@@ -167,6 +178,39 @@ class Original:
         return self.get_record()
 
 
+    def query(self, x, y, z, jump, objects):
+        """sub_0003383c on a supplied engine object list (car 0, chase camera zeros)."""
+        self.put(SCRATCH, "%dI" % (0x8000 // 4), *([0] * (0x8000 // 4)))
+        self.put(VIEW_PTR, "I", VIEW)
+        self.put(VIEW + 0x60, "i", len(objects))
+        self.put(LIST_PTR, "I", LIST)
+        self.put(CAM_PTR, "I", VIEW + 0x100)
+        self.put(CARS_PTR, "I", CARS)
+        self.put(CARS + 0x274, "i", jump)
+        mesh = MESH
+        for i, (otype, ox, oy, oz, verts, faces) in enumerate(objects):
+            pool = POOL + 0x40 * i
+            self.put(LIST + 4 * i, "I", pool)
+            self.put(pool, "I", pool)
+            self.put(pool + 4, "I", mesh)
+            self.put(pool + 0xC, "3i", ox, oy, oz)
+            self.put(pool + 0x1C, "I", (otype & 0xFFFF) << 16)
+            self.put(mesh, "2i", len(verts) // 3, len(faces))
+            self.put(mesh + 8, "%di" % len(verts), *verts)
+            face_base = mesh + 8 + 4 * len(verts)
+            for f, (a, b, c) in enumerate(faces):
+                self.put(face_base + 44 * f, "4i", 0, a, b, c)
+            mesh = face_base + 44 * len(faces)
+        self.stub_view = True
+        try:
+            self.run(0x3383C, RETURN, [(0x3383C, 0x33EE7), (0x55F9C, 0x55FC0)],
+                     [(VIEW, VIEW + 0x100), (0x1FFCA8, 0x1FFD44)],
+                     {"EAX": x, "EDX": y, "EBX": z, "ECX": 0})
+        finally:
+            self.stub_view = False
+        return [self.get(RESULT, "i")[0]]
+
+
 def f32(v):
     return struct.unpack("<f", struct.pack("<f", v))[0]
 
@@ -230,6 +274,22 @@ def cases(seed):
         rec = [1, x, ground + rnd.uniform(-40, 60), z] + vel + [rnd.uniform(0, 3599) for _ in range(3)] + \
               [rnd.uniform(-50, 50) for _ in range(3)]
         out.append(("B", rec, normal, [v for p in pts for v in p]))
+    # Special-object queries: up to 6 objects of 1-4 faces around the point, mixed types and heights.
+    types = (0x12C, 0x12D, 0x12E, 0x12F, 0x130, 0x131, 0x15D, 0x15E, 0x12B, 0x112C, 0x7)
+    for i in range(1500):
+        x, y, z = rnd.randrange(1000, 50000), rnd.randrange(-2000, 2000), rnd.randrange(1000, 50000)
+        objects = []
+        for _ in range(rnd.randrange(1, 7)):
+            span = rnd.choice((150, 600, 1200))
+            reach = rnd.choice((1000, span // 2))
+            ox, oz = x + rnd.randrange(-reach, reach), z + rnd.randrange(-reach, reach)
+            oy = y + rnd.choice((rnd.randrange(-300, 300), rnd.randrange(-189, 190)))
+            nv = rnd.randrange(3, 7)
+            verts = [v for _ in range(nv) for v in (rnd.randrange(-span, span), rnd.randrange(-50, 50),
+                                                    rnd.randrange(-span, span))]
+            faces = [tuple(rnd.randrange(nv) for _ in range(3)) for _ in range(rnd.randrange(1, 5))]
+            objects.append((rnd.choice(types), ox, oy, oz, verts, faces))
+        out.append(("Q", x, y, z, rnd.randrange(2), objects))
     return out
 
 
@@ -246,6 +306,13 @@ def runner_input(case):
         return "R " + " ".join("%.17g" % x for x in case[1] + case[2])
     if kind == "F":
         return "F %d " % case[1][0] + " ".join("%.17g" % x for x in case[1][1:])
+    if kind == "Q":
+        parts = ["Q %d %d %d %d %d" % (case[1], case[2], case[3], case[4], len(case[5]))]
+        for otype, ox, oy, oz, verts, faces in case[5]:
+            parts.append("%d %d %d %d %d %d" % (otype, ox, oy, oz, len(verts) // 3, len(faces)))
+            parts.append(" ".join(str(v) for v in verts))
+            parts.append(" ".join("%d %d %d" % f for f in faces))
+        return " ".join(parts)
     return "B %d " % case[1][0] + " ".join("%.17g" % x for x in case[1][1:]) + " " + \
         " ".join(str(v) for v in case[2] + case[3])
 
@@ -260,6 +327,8 @@ def original_output(orig, case):
         return orig.reflect(case[1], case[2])
     if kind == "F":
         return orig.fly(case[1])
+    if kind == "Q":
+        return orig.query(case[1], case[2], case[3], case[4], case[5])
     return orig.bounce(case[1], case[2], case[3])
 
 
@@ -272,7 +341,7 @@ def close(a, b, rel, abs_tol):
 # Port intermediates are binary64 where the x87 keeps 80 bits. sub_000346cc rounds jB0 = -1.25 * j0 (masses 10 and
 # 2) to float32: the exact value can lie on a float midpoint, and the 80-bit rounding of 1 / (mA + mB) breaks the tie,
 # so that intermediate may end one float ulp apart; "I" allows it and the exact cases are counted separately.
-TOLERANCE = {"P": (2.5e-7, 1e-4), "I": (1e-6, 1e-5), "R": (1e-12, 1e-10), "F": (1e-15, 1e-12), "B": (1e-12, 1e-9)}
+TOLERANCE = {"Q": (0, 0), "P": (2.5e-7, 1e-4), "I": (1e-6, 1e-5), "R": (1e-12, 1e-10), "F": (1e-15, 1e-12), "B": (1e-12, 1e-9)}
 EXACT = (1e-12, 1e-12)
 
 
@@ -316,7 +385,8 @@ def main():
             s = stats.setdefault(kind, {"cases": 0, "failures": 0, "contacts": 0, "exact": 0})
             s["cases"] += 1
             s["exact"] += int(compare(kind, port, want, EXACT))
-            s["contacts"] += int(kind in "PI" and want[0] != 0) + int(kind == "B" and want[0] == 0)
+            s["contacts"] += int(kind in "PI" and want[0] != 0) + int(kind == "B" and want[0] == 0) + \
+                int(kind == "Q" and want[0] >= 0)
             if not ok:
                 s["failures"] += 1
                 if len(failures) < 10:

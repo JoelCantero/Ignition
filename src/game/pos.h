@@ -52,4 +52,25 @@ void ign_coll_reflect(const double n[3], double v[3]);
 /* 0x35967: height (up) of the query's plane at engine (x, z). */
 double ign_coll_ground_up(const IgnGroundHit *hit, double x, double z);
 
+/* Special objects, PLC types 0x12c-0x15d (list 0x1fef58, world creation 0x255cb). car_update 0x30dbb-0x31303 acts on
+ * [esp+0x288]: */
+enum {
+    IGN_SPECIAL_NONE,
+    IGN_SPECIAL_LAUNCH, /* 0x12d, or 0x131 next to an erupting geyser: somersault (car+0x554) */
+    IGN_SPECIAL_PUSH,   /* 0x12e: thrown up and spun */
+    IGN_SPECIAL_MESH    /* 0x12f: sub_00031858 mesh swap, not ported */
+};
+/* sub_0003383c: integer arguments in engine coordinates (x/z + IGN_SRF_ORIGIN, height up). Among the objects of type
+ * 0x12c-0x15d (low 16 bits) the last one with a face over (x, z) within 600 in x and z (900 in jump mode) once one of
+ * them has been within 190 in height; returns its type or -1. Vertices are the mesh's plus the object's current
+ * position (POS), without rotation. */
+int ign_special_query(const IgnLevel *lv, int32_t x, int32_t y, int32_t z, int jump);
+/* car_update 0x2f01f-0x2f2be (first corner probe): for each special object within 200 in x and z of the car, ICELAND's
+ * 0x12c objects explode a car within 30 in x, height and z (*wreck = 1); otherwise sub_0003383c under the car decides:
+ * 0x12c explosion, 0x130 slide (*wreck = 3), 0x12d/0x131/0x12e/0x12f as above. Returns IGN_SPECIAL_*. */
+int ign_special_probe(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car, int iceland, int *wreck);
+/* car_update 0x30dbb-0x31303 for one car and tick (before ign_car_tick): wrecks, launch with debris, push with its
+ * sample (one per 15 car updates, [0x1fee3c]). */
+void ign_special_apply(IgnCar *car, int special, int wreck, IgnFx *fx, float focus_x, float focus_z);
+
 #endif

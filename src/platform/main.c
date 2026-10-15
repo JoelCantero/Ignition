@@ -123,6 +123,13 @@ static int spectate(IgnCar *const *all, int n) {
     return spectated;
 }
 
+/* car_update 0x2f01f / 0x30dbb: the special objects (0x12c-0x15d) under a car, before its tick. Track 5 is ICELAND. */
+static void special_tick(IgnCar *c, const IgnLevel *lv) {
+    if (c->wrecked) return;
+    int wreck, special = ign_special_probe(lv, &fx, c, track_id == 5, &wreck);
+    ign_special_apply(c, special, wreck, &fx, c->x, c->z);
+}
+
 static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, IgnAi *player_ai, int autopilot) {
     ghost_tick++;
     int started = ign_race_started(&race);
@@ -132,6 +139,7 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_ai_set_cars(all, nrivals + 1);
     for (int i = 0; i < nrivals; i++) {
+        special_tick(&rivals[i], lv);
         if (!rivals[i].wrecked) {
             ign_car_tick(&rivals[i], lv, NULL);
             ign_race_progress(&race, &rivals[i], t);
@@ -525,6 +533,7 @@ int main(int argc, char **argv) {
         }
         float t = 0;
         for (int step = 0; sim_ticks >= 0 ? step < sim_ticks : t < sim_seconds; step++, t += SIM_DT) {
+            special_tick(&car, &lv);
             if (!car.wrecked) {
                 if (!autopilot && car.progress_lock != 1) player_ai.input = in;
                 ign_car_tick(&car, &lv, autopilot || car.progress_lock == 1 ? NULL : &in);
@@ -684,6 +693,7 @@ int main(int argc, char **argv) {
                 IgnInput tick_input = in;
                 tick_input.gear_shift = pending_gear_shift;
                 pending_gear_shift = 0;
+                special_tick(&car, &lv);
                 if (!car.wrecked) {
                     if (car.progress_lock != 1) player_ai.input = tick_input;
                     ign_car_tick(&car, &lv, car.progress_lock == 1 ? NULL : &tick_input);

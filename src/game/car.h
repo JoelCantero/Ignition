@@ -105,6 +105,7 @@ typedef struct {
      * inertia 4000 (cars_init 0x273b3) and the impact of the last object hit (car+0x634/+0x638/+0x63c). */
     double contact_v[2];
     float contact_mass, contact_inertia, contact_impact;
+    int launch;                    /* car+0x554: ticks of the somersault started by a 0x12d object, 0 = none */
 } IgnCar;
 
 #define IGN_WRECK_FRAMES 80.0

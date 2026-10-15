@@ -147,12 +147,22 @@ static int sample_ground(IgnCar *car, const IgnLevel *lv, int types[4], double w
             sum -= h[w];
         }
     }
-    if (!car->airborne) {
+    if (!car->airborne && !car->launch) {
         double run_x = fabs(car->corner_x[0] - car->corner_x[3]) * scale / (special + 1);
         double run_z = fabs(car->corner_z[0] - car->corner_z[1]) * scale / (special + 1);
         /* y points down: a lower front (larger y) gives positive pitch, i.e. downhill acceleration. */
         b->pitch = slope_angle((h[2] + h[3]) * 0.5 - (h[0] + h[1]) * 0.5, run_x, 1.0, b->pitch, limit);
         b->roll = slope_angle((h[1] + h[2]) * 0.5 - (h[0] + h[3]) * 0.5, run_z, 0.6, b->roll, limit);
+    } else if (limit && car->launch > 0) {
+        /* 0x30d05: the somersault turns the pitch (car+0x110) 0.078 rad per tick; after 80 ticks the car is level. */
+        car->launch++;
+        b->pitch = fmod(car->launch * 0.078, 6.2831853071796);
+        if (car->launch > 80) {
+            car->body_pitch = 0;
+            b->pitch = 0;
+            car->body_roll = b->roll; /* car+0x584 = car+0x108 (the engine keeps it in tenths of a degree) */
+            car->launch = 0;
+        }
     } else if (limit && b->pitch < PI / 4) {
         b->pitch += 0.01; /* 0x30d98: car+0x130, the nose drops in the air */
     }
@@ -864,24 +874,7 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     double wheel_up[4];
     sample_ground(car, lv, types, wheel_up, 1);
 
-    /* car_update 0x2f01f: near a special object (PLC type 0x12c-0x15d, list 0x1fef58, built at 0x255cb) the ground
-     * under the car centre is probed; type 0x130 (AUSTRIA) starts wreck 3 (sub_0003db4c). The other types drive
-     * moving objects that the port does not have. */
-    for (int i = 0; i < lv->track.nobj; i++) {
-        const IgnObject *o = &lv->track.objs[i];
-        if (o->type < 0x12c || o->type >= 0x15e || fabsf(car->x - (float)o->pos[0]) >= 200.0f ||
-            fabsf(car->z - (float)o->pos[2]) >= 200.0f)
-            continue;
-        IgnGroundHit hit;
-        if (ign_ground_at(lv, car->x, car->z, (float)-car->height, &hit) != 0 ||
-            lv->track.objs[hit.object].type < 0x12c)
-            continue;
-        if (lv->track.objs[hit.object].type == 0x130) {
-            wreck_why(car, 3, "object 0x130");
-            return;
-        }
-        break;
-    }
+    /* car_update 0x2f01f: special objects are probed by the caller (ign_special_probe / ign_special_apply). */
 
     /* car_update 0x2fd63: no ground under any wheel wrecks the car; 0x2fd9a: neither do more than 5 grounded ticks
      * with every wheel on a type above 0x28. A wheel without ground keeps its last type (0x30265). */
