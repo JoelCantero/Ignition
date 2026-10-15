@@ -404,7 +404,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | GST | coches fantasma | 🟡 leer, escribir y reproducir (`ghost.c`, `tools/gst.py`); falta la contrarreloj |
 | BTZ | configuración y récords | 🔴 |
 | INF | curvas del sonido del motor por coche | � 4 tablas de 200 B: tono y volumen de `00_A`/`01_A` por régimen (`sound.c`) |
-| WAV / PAT / XI / OGG | sonido (PCM, Gravis, FastTracker, pistas de CD) | 🟢 WAV, PAT y XI (`audio.c`); falta OGG (música) |
+| WAV / PAT / XI / OGG | sonido (PCM, Gravis, FastTracker, pistas de CD) | 🟢 WAV, PAT y XI (`audio.c`); OGG con stb_vorbis (`music.c`) |
 
 ### Sistemas del juego descifrados y portados
 
@@ -536,7 +536,8 @@ lista de fantasmas `0x17054` · `menu_load_car` `0x1aaf8` · trucos `0x160c4`.
 `0x50e94` · guardar configuración `0x2b430`, `0x2cf60` · apagado `0x2b6b4`.
 
 **Sonido**: sonidos de coche (ROLL, SKID…) `0x2a4ec` · cargar muestras `.WAV/.PAT/.RW8` `0x63310` · reproducir sonido
-*¿?* `0x49a8c` · canal *¿?* `0x626fc` · detección de Sound Blaster (`BLASTER`) `0x7a85c` · *Script Player* `0x549b0`.
+*¿?* `0x49a8c` · canal *¿?* `0x626fc` · detección de Sound Blaster (`BLASTER`) `0x7a85c` · *Script Player* `0x549b0` ·
+CD audio (MSCDEX): tocar pista `0x64241`, volumen `0x63f3e`, ocupado `0x63cf3`, TOC `0x640b3`.
 
 **Motor Lisa 2 y runtime**: API de objetos `LI_MOVEOBJECT` `0x56d24`, `LI_PLACEOBJECT` `0x56c74`, cambiar malla
 `0x56e9c` · `engine_alloc_objects` `0x569ec` · memoria `mem.c` (`pool_alloc` `0x64e84`, `0x64db8`, `0x650f8`, `0x651c8`)
@@ -549,7 +550,6 @@ pulsada `0x55c28` · palabra tecleada `0x55cd0` · `atan2` `0x647ef` · `pow` `0
 - `GENERAL/*.TEX`: texturas de efectos (BOOM, DARKSMOK, DIVSPR, EXSMOKE, LIGHT, SMOKE).
 - `GENERAL/SOUND/{BOOST,COLL,DIV,ROLL,SKID}`, `CARS/<coche>/SOUND/{00_A.WAV,01_A.WAV,ENGINE.INF}` y
   `LEVELS/<pista>/SOUND/*.PAT|WAV`: ambiente por pista.
-- `MUSIC/Track02–08.ogg`: música (pistas de CD).
 - `FONTS/*.LFT`, `IGNITION.FNT`; `*_PANGFX.PIC`, `H_PAN*.PIC`, `*_SIGNS.PIC`, `POKAL.PIC`: HUD, señales y trofeo.
 - `BALTAZAR/DATA`: menú (MENU.COL/TAB, MENUCAR.*, BILAR/CAR_SEL/DEMOCAR/DEMOTRK/FLAGGOR/IGN_LOGO/MARK/CONSPR/TRK_SPR.PIC,
   `*.LFT`, `IGN*.CDP`, `DEFAULT2.PSQ`, `TEST2.PFM`).
@@ -635,7 +635,8 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    motor original). La rotación `Z(Y(X(v)))` y la geometría transformada son aproximaciones; la rejilla SRF conserva
    sus spans estáticos, por lo que la consulta de suelo y las colisiones de objetos trasladados no son completas.
 10. **Sonido**: mezclador propio en SDL3 (mono, 44,1 kHz) en lugar del driver GUS/Sound Blaster; volumen 0..`0x10000`
-   y frecuencia en Hz como en `0x625f4`. Sin panorama estéreo, sin música y sin los sonidos de objetos móviles.
+   y frecuencia en Hz como en `0x625f4`. Sin panorama estéreo y sin los sonidos de objetos móviles. Música OGG en
+   lugar del CD (`music.c`): mono, F5/F6 en vez de ←/→ del menú de pausa y pista 8 al terminar en el podio.
 
 ---
 
@@ -839,7 +840,8 @@ implementado.
 - [x] **P1** Efectos: BOOST, COLL, DIV, ROLL, SKID (`0x2a4ec`); reproducción posicional `0x49a8c` y canales `0x626fc`.
 - [x] **P2** Ambiente por pista `LEVELS/<pista>/SOUND`: emisores PLC `0x190+n` (`0x2489c`, `0x360f0`), lluvia,
       viento y truenos.
-- [ ] **P2** Música `MUSIC/Track02–08.ogg` (antes pistas de CD): asignación por pista y menú.
+- [x] **P2** Música `MUSIC/Track02–08.ogg` (antes pistas de CD, MSCDEX `0x63cf3…0x64710`): pista por nivel `0xc3fd8`,
+      repetición `0x212f8`, podio (pista 8) y cambio de pista; falta el menú (pista 7) cuando exista.
 
 ### Fase 6 — Fantasmas y persistencia
 

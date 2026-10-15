@@ -17,6 +17,7 @@
 #include "../render/camera.h"
 #include "../render/hud.h"
 #include "../render/raster.h"
+#include "music.h"
 #include "sound.h"
 
 #define DEFAULT_DATA_DIR "/Users/Shared/Epic Games/Ignition/ignition"
@@ -300,6 +301,8 @@ int main(int argc, char **argv) {
     IgnCamera cam = {0};
     int fixed_cam = 0;
     const char *ghost_out = NULL, *ghost_in = NULL;
+    /* [0x1ff253] music volume 0..10 and [0x1ff24f] track setting (0 level, -1 random, n fixed). */
+    int music_on = 1, music_volume = 10, music_mode = IGN_MUSIC_BY_LEVEL;
     ign_frame_init(&frame, 640, 480);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--shot") && i + 1 < argc)
@@ -315,6 +318,13 @@ int main(int argc, char **argv) {
             frame.perspective = 1;
         } else if (!strcmp(argv[i], "--countdown")) {
             countdown = 1;
+        } else if (!strcmp(argv[i], "--no-music")) {
+            music_on = 0;
+        } else if (!strcmp(argv[i], "--music-volume") && i + 1 < argc) {
+            music_volume = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--music-track") && i + 1 < argc) {
+            i++;
+            music_mode = !strcmp(argv[i], "random") ? IGN_MUSIC_RANDOM : atoi(argv[i]);
         } else if (!strcmp(argv[i], "--rear")) {
             rear_view = 1;
         } else if (!strcmp(argv[i], "--record-ghost") && i + 1 < argc)
@@ -617,6 +627,8 @@ int main(int argc, char **argv) {
         for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
         if (ign_sound_start(data_dir, level, &lv, all, nrivals + 1, &weather))
             fprintf(stderr, "audio: %s\n", SDL_GetError());
+        else if (music_on)
+            ign_music_start(data_dir, level, music_mode, music_volume);
     }
 
     bool free_cam = false;
@@ -640,6 +652,9 @@ int main(int argc, char **argv) {
                 else if (!free_cam && ev.key.key == SDLK_E) pending_gear_shift = 1;
                 /* sub_0002b9e4 0x2c017: TAB (scancode 0x0f) steps the post-race camera 0, 1, 2, 3. */
                 else if (ev.key.key == SDLK_TAB) tv_index = (tv_index + 1) % 4;
+                /* sub_0002b9e4 0x2c1cb/0x2c29a: left/right on the pause menu's music line; F5/F6 here (deviation). */
+                else if (ev.key.key == SDLK_F5) ign_music_step(-1);
+                else if (ev.key.key == SDLK_F6) ign_music_step(1);
             }
             /* Cheat words are typed during play (0x160c4); BANARNE toggles 3x tall bodies. */
             if (ev.type == SDL_EVENT_TEXT_INPUT) {
@@ -699,6 +714,7 @@ int main(int argc, char **argv) {
             SDL_SetWindowTitle(win, title);
         }
 
+        ign_music_poll(now / 1000.0, car.out ? car.finish_position : 0);
         draw(&lv, &car, &cam);
         IgnPalette shown;
         ign_fx_palette(&fx, &lv.palette, &shown);
@@ -709,6 +725,7 @@ int main(int argc, char **argv) {
         SDL_RenderPresent(ren);
     }
 
+    ign_music_stop();
     ign_sound_stop();
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);

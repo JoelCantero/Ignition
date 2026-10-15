@@ -961,6 +961,46 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   decorados, así que solo en USA y CANADA coinciden los índices. Se reconstruye la correspondencia asignando a cada objeto
   del motor el siguiente PLC cuya malla admite todos sus desplazamientos de cara: autocoincidencia 88–98 % en todas las pistas.
 
+## Música de CD (portada a `src/platform/music.c`)
+
+El original toca las pistas de audio del CD con MSCDEX: `int 0x2f` en modo real a través de DPMI `0x300`
+(`0x64559` AX=`0x1500` comprueba MSCDEX, `0x645e1` AX=`0x1510` envía la petición de dispositivo del búfer DOS
+`[0x25ade8]` reservado en `0x6442f`). `0x64659` monta la cabecera (`al` = orden): `0x84` PLAY AUDIO (`0x64332`, inicio
+y longitud en *frames*), `0x85` STOP (`0x64391`) e IOCTL `3`/`0xc` (lectura/escritura). `0x640b3` lee la TOC: última
+pista en `[0x25a934]`, inicio y longitud por pista en `[0x25a938+4n]`/`[0x25ab90+4n]` (MSF → *frames*
+`m*4500 + s*75 + f - 150`, `0x64710`; IOCTL `0x0a` da primera `+0x21`, última `+0x22` y *lead-out* `+0x23`, e IOCTL
+`0x0b` con la pista en `+0x21` su inicio en `+0x22`; `[0x25a934]` = última − primera + 1). `0x64241(n)` toca la
+pista `n` si `1 ≤ n ≤ [0x25a934]`. Antes de usar el CD se llama a `0x63d56`: IOCTL `4` (volumen del canal 0 →
+`[0x25adf0]`), `6` (bit 0 = puerta abierta → `[0x25adf4] = 0`; si no, 1), `9` (cambio de disco → `[0x25adf8]`) y
+`0xc` (ocupado → `[0x25ae08]`, inicio/fin de reanudación en `[0x25ae00]`/`[0x25adfc]`); `0x63cf3` repite solo la
+consulta de ocupado.
+
+La pista 1 del CD es de datos; la versión GOG trae las de audio como `MUSIC/Track02–08.ogg` (Vorbis, estéreo,
+44,1 kHz).
+
+| Momento | Dirección | Pista |
+|---|---|---|
+| Carga del nivel (`level_prepare`) | `0x2249c` → `0x224b4` | `[0x1feed8]` |
+| Elección (`0x2293c`) | `0x22adf` | `[0x1ff24f]` = 0: `0xc3fd8[[0x1fef10]]` = {CANADA 2, USA 3, CARIB 4, BRAZIL 5, AUSTRIA 6, ICELAND 6, JAPAN 7}, acotada a `[0x25a934]`; −1: `1 + rand·[0x25a934]` (`0x51714`); n: pista n |
+| Bucle de carrera | `0x212f8`–`0x2132e` | cada 5 s de `[0x1fb540]` (`[0xc0b30]`), si `[0x1ff253] ≠ 0` y `0x63cf3` dice que el CD está parado, vuelve a tocar `[0x1feed8]` (bucle) |
+| Menú de pausa, línea de música (`[0x1fed90] == 3`, dibujada en `0x43cc8`), teclas ←/→ (`0xcb`/`0xcd`) | `0x2c1cb`, `0x2c29a` | `[0x1ff24f] − 1` si es > −1, `+ 1` si es < `[0x25a934]`; se recalcula como arriba y se toca |
+| Joystick | `0x4d228`–`0x4d36a` | lo mismo que las teclas |
+| Resultados (`render_main` con `5 < [0x1fee34] < 8` y posición final `car+0x3a0 < 4`) | `0x460c1`, `0x464d8` | pista 8 una vez (`[0x1fed54]`, a 0 en `0x2aaa1`); al acabar, el bucle de carrera vuelve a la pista del nivel |
+| Menú (`0x12bb8`) | `0x13309`, `0x13717` | `[0xe9cf3]` = 0: pista 7; −1: `rand()·[0x25a934] >> 15 + 1`; n: n. Se reintenta cada `0x7d0/0x1b` ≈ 74 fotogramas si `0x63cf3` = 0 |
+
+Volumen (`0x63f3e`, 0..255 en los cuatro canales): `game_init` pone 255 (`0x21833`); la carrera
+`[0x1feef4] · 2,55` (`0x2a4f5`, `[0x1feef4] = [0x1ff253] · 10`); el menú `[0xe9cf7] · 25,5` (`0x13697`). Parar:
+opciones `0x13a5c`, `0x2b430` y apagado `0x2b6b4` (`0x64391` + `0x644c5`).
+
+Port: `ign_music_track` (tabla `0xc3fd8`), `ign_music_play` (`0x64241`), `ign_music_set_volume` (`0x63f3e`),
+`ign_music_start` (`level_prepare`), `ign_music_poll` (bucle de 5 s `0x212f8` y pista 8 del podio) e
+`ign_music_step` (←/→ del menú de pausa). Opciones `--no-music`, `--music-volume 0..10` (`[0x1ff253]`, 10 por
+defecto) y `--music-track N|random` (`[0x1ff24f]`). Ganancia: volumen 255 = el 0,4 de una muestra a `0x10000`
+(RMS medio de las pistas 0,09–0,14; motores 0,10–0,37). Desviaciones: el modo aleatorio no elige la pista de
+datos 1; mezcla mono como el resto del mezclador; el reloj del sondeo es el tiempo real de la ventana; sin menú de
+pausa, ←/→ son F5/F6; sin pantalla de resultados, la pista 8 suena al terminar en los tres primeros puestos; aún no
+hay menú principal (pista 7).
+
 ## Pendiente / desviaciones
 
 - Suelo del coche (`car_update` 0x2eea4–0x30d98, portado): una consulta por esquina de la caja de la carrocería ×1,1

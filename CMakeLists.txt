@@ -42,6 +42,16 @@ if(NOT MSVC)
   target_compile_options(ignition PRIVATE -Wall -Wextra)
 endif()
 
+# Music: MUSIC/TrackNN.ogg (the original CD audio) decoded by the vendored stb_vorbis.
+add_library(stb_vorbis STATIC third_party/stb_vorbis/stb_vorbis.c)
+target_compile_definitions(stb_vorbis PRIVATE STB_VORBIS_NO_PUSHDATA_API STB_VORBIS_NO_STDIO)
+if(NOT MSVC)
+  target_compile_options(stb_vorbis PRIVATE -w)
+  target_link_libraries(stb_vorbis PRIVATE m)
+endif()
+target_sources(ignition PRIVATE src/platform/music.c)
+target_link_libraries(ignition PRIVATE stb_vorbis)
+
 # Flat ELF image of the original executable for disassemblers.
 set(GAME_DIR "/Users/Shared/Epic Games/Ignition/ignition" CACHE PATH "Original game data")
 add_custom_target(elf
