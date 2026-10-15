@@ -232,6 +232,8 @@ class RenderOriginal:
             lut = self.luts.get(rec[31], 0)
             if rec[0] in (0x11, 0x12):
                 words[7], words[8], words[9] = uv, page, lut
+            elif rec[0] == 0x13:
+                words[8] = self.luts[2]
             elif rec[0] in (0x14, 0x15):
                 words[1] = page
                 words[11:17] = rec[24:30]

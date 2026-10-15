@@ -44,6 +44,7 @@ int main(int argc, char **argv) {
         switch (rec[0]) {
         case 0x11:
         case 0x12: ign_prim_tex(&r, rec + 1, rec + 24, page, rec[0] == 0x12 ? lut : NULL); break;
+        case 0x13: ign_prim_shade(&r, rec + 1, shd + ((size_t)(rec[7] & 0xff) << 8)); break;
         case 0x14:
         case 0x15: {
             const int32_t xy[6] = {rec[2], rec[3], rec[5], rec[6], rec[8], rec[9]}, l[3] = {rec[4], rec[7], rec[10]};

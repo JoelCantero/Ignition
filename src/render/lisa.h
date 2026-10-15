@@ -12,7 +12,7 @@
 typedef struct {
     uint8_t *fb;
     int stride;
-    int xmin, ymin, ymax1;              /* 0xc87cc, 0xc87d0, 0xc87d8 */
+    int xmin, ymin, xmax1, ymax1;       /* 0xc87cc, 0xc87d0, 0xc87d4, 0xc87d8 */
     int32_t xmin8, ymin8, xmax8, ymax8; /* 0xc87ec..0xc87f8: 8.8, far edges exclusive */
 } IgnRaster;
 
@@ -26,6 +26,9 @@ void ign_prim_tex(IgnRaster *r, const int32_t xy[6], const int32_t uv[6], const 
  * lut non-NULL (0x15) blends dst = lut[texel * 256 + dst]. */
 void ign_prim_persp(IgnRaster *r, const int32_t xy[6], const int32_t light[3], const int32_t uv[6],
                     const uint8_t *tex, const uint8_t *lut);
+
+/* Primitive 0x13 (sub_00074d04): flat triangle darkening dst through one table row (row_lut = SHD + row * 256). */
+void ign_prim_shade(IgnRaster *r, const int32_t xy[6], const uint8_t *row_lut);
 
 /* ---- scene engine (lisa.c) ---- */
 

@@ -456,6 +456,38 @@ static void face_blend(Ctx *c, const LisaObject *o, const LisaVert *vb, const in
     f->head[key] = f->nprim++;
 }
 
+/* sub_0005dc08 (face type 20, 5 words: type, v0, v1, v2, SHD row): a darkening triangle (shadows, skid marks);
+ * the back-face product is taken at full 8.8 precision; class >= 100 sorts 76 buckets nearer. */
+static void face_shade(Ctx *c, const LisaObject *o, const LisaVert *vb, const int32_t *face) {
+    const LisaView *v = c->v;
+    LisaFrame *f = c->f;
+    const LisaVert *a = &vb[face[1]], *b = &vb[face[2]], *d = &vb[face[3]];
+    int32_t hx = a->x > b->x ? a->x : b->x, lx = a->x < b->x ? a->x : b->x;
+    int32_t hy = a->y > b->y ? a->y : b->y, ly = a->y < b->y ? a->y : b->y;
+    if (hx <= d->x) hx = d->x;
+    if (lx >= d->x) lx = d->x;
+    if (hy <= d->y) hy = d->y;
+    if (ly >= d->y) ly = d->y;
+    if (hx < v->xmin8 || lx > v->xmax8 || hy < v->ymin8 || ly > v->ymax8) return;
+    int32_t cross = (int32_t)((uint32_t)mul(d->y - b->y, a->x - b->x) - (uint32_t)mul(a->y - b->y, d->x - b->x));
+    if (v->zoom <= 0) cross = ~cross;
+    int32_t zsum = a->z + b->z + d->z;
+    if (zsum <= 600 || cross <= 0) return;
+    LisaPrim *p = new_prim(f);
+    if (!p || !c->scene->shade) return;
+    p->type = 0x13;
+    p->xy[0] = a->x, p->xy[1] = a->y, p->xy[2] = b->x, p->xy[3] = b->y, p->xy[4] = d->x, p->xy[5] = d->y;
+    p->lut = c->scene->shade + ((size_t)(face[4] & 0xff) << 8);
+    int32_t key = zsum >> 4;
+    if (o->klass >= 100) {
+        key -= 76;
+        if (key < 0) key = 0;
+    }
+    if (key >= LISA_BUCKETS) key = LISA_BUCKETS - 1;
+    f->next[f->nprim] = f->head[key];
+    f->head[key] = f->nprim++;
+}
+
 /* Bytes taken by each face type in the mesh (handlers advance 0x24c028 by these). */
 static int face_words(int type) {
     switch (type) {
@@ -477,6 +509,7 @@ static void faces(Ctx *c) {
             int type = face[0] & 0xff;
             switch (type) {
             case 17: face_tex(c, o, vb, face, 0); break;
+            case 20: face_shade(c, o, vb, face); break;
             case 21: face_tex(c, o, vb, face, 80); break;
             case 18: face_blend(c, o, vb, face, c->scene->keyed, 0); break;
             case 19: face_blend(c, o, vb, face, c->scene->shade, 0); break;
@@ -511,6 +544,7 @@ void lisa_draw(const LisaFrame *f, IgnRaster *r) {
         switch (p->type) {
         case 0x11: ign_prim_tex(r, p->xy, p->uv, p->tex, NULL); break;
         case 0x12: ign_prim_tex(r, p->xy, p->uv, p->tex, p->lut); break;
+        case 0x13: ign_prim_shade(r, p->xy, p->lut); break;
         case 0x14: ign_prim_persp(r, p->xy, p->light, p->uv, p->tex, NULL); break;
         case 0x15: ign_prim_persp(r, p->xy, p->light, p->uv, p->tex, p->lut); break;
         default: break;

@@ -17,7 +17,7 @@ static int32_t div16(int32_t n, int32_t d) { return (int32_t)(((int64_t)n * 6553
 void ign_raster_clip(IgnRaster *r, int x0, int y0, int x1, int y1) {
     /* sub_00060e3d 0x60e5d: clip rectangle in pixels and in 8.8 (the far edges are exclusive). */
     r->xmin = x0, r->ymin = y0;
-    r->ymax1 = y1 + 1;
+    r->xmax1 = x1 + 1, r->ymax1 = y1 + 1;
     r->xmin8 = x0 << 8, r->ymin8 = y0 << 8;
     r->xmax8 = (x1 + 1) << 8, r->ymax8 = (y1 + 1) << 8;
 }
@@ -673,4 +673,104 @@ void ign_prim_persp(IgnRaster *r, const int32_t xy[6], const int32_t light[3], c
         h.du = s.du_mb, h.dv = s.dv_mb, h.dl = s.dl_mb;
         persp_rows(r, &s, &h, tex, lut);
     }
+}
+
+/* ---- flat blend through one table row, primitive 0x13 (sub_00074d04) ---- */
+
+typedef struct {
+    int32_t left, right, dleft, dright; /* 0xe6570, 0xe6574, 0xe6578, 0xe657c: 16.16 */
+    int32_t row, rows;                  /* 0xe6568, 0xe656c */
+} ShadeEdges;
+
+/* sub_00074fc0 / sub_00075026: dx / dy in 16.16 with dy forced to 0x41 (or 3) for very short edges, prestepped
+ * to the next row as in sub_00090a00. */
+static void shade_edge(const int32_t *from, const int32_t *to, int32_t *x, int32_t *dx) {
+    uint32_t dy = (uint32_t)(to[1] - from[1]);
+    int32_t ddx = to[0] - from[0];
+    if (dy <= 0x40) {
+        uint32_t adx = (uint32_t)(ddx > 0 ? ddx : -ddx);
+        if (adx <= 0x10000) dy = 0x41;
+        else if (dy <= 3) dy = 3;
+    }
+    *dx = div16(ddx, (int32_t)dy);
+    int32_t f = 0x100 - (from[1] & 0xff);
+    *x = (int32_t)((uint32_t)from[0] << 8) + f * (*dx >> 8);
+}
+
+/* sub_00074ec8 */
+static int32_t shade_rows(const IgnRaster *r, ShadeEdges *e, const uint8_t *row_lut) {
+    int32_t a = e->left, b = e->right, y = e->row;
+    if (y < r->ymin) {
+        int32_t n = r->ymin - y;
+        e->rows -= n;
+        if (e->rows <= 0) return a;
+        a += n * e->dleft;
+        b += n * e->dright;
+        y = r->ymin;
+    }
+    int32_t room = r->ymax1 - y;
+    if (room < e->rows) {
+        if (y > r->ymax1 || room == 0) return a;
+        e->rows = room;
+    }
+    for (; e->rows > 0; e->rows--, y++) {
+        int32_t xr = b >> 16, xl = a >> 16;
+        a += e->dleft, b += e->dright;
+        if (xl < r->xmin) {
+            if (xr < r->xmin) continue;
+            xl = r->xmin;
+        }
+        if (xr > r->xmax1) {
+            if (xl > r->xmax1) continue;
+            xr = r->xmax1;
+        }
+        uint8_t *p = r->fb + (size_t)y * r->stride;
+        for (int32_t x = xl; x < xr; x++) p[x] = row_lut[p[x]];
+    }
+    return a;
+}
+
+void ign_prim_shade(IgnRaster *r, const int32_t xy[6], const uint8_t *row_lut) {
+    /* 0x74d11: order by y with the original's exchanges */
+    const int32_t *v0 = xy, *v1 = xy + 2, *v2 = xy + 4, *t;
+    if (v1[1] >= v0[1]) {
+        if (!(v1[1] < v2[1])) {
+            t = v2, v2 = v1, v1 = t;
+            if (!(v0[1] < v1[1])) t = v1, v1 = v0, v0 = t;
+        }
+    } else {
+        t = v1, v1 = v0, v0 = t;
+        if (!(v2[1] > v1[1])) {
+            t = v2, v2 = v1, v1 = t;
+            if (!(v1[1] > v0[1])) t = v1, v1 = v0, v0 = t;
+        }
+    }
+    const int32_t lim = 0x7d0000;
+    if (v0[0] < -lim || v0[0] > lim || v1[0] < -lim || v1[0] > lim || v2[0] < -lim || v2[0] > lim || v2[1] > lim)
+        return;
+    ShadeEdges e;
+    e.row = v0[1] >> 8;
+    e.rows = (v1[1] >> 8) - e.row;
+    if (e.rows) {
+        shade_edge(v0, v1, &e.left, &e.dleft);
+        shade_edge(v0, v2, &e.right, &e.dright);
+        if (e.dleft > e.dright) {
+            int32_t s = e.dleft;
+            e.dleft = e.dright, e.dright = s;
+            s = e.left, e.left = e.right, e.right = s;
+        }
+        shade_rows(r, &e, row_lut);
+    }
+    e.row = v1[1] >> 8;
+    e.rows = (v2[1] >> 8) - e.row;
+    if (!e.rows) return;
+    shade_edge(v0, v2, &e.left, &e.dleft);
+    shade_edge(v1, v2, &e.right, &e.dright);
+    e.left += ((v1[1] >> 8) - (v0[1] >> 8)) * e.dleft;
+    if (e.dleft < e.dright) {
+        int32_t s = e.dleft;
+        e.dleft = e.dright, e.dright = s;
+        s = e.left, e.left = e.right, e.right = s;
+    }
+    shade_rows(r, &e, row_lut);
 }
