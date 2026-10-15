@@ -75,7 +75,7 @@ class LapOriginal(InputOriginal):
         for register in ("EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "EBP"):
             self.uc.reg_write(getattr(self.reg, "UC_X86_REG_" + register), 0)
         self.uc.reg_write(self.reg.UC_X86_REG_ESP, ESP)
-        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, 0x037F)
+        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, self.fpcw)
         self.uc.reg_write(self.reg.UC_X86_REG_FPTAG, 0xFFFF)
         for offset in (0x2F4, 0x330, 0x334, 0x338, 0x344):
             self.put(ESP + offset, "i", 0)

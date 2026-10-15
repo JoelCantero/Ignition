@@ -13,6 +13,7 @@
 #include "../game/ghost.h"
 #include "../game/pos.h"
 #include "../game/race.h"
+#include "../game/save.h"
 #include "../game/track.h"
 #include "../render/camera.h"
 #include "../render/hud.h"
@@ -20,6 +21,7 @@
 #include "../frontend/frontend.h"
 #include "../frontend/settings.h"
 #include "audio.h"
+#include "music.h"
 #include "sound.h"
 
 #define DEFAULT_DATA_DIR "/Users/Shared/Epic Games/Ignition/ignition"
@@ -76,6 +78,10 @@ static int track_id;
 /* Post-race view of sub_000420cc: [0x1fb4d0] frames since the player finished, camera [0x1fee80] (0-2 fixed,
  * 3 = following a car) and the followed car [0xc0b34] with its switch delay [0xc0b38]. */
 static double finish_clock;
+/* Records, IGN_DOS.BTZ and time-trial ghosts in the user folder: always in the window; headless with --time-trial
+ * or IGN_SAVE_DIR. */
+static IgnSession session;
+static int session_on, session_saved;
 static int tv_index = 3, spectated, spectate_wait;
 static IgnSkids skids;
 static IgnFx fx;
@@ -125,10 +131,60 @@ static int spectate(IgnCar *const *all, int n) {
     return spectated;
 }
 
+/* Persistence hooks once per physics tick: ghost sample, "LAP RECORD" (0x2f43a) and the end of the race
+ * (records of render_main 0x45938, ghost and BTZ of sub_0002ccc8). */
+static void session_hooks(IgnCar *const *all, int n, const IgnTrack *t, double best_lap, int was_out) {
+    const IgnCar *player = all[0];
+    int language = ign_btz_i32(&session.btz, IGN_BTZ_LANGUAGE);
+    if (ign_race_started(&race)) ign_session_tick(&session, player, t->count);
+    if (race.best_lap < best_lap && player->last_lap == race.best_lap)
+        printf("%s %.2f\n", ign_lap_record_text(language), player->last_lap);
+    if (player->out && !was_out) {
+        session_saved = ign_session_finish(&session, player);
+        if (session_saved < 0)
+            fprintf(stderr, "cannot save records or ghost in %s\n", session.dir);
+        else if (session_saved & IGN_SAVED_TRACK_RECORD)
+            printf("%s %.2f\n", ign_track_record_text(language), player->race_elapsed);
+        if (session_saved >= 0 && session.time_trial)
+            printf("time trial: %.2f s against %.2f s, ghost %s\n", player->race_elapsed, session.record_cs / 100.0,
+                   session_saved & IGN_SAVED_GHOST ? session.ghost_path : "not saved");
+    }
+    /* sub_0002ccc8 once every car is out: championship round and grid, grid shuffle, IGN_DOS.BTZ. */
+    if (race.finished >= n && !session.ended) {
+        int place[MAX_RIVALS + 1];
+        for (int i = 0; i < n; i++) place[i] = all[i]->place - 1;
+        if (ign_session_race_end(&session, race.mode, place, n) < 0)
+            fprintf(stderr, "cannot save %s in %s\n", IGN_BTZ_NAME, session.dir);
+    }
+}
+
+/* SDL_GetPrefPath, or IGN_SAVE_DIR (tests); never the game folder. */
+static int session_setup(const char *data_dir, const char *level, int car_model, int time_trial) {
+    const char *dir = getenv("IGN_SAVE_DIR");
+    char *pref = dir ? NULL : SDL_GetPrefPath("UDS", "Ignition");
+    int rc = dir || pref ? ign_session_begin(&session, dir ? dir : pref, data_dir, level, car_model, time_trial,
+                                             &ghost)
+                         : -1;
+    SDL_free(pref);
+    if (rc) {
+        fprintf(stderr, "no user folder for records: %s\n", SDL_GetError());
+        return -1;
+    }
+    session_on = 1;
+    race.best_lap = ign_session_best_lap(&session);
+    if (session.time_trial) {
+        static const char *const STATE[] = {"no ghost", "ghost", "ghost of another track (not saved)"};
+        printf("time trial: %s, record %.2f s, saving in %s\n", STATE[session.ghost_state], session.record_cs / 100.0,
+               session.dir);
+    }
+    return 0;
+}
+
 static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, IgnAi *player_ai, int autopilot) {
     ghost_tick++;
     int started = ign_race_started(&race);
     int was_out = player->out;
+    double best_lap = race.best_lap;
     ign_race_progress(&race, player, t);
     IgnCar *all[MAX_RIVALS + 1] = {player};
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
@@ -197,6 +253,7 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
     if (started) ign_race_step(&race, all, nrivals + 1);
     /* car_update 0x2f37f: the player's finish restarts [0x1fb4d0] and selects the car-following camera. */
     if (player->out && !was_out) finish_clock = 0, tv_index = 3, spectate_wait = 100;
+    if (session_on) session_hooks(all, nrivals + 1, t, best_lap, was_out);
     /* sub_00047f94 runs once per rendered frame for every car; the original renders at most 36 frames per second. */
     if (ghost_tick % 2 == 0) {
         for (int i = 0; i <= nrivals; i++) ign_chase_update(&cams[i], all[i], lv, t, started);
@@ -304,6 +361,7 @@ static int run_game(int argc, char **argv) {
     finish_clock = 0;
     tv_index = 3;
     spectated = spectate_wait = 0;
+    session_on = session_saved = 0;
     const char *data_dir = getenv("IGNITION_DATA");
     if (!data_dir) data_dir = DEFAULT_DATA_DIR;
     const char *level = "USA";
@@ -315,6 +373,8 @@ static int run_game(int argc, char **argv) {
     IgnCamera cam = {0};
     int fixed_cam = 0;
     const char *ghost_out = NULL, *ghost_in = NULL;
+    /* [0x1ff253] music volume 0..10 and [0x1ff24f] track setting (0 level, -1 random, n fixed). */
+    int music_on = 1, music_volume = 10, music_mode = IGN_MUSIC_BY_LEVEL;
     ign_frame_init(&frame, 640, 480);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--shot") && i + 1 < argc)
@@ -330,6 +390,13 @@ static int run_game(int argc, char **argv) {
             frame.perspective = 1;
         } else if (!strcmp(argv[i], "--countdown")) {
             countdown = 1;
+        } else if (!strcmp(argv[i], "--no-music")) {
+            music_on = 0;
+        } else if (!strcmp(argv[i], "--music-volume") && i + 1 < argc) {
+            music_volume = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--music-track") && i + 1 < argc) {
+            i++;
+            music_mode = !strcmp(argv[i], "random") ? IGN_MUSIC_RANDOM : atoi(argv[i]);
         } else if (!strcmp(argv[i], "--rear")) {
             rear_view = 1;
         } else if (!strcmp(argv[i], "--record-ghost") && i + 1 < argc)
@@ -381,6 +448,8 @@ static int run_game(int argc, char **argv) {
             car_id = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--manual")) {
             manual_start = true;
+        } else if (!strcmp(argv[i], "--time-trial")) {
+            race_mode = IGN_MODE_TIME_TRIAL;
         } else if (!strcmp(argv[i], "--elimination")) {
             race_mode = IGN_MODE_ELIMINATION;
         } else if (!strcmp(argv[i], "--rivals") && i + 1 < argc) {
@@ -422,6 +491,10 @@ static int run_game(int argc, char **argv) {
             level = argv[i];
     }
 
+    if (race_mode == IGN_MODE_TIME_TRIAL && ghost_in) {
+        fprintf(stderr, "--time-trial loads its own ghost; use --ghost without it\n");
+        return 1;
+    }
     if (sim_ticks >= 0 && !shot) {
         fprintf(stderr, "--sim-ticks requires --shot\n");
         return 1;
@@ -439,11 +512,11 @@ static int run_game(int argc, char **argv) {
         return 1;
     }
     ign_track_gates(&track, &lv);
-    if (ign_track_ai_records(&track, &lv))
+    if (ign_track_ai_records(&track, &lv, ign_ghost_track_id(level)))
         fprintf(stderr, "warning: cannot build TRI AI records; using track-gate fallback\n");
     ign_ai_set_track(level);
     IgnCar car;
-    int want = want_rivals >= 0 ? want_rivals : (shot ? 0 : 3);
+    int want = race_mode == IGN_MODE_TIME_TRIAL ? 0 : want_rivals >= 0 ? want_rivals : (shot ? 0 : 3);
     if (want > MAX_RIVALS) want = MAX_RIVALS;
     float sx, sz, sh;
     grid_pose(&lv, &track, 0, want + 1, &sx, &sz, &sh);
@@ -482,6 +555,11 @@ static int run_game(int argc, char **argv) {
         return 1;
     }
     ign_race_init(&race, race_mode, nrivals + 1);
+    /* Headless runs keep the user folder untouched unless --time-trial or an explicit IGN_SAVE_DIR. */
+    if ((race_mode == IGN_MODE_TIME_TRIAL || !shot || getenv("IGN_SAVE_DIR")) &&
+        !session_setup(data_dir, level, car.id, race_mode == IGN_MODE_TIME_TRIAL) &&
+        session.ghost_state == IGN_TRIAL_GHOST && !ign_car_init(&ghost_car, &lv, ghost.car, sx, sz, sh))
+        ghost_on = 1;
     /* Headless runs start at once unless --countdown; the game window always counts down. */
     if (shot && !countdown) ign_race_skip_countdown(&race);
     ign_set_race_started(ign_race_started(&race));
@@ -578,6 +656,7 @@ static int run_game(int argc, char **argv) {
                    ghost_in, ghost.car, ghost.track, ghost.time_cs / 100.0, ghost.name, n, n ? dev_sum / n : 0.0,
                    dev_max);
         }
+        if (session_on && session.time_trial && !session.finished) printf("time trial: not finished\n");
         if (ghost_out) {
             ign_ghost_finish(&rec, car.race_elapsed);
             if (ign_ghost_save(ghost_out, &rec)) {
@@ -640,6 +719,8 @@ static int run_game(int argc, char **argv) {
         for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
         if (ign_sound_start(data_dir, level, &lv, all, nrivals + 1, &weather))
             fprintf(stderr, "audio: %s\n", SDL_GetError());
+        else if (music_on)
+            ign_music_start(data_dir, level, music_mode, music_volume);
     }
 
     bool free_cam = false;
@@ -664,6 +745,9 @@ static int run_game(int argc, char **argv) {
                 else if (!free_cam && ev.key.key == SDLK_E) pending_gear_shift = 1;
                 /* sub_0002b9e4 0x2c017: TAB (scancode 0x0f) steps the post-race camera 0, 1, 2, 3. */
                 else if (ev.key.key == SDLK_TAB) tv_index = (tv_index + 1) % 4;
+                /* sub_0002b9e4 0x2c1cb/0x2c29a: left/right on the pause menu's music line; F5/F6 here (deviation). */
+                else if (ev.key.key == SDLK_F5) ign_music_step(-1);
+                else if (ev.key.key == SDLK_F6) ign_music_step(1);
             }
             /* Cheat words are typed during play (0x160c4); BANARNE toggles 3x tall bodies. */
             if (ev.type == SDL_EVENT_TEXT_INPUT) {
@@ -723,6 +807,7 @@ static int run_game(int argc, char **argv) {
             SDL_SetWindowTitle(win, title);
         }
 
+        ign_music_poll(now / 1000.0, car.out ? car.finish_position : 0);
         draw(&lv, &car, &cam);
         IgnPalette shown;
         ign_fx_palette(&fx, &lv.palette, &shown);
@@ -733,6 +818,7 @@ static int run_game(int argc, char **argv) {
         SDL_RenderPresent(ren);
     }
 
+    ign_music_stop();
     ign_sound_stop();
     SDL_DestroyTexture(tex);
     SDL_StopTextInput(win);
@@ -768,6 +854,16 @@ static void host_present(const uint8_t *buf) {
 
 static const char *menu_data_dir;
 static int host_sound_init(void) { return ign_audio_open_menu(menu_data_dir) == 0 ? 1 : 0; }
+/* The menu's CD (MSCDEX in the original) is the GOG rip: Track02-08.ogg, i.e. an 8-track disc whose track 1 is data. */
+static int host_cd_tracks(void) {
+    char path[1200];
+    snprintf(path, sizeof path, "%s/MUSIC/Track07.ogg", menu_data_dir);
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return IGN_MUSIC_LAST;
+}
+static void host_cd_play(int track) { ign_music_play(menu_data_dir, track, 0); }
 static int host_sound_play(int sample, int vol, int rate) {
     int h = ign_audio_play(IGN_SND_MENU, 0, sample, 0, vol, rate);
     return h ? h : -1;
@@ -819,6 +915,17 @@ static int dos_scancode(SDL_Scancode sc) {
 /* Menu, then the race it configures, then back to the menu (sub_00020d60). */
 static int run_frontend(const char *data_dir) {
     menu_data_dir = data_dir;
+    /* The same user folder as the race's records (session_setup): IGN_DOS.BTZ and GHOSTS live there; the game
+     * folder's IGN_DOS.BTZ is only read when the user folder has none. */
+    const char *env = getenv("IGN_SAVE_DIR");
+    char *pref = env ? NULL : SDL_GetPrefPath("UDS", "Ignition");
+    char save_dir[1024];
+    snprintf(save_dir, sizeof save_dir, "%s", env ? env : pref ? pref : "");
+    SDL_free(pref);
+    if (!save_dir[0]) {
+        fprintf(stderr, "no user folder for the settings: %s\n", SDL_GetError());
+        return 1;
+    }
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
@@ -840,6 +947,12 @@ static int run_frontend(const char *data_dir) {
         .sound_free = host_sound_free,
         .sound_volume = ign_audio_set_master,
         .sound_shutdown = ign_audio_close,
+        .cd_tracks = host_cd_tracks,
+        .cd_play = host_cd_play,
+        .cd_stop = ign_music_stop,
+        .cd_volume = ign_music_set_volume,
+        .cd_busy = ign_music_playing,
+        .save_dir = save_dir,
     };
     if (ign_frontend_init(data_dir, &host)) {
         fprintf(stderr, "cannot load the frontend data from %s\n", data_dir);
@@ -871,12 +984,12 @@ static int run_frontend(const char *data_dir) {
         if (result != IGN_FRONTEND_RACE) break;
 
         /* The settings block (ign_dos.btz) drives the race: track, player car, field size, difficulty, gearbox. */
-        char car[16], rivals[16], difficulty[16];
+        char car[16], rivals[16], difficulty[16], volume[16], cd_track[16];
         snprintf(car, sizeof car, "%d", (int)ign_cfg_get(CFG_CAR_SLOT));
         int racers = (int)ign_cfg_get(CFG_RACERS);
         snprintf(rivals, sizeof rivals, "%d", racers > 1 ? racers - 1 : 0);
         snprintf(difficulty, sizeof difficulty, "%d", (int)ign_cfg_get(CFG_DIFFICULTY));
-        char *argv[16];
+        char *argv[24];
         int argc = 0;
         argv[argc++] = "ignition";
         argv[argc++] = "--car";
@@ -886,6 +999,19 @@ static int run_frontend(const char *data_dir) {
         argv[argc++] = "--difficulty";
         argv[argc++] = difficulty;
         if (ign_cfg_get(CFG_GEARBOX) == 0) argv[argc++] = "--manual";
+        /* GAME TYPE: 2 TIME TRIAL (ghost and records of the session), 3 PURSUE MODE (elimination). */
+        if (ign_cfg_get(CFG_GAME_MODE) == 2) argv[argc++] = "--time-trial";
+        else if (ign_cfg_get(CFG_GAME_MODE) == 3) argv[argc++] = "--elimination";
+        /* SOUND OPTIONS: CD VOLUME 0..10 and CD TRACK (-1 random, 0 the level's track, n). */
+        snprintf(volume, sizeof volume, "%d", (int)ign_cfg_get(CFG_MUSIC_VOL));
+        argv[argc++] = "--music-volume";
+        argv[argc++] = volume;
+        argv[argc++] = "--music-track";
+        if (ign_cfg_get(CFG_CD_TRACK) == -1) argv[argc++] = "random";
+        else {
+            snprintf(cd_track, sizeof cd_track, "%d", (int)ign_cfg_get(CFG_CD_TRACK));
+            argv[argc++] = cd_track;
+        }
         argv[argc++] = (char *)ign_frontend_level((int)ign_cfg_get(CFG_TRACK));
         argv[argc] = NULL;
         rc = run_game(argc, argv);

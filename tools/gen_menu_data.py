@@ -11,7 +11,8 @@ What is extracted (addresses of the original data object):
   edits    0x16-byte {Element *elem, char *dest, i16 x, y, font_sel, font_unsel, u8 maxlen, cursor, i16 blink, type}
   0xbe514  transition table, 25 rows x 16 {i16 match, i16 action}
   0xbee1c / 0xc4860 key maps, 0xbef1c key-binding allow table, 0xc4960 scancode -> ASCII, 0xc49b4 key names
-  0xbf088  char* [6][50] frontend strings; 0xbf538 credit names; 0xbf57c credit slides; 0xbf628 default records
+  0xbf088  char* [6][50] frontend strings; 0xbf538 credit names; 0xbf57c credit slides (the default records
+           0xbf628 are game/save.c's)
   0xbf04c  track names; 0xbf5fc driver tags; 0xbf06c track thumbnail offsets; 0xbed00 intro CDP names;
   0xbf030  cheat words
 Value and edit-destination pointers point into the settings block 0xe9bfc and are stored as offsets in it.
@@ -207,7 +208,6 @@ class Gen:
         bytes_table("ign_menu_keymap_default", "int8_t", 0xc4860, 256, True)
         bytes_table("ign_menu_bind_allowed", "uint8_t", 0xbef1c, 256)
         bytes_table("ign_menu_ascii", "uint8_t", 0xc4960, 0x54)
-        bytes_table("ign_menu_default_records", "uint8_t", 0xbf628, 7 * 0x78)
 
         def str_table(name, addr, n, dims=""):
             w("const char *const %s%s = {" % (name, dims or "[%d]" % n))

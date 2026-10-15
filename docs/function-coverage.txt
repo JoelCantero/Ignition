@@ -1,10 +1,10 @@
-functions: 1112 (unknown=412, identified=71, understood=0, port-pending=2, partial=14, ported=115, verified=5, native=5, library=488)
+functions: 1112 (unknown=391, identified=81, understood=1, port-pending=2, partial=19, ported=118, verified=7, native=5, library=488)
 library (C runtime / DOS4G) unique instructions: 20323, to exclude from game review
 unique instructions: 128832
-game instructions marked ported/verified: 33086/108509 (30.5%)
-game instructions marked partial: 11785 (excluded from ported/verified)
-game functions linked to roadmap tasks: 202/624 (32.4%)
-all functions linked to roadmap tasks (including library): 202/1112
+game instructions marked ported/verified: 33392/108509 (30.8%)
+game instructions marked partial: 13767 (excluded from ported/verified)
+game functions linked to roadmap tasks: 222/624 (35.6%)
+all functions linked to roadmap tasks (including library): 222/1112
 code bytes covered: 474981/482383 (98.5%)
 address  status      instructions  function
 00010010  native      25            main
@@ -75,7 +75,7 @@ address  status      instructions  function
 0001ccd0  unknown     48            sub_0001ccd0
 0001cd6c  unknown     39            sub_0001cd6c
 0001cdfa  unknown     24            sub_0001cdfa
-0001ce30  identified  1079          load_tri
+0001ce30  partial     1079          load_tri
 0001dcc4  unknown     12            sub_0001dcc4
 0001dcfc  unknown     146           sub_0001dcfc
 0001decc  partial     94            ai_find_section
@@ -117,9 +117,9 @@ address  status      instructions  function
 00022238  unknown     94            sub_00022238
 0002236c  identified  87            level_prepare
 000224d0  identified  303           load_level
-0002293c  unknown     237           sub_0002293c
+0002293c  partial     237           race_config_load
 00022d08  ported      168           computer_cars
-00022f38  unknown     99            sub_00022f38
+00022f38  ported      99            set_track_names
 000230f4  identified  95            load_plc
 0002322c  identified  96            load_msh
 00023368  identified  1247          load_tex
@@ -142,8 +142,8 @@ address  status      instructions  function
 0002a97c  unknown     143           sub_0002a97c
 0002abdc  unknown     31            sub_0002abdc
 0002ac28  ported      167           iris_table_build
-0002adf8  unknown     442           sub_0002adf8
-0002b430  unknown     54            sub_0002b430
+0002adf8  partial     442           ghost_load
+0002b430  partial     54            shutdown_save
 0002b51c  unknown     130           sub_0002b51c
 0002b6b4  unknown     35            sub_0002b6b4
 0002b734  identified  79            frame_time
@@ -151,8 +151,8 @@ address  status      instructions  function
 0002b998  unknown     28            sub_0002b998
 0002b9e4  unknown     700           sub_0002b9e4
 0002c5b8  partial     424           human_input
-0002ccc8  unknown     170           sub_0002ccc8
-0002cf60  unknown     46            sub_0002cf60
+0002ccc8  partial     170           race_end_save
+0002cf60  ported      46            btz_save
 0002d008  partial     846           cars_update_all
 0002de30  identified  274           race_elimination
 0002e234  ported      260           car_vertical
@@ -247,7 +247,7 @@ address  status      instructions  function
 00051204  unknown     164           sub_00051204
 0005146c  unknown     24            sub_0005146c
 000514c0  unknown     20            sub_000514c0
-00051508  identified  75            palette_blend
+00051508  verified    75            palette_blend
 000515f8  unknown     86            sub_000515f8
 00051714  unknown     22            sub_00051714
 00051760  unknown     70            sub_00051760
@@ -256,8 +256,8 @@ address  status      instructions  function
 00051938  unknown     29            sub_00051938
 00051980  unknown     27            sub_00051980
 000519c8  unknown     40            sub_000519c8
-00051a38  unknown     52            sub_00051a38
-00051a9c  ported      43            palette_lerp
+00051a38  understood  52            palette_step
+00051a9c  verified    43            palette_lerp
 00051afc  identified  13            out_of_memory
 00051b20  ported      81            gui_start
 00051c94  ported      750           gui_tick
@@ -406,7 +406,7 @@ address  status      instructions  function
 00060e3d  partial     2214          raster_draw_list
 00060f40  identified  36            read_file_into
 00060f9c  identified  92            load_file
-00061078  unknown     37            sub_00061078
+00061078  identified  37            write_file
 000610c8  library     26            sub_000610c8
 00061100  unknown     30            sub_00061100
 0006114c  library     7             sub_0006114c
@@ -478,26 +478,26 @@ address  status      instructions  function
 00063ca8  library     7             sub_00063ca8
 00063cc0  library     7             sub_00063cc0
 00063cd8  library     8             sub_00063cd8
-00063cf3  unknown     34            sub_00063cf3
-00063d56  unknown     116           sub_00063d56
-00063f3e  unknown     52            sub_00063f3e
+00063cf3  identified  34            cd_busy
+00063d56  identified  116           cd_media_check
+00063f3e  ported      52            cd_set_volume
 00063ff3  unknown     31            sub_00063ff3
 00064054  unknown     31            sub_00064054
-000640b3  unknown     97            sub_000640b3
+000640b3  identified  97            cd_read_toc
 00064208  unknown     22            sub_00064208
-00064241  unknown     34            sub_00064241
+00064241  ported      34            cd_play_track
 000642a4  unknown     46            sub_000642a4
-00064332  unknown     31            sub_00064332
-00064391  unknown     23            sub_00064391
+00064332  identified  31            cd_play_audio
+00064391  identified  23            cd_stop_audio
 000643cb  unknown     23            sub_000643cb
 0006440f  library     18            sub_0006440f
-0006442f  unknown     46            sub_0006442f
-000644c5  unknown     30            sub_000644c5
+0006442f  identified  46            cd_init
+000644c5  identified  30            cd_free
 00064513  unknown     25            sub_00064513
-00064559  unknown     41            sub_00064559
-000645e1  unknown     39            sub_000645e1
-00064659  unknown     51            sub_00064659
-00064710  unknown     35            sub_00064710
+00064559  identified  41            cd_mscdex_check
+000645e1  identified  39            cd_request
+00064659  identified  51            cd_request_header
+00064710  identified  35            cd_msf_to_frames
 0006476e  library     2             sub_0006476e
 00064774  library     12            sub_00064774
 00064798  library     8             sub_00064798

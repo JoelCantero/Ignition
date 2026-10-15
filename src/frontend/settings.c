@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "menu_data.h"
+#include "../game/save.h"
 
 uint8_t g_cfg[IGN_CFG_SIZE];
 
@@ -17,7 +17,13 @@ void ign_cfg_set(int off, int32_t v) {
     for (int i = 0; i < 4; i++) p[i] = (uint8_t)((uint32_t)v >> (8 * i));
 }
 
-void ign_cfg_default_records(uint8_t out[7 * 0x78]) { memcpy(out, ign_menu_default_records, 7 * 0x78); }
+_Static_assert(IGN_CFG_SIZE == IGN_BTZ_SIZE && CFG_RECORDS == IGN_BTZ_RECORDS, "g_cfg is the IGN_DOS.BTZ image");
+
+void ign_cfg_default_records(void) {
+    IgnBtz d;
+    ign_btz_default(&d);
+    memcpy(g_cfg + CFG_RECORDS, d.raw + CFG_RECORDS, IGN_BTZ_TRACKS * IGN_RECORD_STRIDE);
+}
 
 void ign_cfg_defaults(void) {
     static const int32_t slots[8] = {0, 2, 3, 4, 5, 7, 8, 8};
@@ -74,20 +80,14 @@ void ign_cfg_defaults(void) {
 }
 
 int ign_cfg_load(const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return -1;
-    uint8_t buf[IGN_CFG_SIZE];
-    size_t n = fread(buf, 1, sizeof buf, f);
-    fclose(f);
-    /* The version int alone decides; a short read leaves the rest of the block as it was (read_file_into). */
-    if (n < 4 || buf[0] != IGN_CFG_VERSION || buf[1] || buf[2] || buf[3]) return -1;
-    memcpy(g_cfg, buf, n);
+    IgnBtz b;
+    if (ign_btz_load(path, &b) || ign_btz_i32(&b, IGN_BTZ_VERSION) != IGN_CFG_VERSION) return -1;
+    memcpy(g_cfg, b.raw, IGN_CFG_SIZE);
     return 0;
 }
 
 int ign_cfg_save(const char *path) {
-    FILE *f = fopen(path, "wb");
-    if (!f) return -1;
-    size_t n = fwrite(g_cfg, 1, IGN_CFG_SIZE, f);
-    return fclose(f) || n != IGN_CFG_SIZE ? -1 : 0;
+    IgnBtz b;
+    memcpy(b.raw, g_cfg, IGN_CFG_SIZE);
+    return ign_btz_save(path, &b);
 }

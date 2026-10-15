@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "music.h"
 
 #include <SDL3/SDL.h>
 #include <dirent.h>
@@ -170,6 +171,7 @@ static void SDLCALL mix(void *user, SDL_AudioStream *st, int additional, int tot
                 ch->pos += step;
             }
         }
+        ign_music_mix(buf, n, OUT_RATE);
         for (int i = 0; i < n; i++) buf[i] = buf[i] > 1.0f ? 1.0f : buf[i] < -1.0f ? -1.0f : buf[i];
         SDL_PutAudioStreamData(st, buf, n * (int)sizeof(float));
         left -= n;
@@ -234,6 +236,10 @@ int ign_audio_play(int group, int sub, int idx, int loops, int vol, int freq) {
     SDL_UnlockAudioStream(stream);
     return handle;
 }
+
+int ign_audio_lock(void) { return stream && SDL_LockAudioStream(stream); }
+
+void ign_audio_unlock(void) { SDL_UnlockAudioStream(stream); }
 
 void ign_audio_set(int handle, int vol, int freq) {
     int c = (handle & 0x7f) - 1;

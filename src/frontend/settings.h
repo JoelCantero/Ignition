@@ -63,12 +63,12 @@ extern uint8_t g_cfg[IGN_CFG_SIZE];
 
 int32_t ign_cfg_get(int off);
 void ign_cfg_set(int off, int32_t v);
-/* Default best times of 0xbf628 (7 x 0x78 bytes). */
-void ign_cfg_default_records(uint8_t out[7 * 0x78]);
-/* sub_0001a864 */
+/* Factory best times of 0xbf628 into g_cfg (from ign_btz_default, game/save.c). */
+void ign_cfg_default_records(void);
+/* sub_0001a864 alone: unlike ign_btz_default it keeps the records and the page cursors (RESTORE SETTINGS). */
 void ign_cfg_defaults(void);
-/* Reads `path` over g_cfg when its first int is 30. Returns 0 if it was loaded. */
+/* Reads `path` (ign_btz_load) over g_cfg when its first int is 30. Returns 0 if it was loaded. */
 int ign_cfg_load(const char *path);
-int ign_cfg_save(const char *path);
+int ign_cfg_save(const char *path); /* ign_btz_save */
 
 #endif

@@ -13,7 +13,8 @@ import subprocess
 import sys
 
 from car_original import CAR, CAR_SIZE, INFO
-from physics_original import Original, BODY, BODY_SIZE, ESP, STACK, RETURN, ROOT, ORIGINAL_SHA256
+from physics_original import (Original, BODY, BODY_SIZE, ESP, STACK, RETURN, ROOT, ORIGINAL_SHA256,
+                              FPCW, EXTENDED_FPCW)
 
 FIELDS = {"D": ("throttle",), "A": ("gear", "sliding", "skid_timer"),
           "K": ("gear", "gear_ticks"), "H": ("gear",),
@@ -112,7 +113,7 @@ class InputOriginal(Original):
     def step(self, mode, values, tick=0):
         for register in ("EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "EBP"):
             self.uc.reg_write(getattr(self.reg, "UC_X86_REG_" + register), 0)
-        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, 0x037F)
+        self.uc.reg_write(self.reg.UC_X86_REG_FPCW, self.fpcw)
         self.uc.reg_write(self.reg.UC_X86_REG_FPTAG, 0xFFFF)
         self.uc.reg_write(self.reg.UC_X86_REG_ESP, ESP)
         self.put(ESP, "I", RETURN)
@@ -151,7 +152,7 @@ class InputOriginal(Original):
         if (self.uc.reg_read(self.reg.UC_X86_REG_EIP) != end or
                 self.uc.reg_read(self.reg.UC_X86_REG_ESP) != stack or
                 self.uc.reg_read(self.reg.UC_X86_REG_FPTAG) != 0xFFFF or
-                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != 0x037F):
+                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != self.fpcw):
             raise ValueError(f"{mode} execution boundary/x87 contract failed")
         if mode == "D":
             return [struct.unpack("<i", struct.pack("<I", self.uc.reg_read(self.reg.UC_X86_REG_EAX)))[0]]
@@ -172,7 +173,7 @@ class InputOriginal(Original):
         end = self.uc.reg_read(self.reg.UC_X86_REG_EIP)
         if (end not in self.boundaries or self.uc.reg_read(self.reg.UC_X86_REG_ESP) != ESP or
                 self.uc.reg_read(self.reg.UC_X86_REG_FPTAG) != 0xFFFF or
-                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != 0x037F):
+                self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != self.fpcw):
             raise ValueError(f"Turbo {self.active} fragment boundary/x87 contract failed at 0x{end:x}")
         key = f"0x{entry:x}->0x{end:x}"
         self.fragment_executions[key] = self.fragment_executions.get(key, 0) + 1
@@ -278,14 +279,27 @@ def verify(executable, runner):
     rows = result.stdout.splitlines()
     if len(rows) != sum(ticks for _, ticks, _ in cases):
         raise ValueError("Input oracle output row count mismatch")
-    failures, cursor = [], 0
+    failures, cursor, starts = [], 0, []
     for index, (mode, ticks, values) in enumerate(cases):
+        starts.append(cursor)
         original.start(mode, values)
         for tick in range(ticks):
             expected = original.step(mode, values, tick)
             failures.extend(dict(case=index, mode=mode, tick=tick, **diff)
                             for diff in compare(mode, rows[cursor], expected))
             cursor += 1
+    # Negative control: with 64-bit precision the original truncates the unrounded v*3.6 product, so the
+    # gearbox index sweep must expose gear differences the 53-bit run does not have.
+    # A fresh emulator: cached translations from later modes would run past earlier stop addresses.
+    control_original, control = InputOriginal(executable), 0
+    control_original.fpcw = EXTENDED_FPCW
+    for (mode, ticks, values), start in zip(cases, starts):
+        if mode == "K" and values["pattern"] == 3:
+            control_original.start(mode, values)
+            for tick in range(ticks):
+                control += bool(compare(mode, rows[start + tick], control_original.step(mode, values, tick)))
+    if not control:
+        raise ValueError("Extended-precision control word did not change any gearbox decision")
     required = {"D": {0x4D66F, 0x4D69F, 0x4D6A3, 0x4D6A7},
                 "A": {0x4D703, 0x4D70F, 0x4D79A, 0x4D821, 0x4D8BD,
                       0x4E238, 0x4E247, 0x4E265, 0x4E2AD},
@@ -313,6 +327,7 @@ def verify(executable, runner):
                                          Path(__file__).resolve())},
                 observed_at=datetime.now(timezone.utc).isoformat(), host=platform.platform(),
                 python=platform.python_version(), unicorn=unicorn.__version__, tolerance=0,
+                x87_control_word=hex(FPCW), extended_control_word_differing_steps=control,
                 required_addresses_executed={k: [hex(a) for a in sorted(v)] for k, v in required.items()},
                 turbo_fragment_executions=original.fragment_executions,
                 turbo_event_boundaries={"0x4d949": "start effect call (event 1)",

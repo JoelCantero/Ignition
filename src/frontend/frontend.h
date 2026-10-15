@@ -33,6 +33,9 @@ typedef struct {
     void (*cd_stop)(void);                        /* 0x64391 */
     void (*cd_volume)(int vol);                   /* 0x63f3e: 0..255 */
     int (*cd_busy)(void);                         /* 0x63cf3 */
+    /* User folder (trailing separator optional) for IGN_DOS.BTZ and GHOSTS, shared with the race (save.c). The
+     * original wrote both into the game folder; the port only reads the game folder's IGN_DOS.BTZ as a fallback. */
+    const char *save_dir;
 } IgnFrontendHost;
 
 /* Keyboard as seen by the menu (0x55e04 / 0x55ae4): DOS set-1 scancodes, extended keys + 0x80. */

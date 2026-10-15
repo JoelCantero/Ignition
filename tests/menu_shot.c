@@ -4,11 +4,12 @@
  *   menu_shot DATA_DIR OUT_PREFIX STEP...
  *
  * STEP is `wN` (run N frames), `kHEX` (press the scancode), `sNAME` (write OUT_PREFIX-NAME.ppm) or `r` (expect the
- * frontend to have returned IGN_FRONTEND_RACE). Starting a race or quitting writes the settings file: set
- * IGNITION_SAVE to a scratch file so the game's IGN_DOS.BTZ is left alone. */
+ * frontend to have returned IGN_FRONTEND_RACE). Starting a race or quitting writes IGN_DOS.BTZ into the user
+ * folder IGN_SAVE_DIR (created if needed; default ./menu-shot-save/). The game folder is only read. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "frontend/frontend.h"
 
@@ -33,7 +34,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: %s DATA_DIR OUT_PREFIX STEP...\n", argv[0]);
         return 2;
     }
-    IgnFrontendHost host = {.timer_ms = timer, .set_palette = set_palette, .present = present};
+    const char *save = getenv("IGN_SAVE_DIR");
+    if (!save || !*save) save = "menu-shot-save/";
+    mkdir(save, 0777);
+    IgnFrontendHost host = {.timer_ms = timer, .set_palette = set_palette, .present = present, .save_dir = save};
     if (ign_frontend_init(argv[1], &host)) {
         fprintf(stderr, "cannot initialise the frontend from %s\n", argv[1]);
         return 1;

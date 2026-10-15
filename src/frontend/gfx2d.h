@@ -2,8 +2,8 @@
 #define IGN_GFX2D_H
 
 /* 2D layer of the Lisa 2 engine as used by the frontend: draw target (0x61f8c), colour table [0x257e48], sprites
- * (geputget.c 0x771e0 / 0x62184 / 0x791c9), LFT fonts (0x61220, 0x616db, 0x61959), the LUT rectangle blend 0x51818,
- * the palette lerp 0x51a9c and the MenuBkg.dat highlight boxes (0x541d4..0x54864). */
+ * (geputget.c 0x771e0 / 0x62184 / 0x791c9), LFT fonts (0x61220, 0x616db, 0x61959), the LUT rectangle blend 0x51818
+ * and the MenuBkg.dat highlight boxes (0x541d4..0x54864). The palette lerp 0x51a9c is game/palette.c. */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -53,8 +53,6 @@ void ign_font_draw(const IgnFont *f, const char *s, int x, int y);
  * [y0, y1). Rows and columns outside either buffer are skipped (the original wrote past them). */
 void ign_blend_rect(const uint8_t *src, int x0, int y0, int x1, int y1, uint8_t *dst, int dx, int dy,
                     const uint8_t *lut, int sp, int dp, int buf_w, int buf_h);
-/* sub_00051a9c: out = a + trunc((b - a) * t / 256) for t < 256, b otherwise; 768 bytes. */
-void ign_palette_lerp(const uint8_t *a, const uint8_t *b, uint8_t *out, int t);
 
 /* MenuBkg.dat boxes. */
 int ign_menubox_init(const char *path);             /* sub_000541d4 */

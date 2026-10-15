@@ -19,5 +19,8 @@ void ign_audio_free(int group, int sub, int idx); /* sub_00063298 */
 int ign_audio_play(int group, int sub, int idx, int loops, int vol, int freq);
 /* sub_000626fc + the +0xc (volume) / +0x10 (rate, 0 holds the sample) fields; negative values are left as they are. */
 void ign_audio_set(int handle, int vol, int freq);
+/* Holds the mixer (for the music channel of music.c); 0 when no device is open, and then nothing to unlock. */
+int ign_audio_lock(void);
+void ign_audio_unlock(void);
 
 #endif

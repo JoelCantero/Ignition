@@ -19,8 +19,8 @@
 000230f4  load_plc             LEVELS\..PLC + CARS\CARS.PLC  roadmap=phase2.world
 0002322c  load_msh             LEVELS\..MSH + CARS\CARS.MSH  roadmap=phase2.world
 00023368  load_tex             LEVELS\..TEX + CARS.TEX  roadmap=phase2.world
-0001ce30  load_tri             reads TRI (500 B/object), computes edge angles  roadmap=phase1.ai-route
-0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car  status=partial roadmap=phase1.ai-route
+0001ce30  load_tri             direct PLC sections, two canonical slots, float32 angles and integer insets; bounded geometry oracle tests/ai_geometry_original.py, full loader excluded  status=partial roadmap=phase1.ai-route
+0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car; stored TRI heading and original travel blend, full controller excluded  status=partial roadmap=phase1.ai-route
 00026458  cars_init            allocs cars/bodies, torque splines, start grid (slots 0xc33d0); bounded turbo initialization 0x27451..0x27497 verified, full init excluded  roadmap=phase1.car
 00048a14  car_place_objects    per frame: body/wheels/shadow/name engine objects, front wheel steer  roadmap=phase3.render
 00040ec8  cars_body_sway       body tilt car+0x584/+0x58c = ground tilt + lean, smoothed 0.25  roadmap=phase1.car
@@ -129,10 +129,33 @@
 00026154  weather_init         [0x1fee8c] 1 rain / 2 snow / 3 wind by track  status=ported roadmap=phase2.effects
 000400f4  weather_zone         weather flag by player section  status=ported roadmap=phase2.effects
 000403c8  weather_update       weather tiles, density, lightning  status=ported roadmap=phase2.effects
-00051508  palette_blend        palette toward (r,g,b) by fraction
+00051508  palette_blend        eax=src 0x300 B, edx/ebx/ecx=r,g,b, stack: double frac, int32 keep[256]|0; copy to static 0x207afe (returned), c += chop(frac*(t-c)) at CW 0x127f, low byte; keep[i]!=0 skips; callers pass keep=0; palette.c, original-byte replay 253 cases (tests/palette_original.py); fx.c flash not yet routed through it  status=verified roadmap=phase2.effects
+00051a9c  palette_lerp         eax=a, edx=b, ebx=out, ecx=t: t>=256 (signed) copies b, else a+trunc((b-a)*t/256) per byte, low byte; menu crossfade sub_00012bb8; palette.c, original-byte replay 85 cases (tests/palette_original.py)  status=verified roadmap=phase4.ui
+00051a38  palette_step         eax=cur, edx=target, ebx=out, ecx=step: |t-c|<=step -> t, else c+-low byte of step; no call sites or data pointers found (unreferenced)  status=understood
 00049a8c  sound_play           (group, sub, idx, loops, vol, Hz, x, z) distance attenuated  status=ported roadmap=phase4.audio
 0002a4ec  sound_load           banks GENERAL ROLL/SKID/COLL/BOOST/DIV, level, cars + ENGINE.INF  status=ported roadmap=phase4.audio
 00063310  sound_load_dir       load NN_*.WAV/PAT/XI of a directory  status=ported roadmap=phase4.audio
+0006442f  cd_init              MSCDEX present (0x64559) + 0x400 B DOS buffer (DPMI 0x100) -> [0x25ade8]  status=identified roadmap=phase4.audio
+000644c5  cd_free              DPMI 0x101 frees the DOS buffer  status=identified roadmap=phase4.audio
+00064559  cd_mscdex_check      int 0x2f AX=0x1500 via DPMI 0x300; [0xd7d90] drives, [0x25adec] first drive  status=identified roadmap=phase4.audio
+000645e1  cd_request           int 0x2f AX=0x1510 (send device request [0x25ade8]) via DPMI 0x300  status=identified roadmap=phase4.audio
+00064659  cd_request_header    al=command, edx=IOCTL length: 0x0d-byte header, transfer buffer at +0x20  status=identified roadmap=phase4.audio
+00064332  cd_play_audio        command 0x84, eax=start, edx=frames  status=identified roadmap=phase4.audio
+00064391  cd_stop_audio        command 0x85; menu, options and shutdown  status=identified roadmap=phase4.audio
+00064241  cd_play_track        eax=track 1..[0x25a934], start [0x25a938+4n], length [0x25ab90+4n] (music.c ign_music_play)  status=ported roadmap=phase4.audio
+000640b3  cd_read_toc          IOCTL 0x0a disc info (first +0x21, last +0x22, lead-out +0x23), 0x0b per track (start +0x22); [0x25a934] = last-first+1, length = next start - start; MSF -> frames 0x64710  status=identified roadmap=phase4.audio
+00064710  cd_msf_to_frames     m*4500 + s*75 + f - 150  status=identified roadmap=phase4.audio
+00063f3e  cd_set_volume        eax 0..255 on the 4 channels (IOCTL output 3); race [0x1feef4]*2.55, menu [0xe9cf7]*25.5  status=ported roadmap=phase4.audio
+00063cf3  cd_busy              IOCTL 0x0c audio status + busy bit 9 of the request status; 0 = idle (race loop 0x21320 replays the track)  status=identified roadmap=phase4.audio
+00063d56  cd_media_check       IOCTL 4 channel 0 volume -> [0x25adf0]; 6 device status bit 0 (door open) -> [0x25adf4] = 0 and return, else 1; 9 media changed -> [0x25adf8]; 0x0c busy [0x25ae08], resume start/end MSF [0x25ae00]/[0x25adfc]  status=identified roadmap=phase4.audio
+000c3fd8  t_level_cd_track     7 x int by track id [0x1fef10]: {2,3,4,5,6,6,7}  status=ported roadmap=phase4.audio
+001feed8  g_cd_track           current CD track; set by 0x2293c, keys 0xcb/0xcd (0x2c1cb) and joystick (0x4d228)  status=ported roadmap=phase4.audio
+001ff24f  g_cfg_music_track    0 = level's track, -1 = random 1 + rand*[0x25a934], n = fixed; pause menu line (0x43cc8), keys 0xcb/0xcd (--music-track, F5/F6)  status=ported roadmap=phase4.audio
+001ff253  g_cfg_music_volume   0..10; x10 -> [0x1feef4]; 0 disables the replay in the race loop (--music-volume)  status=ported roadmap=phase4.audio
+000e9cf3  g_menu_music_track   menu copy of the setting; 0 plays track 7 (0x13356)  status=identified roadmap=phase4.audio
+001fed54  g_podium_music       track 8 already played on the results (render_main 0x464e2), 0 at race start 0x2aaa1  status=ported roadmap=phase4.audio
+0025adf4  g_cd_door_closed     device status bit 0 clear (0x63d56); the CD calls need it == 1  status=identified roadmap=phase4.audio
+0025a934  g_cd_track_count     tracks on the disc, last - first + 1 (TOC 0x640ff); 8 on the Ignition CD  status=identified roadmap=phase4.audio
 00050824  engine_sound         ENGINE.INF rate/volume by car+0x288  status=ported roadmap=phase4.audio
 00050464  roll_sound           rolling loops by rear wheel surface  status=ported roadmap=phase4.audio
 000360f0  ambient_sound        PLC 0x190+n emitters volume by distance  status=ported roadmap=phase2.effects
@@ -213,7 +236,6 @@
 0001a864  settings_defaults    g_cfg defaults  status=ported roadmap=phase4.ui
 0002ac28  iris_table_build     405x800 shade ramp [0x1fef4c]  status=ported roadmap=phase4.ui
 00051818  blit_lut_rect        dst = lut[src<<8|dst] over a rectangle  status=ported roadmap=phase4.ui
-00051a9c  palette_lerp         out = a + trunc((b-a)*t/256)  status=ported roadmap=phase4.ui
 00051b20  gui_start            Baltazar menu framework (src/frontend/gui.c)  status=ported roadmap=phase4.ui
 00051c94  gui_tick             25 Hz key scan, key callback, text entry, key capture, value/cursor actions  status=ported roadmap=phase4.ui
 000527c8  gui_draw_items       status=ported roadmap=phase4.ui
@@ -258,3 +280,21 @@
 000744c8  raster_tex_shade_tri type 18  status=ported roadmap=phase4.ui
 00074d04  raster_shade_tri     type 19  status=ported roadmap=phase4.ui
 000791c9  sprite_blit          status=ported roadmap=phase4.ui
+# --- Persistence: IGN_DOS.BTZ, records and time-trial ghosts (src/game/save.c, ghost.c, tools/btz.py) ---
+0002293c  race_config_load     read_file_into([0xc0c64]='ign_dos.btz') -> 0x1ff158 (0x597 B), copies settings to globals and participants  status=partial roadmap=phase4.ui
+00022f38  set_track_names      [0x1fef10] -> g_level_dir, g_level_name, ghost basename 0x1ff141  status=ported roadmap=phase6.ghost
+0002adf8  ghost_load           mode 2 && [0x1fee4c]: GHOSTS\%s.GST; missing -> [0x1fee4c]=0, [0x1fee04]=3000000; other track -> [0x1fee00]=1  status=partial roadmap=phase6.ghost
+0002b430  shutdown_save        frees resources, writes 0x597 B of 0x1ff158 to ign_dos.btz  status=partial roadmap=phase4.ui
+0002ccc8  race_end_save        mode 2, !overflow, [0x1fee04]*0.01 > car+0x3a4 -> pad and write GST; mode 0 championship points/grid; calls 0x2cf60  status=partial roadmap=phase6.ghost
+0002cf60  btz_save             mode != 0: shuffle grid 0x1ff28b ncars times; +0x107=[0x1fef08], +0x10b=[0x1fefcc]; write ign_dos.btz  status=ported roadmap=phase4.ui
+00061078  write_file           (eax=name, edx=buf, ebx=size) fopen 'wb' + fwrite; 1 ok, 0x7d0/0x7e4 errors
+001ff158  g_btz                IGN_DOS.BTZ image, 0x597 B packed; layout in docs/formats.md (BTZ)
+001ff317  g_track_records      7 x 0x78: race names[5][4], race times f64[5] (+0x14), lap names (+0x3c), lap times f64[5] (+0x50)
+001ff141  g_ghost_basename     MOOSEJAW, GOLDRUSH, ... (sub_00022f38)
+001ff6eb  g_language           BTZ+0x593: 0 EN, 1 DE, 2 IT, 3 ES, 4 SV, 5 FR
+001feefc  g_game_mode          BTZ+0x8: 0 championship, 1 ¿?, 2 time trial, 3 elimination
+001fee04  g_ghost_record_cs    time to beat in centiseconds (ghost header, 3000000 without ghost)
+001fee00  g_ghost_overflow     recording over 300 s or ghost of another track: no GST written
+001fee4c  g_ghost_on           BTZ+0x10, kept only in time trial
+000bf628  t_factory_records    7 x 0x78 default record blocks (OSK 145.00 ... K L 84.00), copied by menu_load_gfx 0x126dc
+000e9bfc  g_menu_btz           menu copy of IGN_DOS.BTZ (read only if +0x000 == 30)

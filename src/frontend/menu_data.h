@@ -59,7 +59,6 @@ extern const int8_t ign_menu_keymap_pristine[256]; /* 0xbed1c, its original cont
 extern const int8_t ign_menu_keymap_default[256]; /* 0xc4860 */
 extern const uint8_t ign_menu_bind_allowed[256];  /* 0xbef1c */
 extern const uint8_t ign_menu_ascii[0x54];        /* 0xc4960, 0xff = none */
-extern const uint8_t ign_menu_default_records[7 * 0x78]; /* 0xbf628 */
 
 extern const char *const ign_menu_text[6][50];    /* 0xbf088 */
 extern const char *const ign_menu_key_names[256]; /* 0xc49b4 */

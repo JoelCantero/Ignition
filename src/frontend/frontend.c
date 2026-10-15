@@ -7,6 +7,8 @@
 #include <string.h>
 
 #include "../game/assets.h"
+#include "../game/palette.h"
+#include "../game/save.h"
 #include "../render/raster.h"
 #include "cdp.h"
 #include "gfx2d.h"
@@ -52,8 +54,8 @@ static struct {
     int abort, exit, result;                   /* 0xea42c, 0xea428, 0xea778 */
     int lang;                                  /* 0xea764 */
     uint8_t *backbuf, *bgbuf, *textbuf;        /* 0xea400, 0xea404, 0xea408 */
-    uint8_t menu_pal[768];                     /* 0xea200 / 0xea1fc */
-    uint8_t pal_black[768], pal_white[768], pal_work[768]; /* 0xea204, 0xea208, 0xea20c */
+    IgnPalette menu_pal;                       /* 0xea200 / 0xea1fc */
+    IgnPalette pal_black, pal_white, pal_work; /* 0xea204, 0xea208, 0xea20c */
     uint8_t *menu_tab;                         /* 0xea218: MENU.TAB */
     uint8_t *pic_bilar, *pic_trk_spr, *pic_ign_logo, *pic_car_sel, *pic_flaggor; /* 0xea750.. */
     IgnSprite spr_logo, spr_sys_a, spr_sys_b, spr_cells[12], spr_car_sel; /* 0xea2b8.., 0xea2dc */
@@ -131,10 +133,25 @@ static int read_file_into(const char *path, void *buf, size_t size, long offset)
     return rc;
 }
 
-/* IGN_DOS.BTZ lives in the game directory, as in the original; IGNITION_SAVE overrides the file. */
-static const char *btz_path(void) {
-    const char *env = getenv("IGNITION_SAVE");
-    return env && *env ? env : data_path("ign_dos.btz");
+/* <save_dir><name>; the save folder replaces the game folder of the original for everything written. */
+static const char *save_path(const char *name) {
+    static char buf[2][1200];
+    static int n;
+    char *out = buf[n++ & 1];
+    const char *dir = g_host.save_dir ? g_host.save_dir : "";
+    size_t len = strlen(dir);
+    snprintf(out, sizeof buf[0], "%s%s%s", dir, len && dir[len - 1] != '/' && dir[len - 1] != '\\' ? "/" : "", name);
+    return out;
+}
+
+/* IGN_DOS.BTZ of the user folder, else the game folder's (read only), as ign_session_begin. */
+static const char *btz_read_path(void) {
+    FILE *f = fopen(save_path(IGN_BTZ_NAME), "rb");
+    if (f) {
+        fclose(f);
+        return save_path(IGN_BTZ_NAME);
+    }
+    return data_path("ign_dos.btz");
 }
 
 static long file_size(const char *path) {
@@ -305,7 +322,7 @@ static void act_video_mode(int arg, int ev) {
     (void)arg;
     if (ev != 6) return;
     g_key_latch[SC_ESC] = 1;
-    set_palette(M.menu_pal);
+    set_palette(M.menu_pal.rgb[0]);
 }
 
 /* sub_00017014: RESTORE SETTINGS? YES keeps progress, bonus and language. */
@@ -320,14 +337,19 @@ static void act_restore(int arg, int ev) {
     g_key_latch[SC_ESC] = 1;
 }
 
-/* sub_00017054: RESET GHOST CAR? YES deletes the seven best-lap ghosts. */
+/* sub_00017054: RESET GHOST CAR? YES deletes the seven best-lap ghosts (of the user folder, where the race writes
+ * them; the game folder is never written). */
 static void act_reset_ghosts(int arg, int ev) {
     static const char *const ghosts[7] = {"GHOSTS\\CAPETHOR.GST", "GHOSTS\\MOOSEJAW.GST", "GHOSTS\\GOLDRUSH.GST",
                                           "GHOSTS\\SNAKEISL.GST", "GHOSTS\\YODELPEA.GST", "GHOSTS\\TOKYOBUL.GST",
                                           "GHOSTS\\LOSTRUIN.GST"};
     (void)arg;
     if ((int8_t)ev != 6) return;
-    for (int i = 0; i < 7; i++) remove(data_path(ghosts[i]));
+    for (int i = 0; i < 7; i++) {
+        char name[32];
+        snprintf(name, sizeof name, "GHOSTS/%s", ghosts[i] + 7);
+        remove(save_path(name));
+    }
     g_key_latch[SC_ESC] = 1;
 }
 
@@ -847,7 +869,7 @@ static int menu_page_key(int sc, int ev) {
     }
     if (0.0 < M.intro_t && M.intro_t < 1278.0) { /* skip the intro */
         M.intro_t = 1278.0;
-        set_palette(M.pal_white);
+        set_palette(M.pal_white.rgb[0]);
         if (g_host.sound_stop_voice) {
             g_host.sound_stop_voice(M.intro_snd_a);
             g_host.sound_stop_voice(M.intro_snd_b);
@@ -963,15 +985,15 @@ static uint8_t *load_pic_pixels(const char *name, size_t size) {
 int ign_frontend_load(void) {
     memset(&M, 0, sizeof M);
     M.abort = 0;
-    read_file_into(data_path("baltazar\\data\\menu.col"), M.menu_pal, 0x300, 8);
+    read_file_into(data_path("baltazar\\data\\menu.col"), M.menu_pal.rgb, 0x300, 8);
     M.backbuf = xcalloc(MENU_BUF);
-    set_palette(M.menu_pal);
+    set_palette(M.menu_pal.rgb[0]);
     if (g_first_menu) {
         int32_t ver = 0;
         uint8_t lang[4] = {0};
-        read_file_into(btz_path(), &ver, 4, 0);
+        read_file_into(btz_read_path(), &ver, 4, 0);
         if (ver == IGN_CFG_VERSION) {
-            read_file_into(btz_path(), lang, 4, 0x593);
+            read_file_into(btz_read_path(), lang, 4, 0x593);
             M.lang = (int)(lang[0] | lang[1] << 8 | lang[2] << 16 | (uint32_t)lang[3] << 24);
         } else
             M.lang = 0;
@@ -1005,8 +1027,8 @@ int ign_frontend_load(void) {
     M.fadein_t = M.quit_t = M.race_t = 0.0;
     M.page7_autosel = 0;
     M.result = IGN_FRONTEND_STAY;
-    memset(M.pal_black, 0, 768);
-    memset(M.pal_white, 0xff, 768);
+    memset(&M.pal_black, 0, sizeof M.pal_black);
+    memset(&M.pal_white, 0xff, sizeof M.pal_white);
     M.bgbuf = xcalloc(MENU_BUF);
     M.textbuf = xcalloc(MENU_BUF);
     M.pic_bilar = load_pic_pixels("baltazar\\data\\bilar.pic", 0x1e786);
@@ -1019,8 +1041,8 @@ int ign_frontend_load(void) {
     for (int k = 0; k < 25; k++) M.pages[k] = ign_menu_lang_pages[0][k];
     ign_cfg_defaults();
     for (int k = 0; k < 25; k++) ign_cfg_set(CFG_PAGE_CURSOR + 4 * k, page(k)->sel);
-    ign_cfg_default_records(g_cfg + CFG_RECORDS);
-    ign_cfg_load(btz_path());
+    ign_cfg_default_records();
+    ign_cfg_load(btz_read_path());
     ign_cfg_set(CFG_SCREEN_SIZE, 3 - ign_cfg_get(CFG_SCREEN_INV));
     if (ign_cfg_get(CFG_DIFFICULTY) > ign_cfg_get(CFG_UNLOCK)) ign_cfg_set(CFG_DIFFICULTY, ign_cfg_get(CFG_UNLOCK));
     for (int l = 0; l < 6; l++) {
@@ -1114,7 +1136,7 @@ static void cd_restart_music(void) {
 
 static void save_settings(void) {
     menu_commit_settings();
-    ign_cfg_save(btz_path());
+    ign_cfg_save(save_path(IGN_BTZ_NAME));
 }
 
 int ign_frontend_frame(void) {
@@ -1146,7 +1168,7 @@ int ign_frontend_frame(void) {
             if (M.intro_t > 1312.56) ign_gui_set_input_lock(0);
             if (M.intro_t >= 1335.6) {
                 M.intro_t = 0.0;
-                set_palette(M.menu_pal);
+                set_palette(M.menu_pal.rgb[0]);
                 if (g_host.sound_stop_voice) {
                     g_host.sound_stop_voice(M.intro_snd_a);
                     g_host.sound_stop_voice(M.intro_snd_b);
@@ -1217,18 +1239,18 @@ int ign_frontend_frame(void) {
     if (M.intro_t != 0.0) {
         const uint8_t *video = ign_cdp_palette(&M.cdp);
         if (M.intro_t >= 28.8 && M.intro_t < 57.6 && video) {
-            ign_palette_lerp(M.pal_white, video, M.pal_work, (int)((M.intro_t - 28.8) * 270.0 * (1 / 28.8)));
-            set_palette(M.pal_work);
+            ign_palette_lerp(&M.pal_white, (const IgnPalette *)video, (int)((M.intro_t - 28.8) * 270.0 * (1 / 28.8)), &M.pal_work);
+            set_palette(M.pal_work.rgb[0]);
         } else if (M.intro_t >= 1249.2 && M.intro_t < 1278.0 && video) {
-            ign_palette_lerp(video, M.pal_white, M.pal_work, (int)((M.intro_t - 1249.2) * 270.0 * (1 / 28.8)));
-            set_palette(M.pal_work);
+            ign_palette_lerp((const IgnPalette *)video, &M.pal_white, (int)((M.intro_t - 1249.2) * 270.0 * (1 / 28.8)), &M.pal_work);
+            set_palette(M.pal_work.rgb[0]);
         }
         if (M.intro_t < 28.8) {
-            ign_palette_lerp(M.pal_black, M.pal_white, M.pal_work, (int)(M.intro_t * 270.0 * (1 / 28.8)));
-            set_palette(M.pal_work);
+            ign_palette_lerp(&M.pal_black, &M.pal_white, (int)(M.intro_t * 270.0 * (1 / 28.8)), &M.pal_work);
+            set_palette(M.pal_work.rgb[0]);
         } else if (M.intro_t >= 1306.8) {
-            ign_palette_lerp(M.pal_white, M.menu_pal, M.pal_work, (int)((M.intro_t - 1306.8) * 270.0 * (1 / 28.8)));
-            set_palette(M.pal_work);
+            ign_palette_lerp(&M.pal_white, &M.menu_pal, (int)((M.intro_t - 1306.8) * 270.0 * (1 / 28.8)), &M.pal_work);
+            set_palette(M.pal_work.rgb[0]);
         } else if (g_intro_snd_once) {
             g_intro_snd_once = 0;
             memset(M.textbuf, 0, SCREEN_BYTES);

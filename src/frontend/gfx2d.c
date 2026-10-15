@@ -182,14 +182,6 @@ void ign_blend_rect(const uint8_t *src, int x0, int y0, int x1, int y1, uint8_t 
     }
 }
 
-void ign_palette_lerp(const uint8_t *a, const uint8_t *b, uint8_t *out, int t) {
-    if (t >= 256) {
-        memcpy(out, b, 768);
-        return;
-    }
-    for (int i = 0; i < 768; i++) out[i] = (uint8_t)(a[i] + ((b[i] - a[i]) * t) / 256);
-}
-
 /* ---- MenuBkg.dat boxes (0x541d4..0x54864) ---------------------------------------------------------------------- */
 
 #define MENUBKG_SIZE 0x9358
