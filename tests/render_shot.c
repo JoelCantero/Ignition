@@ -1,12 +1,13 @@
 /* Track-only frame of the port renderer for comparisons with tests/render_original.py.
  * usage: render_shot DATA LEVEL WxH X Y Z YAW PITCH OUT.raw [PRIMS.txt]
  * Camera as ./ignition --cam; writes 8-bit indices and, if given, the sorted primitive list.
- * IGN_ROT=k rotates every k-th PLC object by angles derived from its index (see tests/render_original.py). */
+ * IGN_PERSP=1 sets the PERSP. POLY option, IGN_DIFFICULTY=3 the mirrored view; IGN_ROT=k rotates every k-th PLC object by angles derived from its index (see tests/render_original.py). */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "render/lisa.h"
+#include "game/car.h"
 #include "render/raster.h"
 
 static IgnFrame frame;
@@ -23,6 +24,8 @@ int main(int argc, char **argv) {
     int w = 0, h = 0;
     if (sscanf(argv[3], "%dx%d", &w, &h) != 2) return 2;
     ign_frame_init(&frame, w, h);
+    frame.perspective = getenv("IGN_PERSP") && atoi(getenv("IGN_PERSP"));
+    if (getenv("IGN_DIFFICULTY")) ign_set_difficulty(atoi(getenv("IGN_DIFFICULTY")));
     IgnCamera cam = {strtof(argv[4], NULL), strtof(argv[5], NULL), strtof(argv[6], NULL), strtof(argv[7], NULL),
                      strtof(argv[8], NULL)};
     const char *rot = getenv("IGN_ROT");

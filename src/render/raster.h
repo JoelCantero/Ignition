@@ -16,7 +16,7 @@
 typedef struct {
     int w, h;
     float fx, fy;    /* projection scale (race_setup_video 0x492fc: camera +0x58/+0x5c) */
-    int perspective; /* PERSP. POLY option; off by default, the original maps textures affinely */
+    int perspective; /* PERSP. POLY option ([0x1fee84] -> config +0x58): near road faces perspective-correct */
     uint8_t color[IGN_MAX_W * IGN_MAX_H];
     float inv_z[IGN_MAX_W * IGN_MAX_H];
 } IgnFrame;

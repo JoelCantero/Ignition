@@ -168,11 +168,13 @@ class RenderOriginal:
             obj = self.get(self.handles[i], "I")[0]
             self.put(obj + 0x18, "hhh", (i * 37) % 3600 - 100, (i * 53) % 3600, (i * 71) % 3700)
 
-    def render(self, x, y, z, pitch, yaw, roll=0.0, zone=0, reach=0, fx=200, fy=164, near=25, clear=0):
+    def render(self, x, y, z, pitch, yaw, roll=0.0, zone=0, reach=0, fx=200, fy=164, near=25, clear=0, persp=1,
+               zoom=1.0):
         """Engine coordinates (x/z + 25600, y up); angles in tenths of a degree, as config +0x18/+0x20/+0x28."""
         config = self.get(0x24C05C, "I")[0]
-        self.put(config, "ddddddd", x, y, z, pitch, yaw, roll, 1.0)
+        self.put(config, "ddddddd", x, y, z, pitch, yaw, roll, zoom)
         self.put(config + 0x38, "i", 0)
+        self.put(config + 0x58, "i", persp)  # PERSP. POLY ([0x1fee84], sub_0002489c 0x248c6)
         self.put(config + 0x80, "iii", fx, fy, near)
         self.put(config + 0x9C, "iii", self.width // 2, self.height // 2, reach)
         self.put(0xC4850, "iiii", 0, 0, self.width - 1, self.height - 1)
@@ -242,13 +244,19 @@ class RenderOriginal:
                 pass
             elif rec[0] == 0xD:
                 words[7] = self.luts[2]
+            elif rec[0] == 7:
+                pass
             elif rec[0] in (0x14, 0x15):
                 words[1] = page
                 words[11:17] = rec[24:30]
                 words[17] = lut
             else:
                 raise ValueError(f"primitive 0x{rec[0]:x} not supported")
-            pointers.append(self.blob(struct.pack("<24I", *[w & 0xFFFFFFFF for w in words])))
+            address = self.blob(struct.pack("<24I", *[w & 0xFFFFFFFF for w in words]))
+            if rec[0] == 7:  # sprite: pointers into itself, texture and table in the parameter block
+                self.put(address + 4, "II", address + 0x14, address + 0x34)
+                self.put(address + 0x2C, "II", page, lut)
+            pointers.append(address)
         listing = self.blob(struct.pack(f"<{len(pointers) + 1}I", *pointers, 0))
         size = self.width * self.height
         self.uc.mem_write(FRAMEBUFFER, bytes(size))

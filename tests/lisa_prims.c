@@ -48,6 +48,7 @@ int main(int argc, char **argv) {
         case 0x12: ign_prim_tex(&r, rec + 1, rec + 24, page, rec[0] == 0x12 ? lut : NULL); break;
         case 1: ign_prim_point(&r, rec[1], rec[2], tab, rec[4], (rec[5] >> 8) & 0xff); break;
         case 2: ign_prim_point(&r, rec[1], rec[2], shd, rec[3], -1); break;
+        case 7: ign_prim_sprite(&r, rec[3], rec[4], rec + 5, rec + 13, page, lut); break;
         case 0xd: ign_prim_line(&r, (const int32_t[4]){rec[1], rec[2], rec[4], rec[5]}, rec[8], rec[9], shd); break;
         case 0xf: ign_prim_flat(&r, (const int32_t[6]){rec[1], rec[2], rec[4], rec[5], rec[7], rec[8]},
                                 tab[(rec[10] & 0xff) << 8 | ((rec[11] >> 8) & 0xff)]); break;
