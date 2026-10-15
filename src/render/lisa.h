@@ -35,6 +35,13 @@ void ign_prim_point(IgnRaster *r, int32_t x, int32_t y, const uint8_t *lut, int 
 /* Primitive 0xf (sub_000729f3): flat triangle of palette index `colour` (the TAB entry), whole-pixel vertices. */
 void ign_prim_flat(IgnRaster *r, const int32_t xy[6], uint8_t colour);
 
+/* Primitive 7 (sub_000704a0): sprite quad; uv = {half u, half v, u0, v0, u1, v1} (8.8), s = 2x2 scale. */
+void ign_prim_sprite(IgnRaster *r, int32_t x, int32_t y, const int32_t uv[6], const int32_t s[4], const uint8_t *tex,
+                     const uint8_t *lut);
+
+/* Primitive 0xd (sub_00071cc7): line from (x0, y0) to (x1, y1) (8.8), 8.8 colours c0..c1 used as table rows. */
+void ign_prim_line(IgnRaster *r, const int32_t xy[4], int32_t c0, int32_t c1, const uint8_t *lut);
+
 /* ---- scene engine (lisa.c) ---- */
 
 #define LISA_BUCKETS 6000      /* 0x24c04c */
@@ -64,6 +71,8 @@ typedef struct {
     int gw, gh;
     const uint8_t *keyed; /* 0x24c004: [a * 256 + b] = a ? a : b (sub_00011494) */
     const uint8_t *shade; /* 0x24bfa8: the level SHD */
+    const uint8_t *tab;   /* [0xc484c]: the level TAB */
+    const uint8_t *pan;   /* 0x24bfec: the level PAN, blend table of type-8 sprites */
 } LisaScene;
 
 int lisa_scene_init(LisaScene *s, int width, int depth, int max_objects);
@@ -107,6 +116,7 @@ typedef struct {
     int32_t xy[6];
     int32_t light[3];
     int32_t uv[6];
+    int32_t scale[4];   /* sprites */
     const uint8_t *tex;
     const uint8_t *lut;
 } LisaPrim;

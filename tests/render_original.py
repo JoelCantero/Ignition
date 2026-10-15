@@ -240,6 +240,8 @@ class RenderOriginal:
                 words[4] = self.luts[2]
             elif rec[0] in (1, 0xF):
                 pass
+            elif rec[0] == 0xD:
+                words[7] = self.luts[2]
             elif rec[0] in (0x14, 0x15):
                 words[1] = page
                 words[11:17] = rec[24:30]

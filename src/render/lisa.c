@@ -494,12 +494,128 @@ static void face_shade(Ctx *c, const LisaObject *o, const LisaVert *vb, const in
     f->head[key] = f->nprim++;
 }
 
+/* sub_0005dea0 (type 7) / sub_0005e004 (type 8), faces of 9 words {type, v, u0, v0, u1, v1, page, sx, sy}: a
+ * sprite at a vertex with z (4 z) > 200, sorted at trunc(2.8 * z) >> 4. Type 7 scales by 4 / z and blends through
+ * the SHD; type 8 keeps a screen size of fy * (0.003952569, 0.004820206), snaps to whole pixels and blends
+ * through the PAN. */
+static void face_sprite(Ctx *c, const LisaObject *o, const LisaVert *vb, const int32_t *face, int pan) {
+    LisaFrame *f = c->f;
+    const LisaVert *a = &vb[face[1]];
+    if (a->z <= 200) return;
+    LisaPrim *p = new_prim(f);
+    if (!p) return;
+    p->type = 7;
+    p->xy[0] = pan ? a->x & ~0xff : a->x, p->xy[1] = pan ? a->y & ~0xff : a->y;
+    int32_t u0 = face[2], v0 = face[3], u1 = face[4], v1 = face[5];
+    p->uv[0] = (u0 + u1) / 2 - u0, p->uv[1] = (v0 + v1) / 2 - v0;
+    p->uv[2] = u0, p->uv[3] = v0, p->uv[4] = u1, p->uv[5] = v1;
+    p->tex = o->tex + (uint32_t)face[6];
+    if (pan) {
+        p->lut = c->scene->pan;
+        p->scale[0] = chop(c->v->fy * (double)0.003952569328248501f * face[7]);
+        p->scale[3] = chop(c->v->fy * 0.004820206304829847 * face[8]);
+    } else {
+        p->lut = c->scene->shade;
+        double k = 4.0 / a->z;
+        p->scale[0] = chop(k * face[7]);
+        p->scale[3] = chop(4.0 / a->z * face[8]);
+    }
+    p->scale[1] = p->scale[2] = 0;
+    int32_t key = chop(a->z * 2.8) >> 4;
+    if (o->klass >= 100) {
+        key -= 92;
+        if (key < 0) key = 0;
+    }
+    if (key >= LISA_BUCKETS) key = LISA_BUCKETS - 1;
+    f->next[f->nprim] = f->head[key];
+    f->head[key] = f->nprim++;
+}
+
+/* sub_0005ba5c (type 1, TAB) / sub_0005ee50 (type 2, SHD), faces {type, v, colour}: a point beyond z (4 z) 200,
+ * sorted at 3 z >> 4. */
+static void face_point(Ctx *c, const LisaObject *o, const LisaVert *vb, const int32_t *face, int shd) {
+    LisaFrame *f = c->f;
+    const LisaVert *a = &vb[face[1]];
+    if (a->z <= 200) return;
+    LisaPrim *p = new_prim(f);
+    if (!p) return;
+    p->type = shd ? 2 : 1;
+    p->xy[0] = a->x, p->xy[1] = a->y;
+    p->light[0] = face[2];
+    p->lut = shd ? c->scene->shade : c->scene->tab;
+    int32_t key = (a->z * 3) >> 4;
+    if (o->klass >= 100) {
+        key -= 92;
+        if (key < 0) key = 0;
+    }
+    if (key >= LISA_BUCKETS) key = LISA_BUCKETS - 1;
+    f->next[f->nprim] = f->head[key];
+    f->head[key] = f->nprim++;
+}
+
+/* sub_0005bc10 (type 15), faces {type, v0, v1, v2, colour}: a flat triangle of TAB[colour * 256], rejected like
+ * type 20; sorted at (z0 + z1 + z2) >> 4. */
+static void face_flat(Ctx *c, const LisaObject *o, const LisaVert *vb, const int32_t *face) {
+    const LisaView *v = c->v;
+    LisaFrame *f = c->f;
+    const LisaVert *a = &vb[face[1]], *b = &vb[face[2]], *d = &vb[face[3]];
+    int32_t hx = a->x > b->x ? a->x : b->x, lx = a->x < b->x ? a->x : b->x;
+    int32_t hy = a->y > b->y ? a->y : b->y, ly = a->y < b->y ? a->y : b->y;
+    if (hx <= d->x) hx = d->x;
+    if (lx >= d->x) lx = d->x;
+    if (hy <= d->y) hy = d->y;
+    if (ly >= d->y) ly = d->y;
+    if (hx < v->xmin8 || lx > v->xmax8 || hy < v->ymin8 || ly > v->ymax8) return;
+    int32_t cross = (int32_t)((uint32_t)mul(d->y - b->y, a->x - b->x) - (uint32_t)mul(a->y - b->y, d->x - b->x));
+    if (v->zoom <= 0) cross = ~cross;
+    int32_t zsum = a->z + b->z + d->z;
+    if (zsum <= 600 || cross <= 0 || !c->scene->tab) return;
+    LisaPrim *p = new_prim(f);
+    if (!p) return;
+    p->type = 0xf;
+    p->xy[0] = a->x, p->xy[1] = a->y, p->xy[2] = b->x, p->xy[3] = b->y, p->xy[4] = d->x, p->xy[5] = d->y;
+    p->light[0] = c->scene->tab[(face[4] & 0xff) << 8];
+    int32_t key = zsum >> 4;
+    if (o->klass >= 100) {
+        key -= 92;
+        if (key < 0) key = 0;
+    }
+    if (key >= LISA_BUCKETS) key = LISA_BUCKETS - 1;
+    f->next[f->nprim] = f->head[key];
+    f->head[key] = f->nprim++;
+}
+
+/* sub_0005e264 (type 13), faces of 6 words {type, v0, v1, c0, c1, table}: a line with 8.8 colours used as rows of
+ * the face's table (rain uses the SHD); kept when z0 + z1 > 400, sorted at (z0 + 2 z1) >> 4. The port puts the
+ * table in the scene (faces carry a 32-bit pointer in the original). */
+static void face_line(Ctx *c, const LisaObject *o, const LisaVert *vb, const int32_t *face) {
+    LisaFrame *f = c->f;
+    const LisaVert *a = &vb[face[1]], *b = &vb[face[2]];
+    if (a->z + b->z <= 400 || !c->scene->shade) return;
+    LisaPrim *p = new_prim(f);
+    if (!p) return;
+    p->type = 0xd;
+    p->xy[0] = a->x, p->xy[1] = a->y, p->xy[2] = b->x, p->xy[3] = b->y;
+    p->light[0] = face[3], p->light[1] = face[4];
+    p->lut = c->scene->shade;
+    int32_t key = (a->z + b->z + b->z) >> 4;
+    if (o->klass >= 100) {
+        key -= 92;
+        if (key < 0) key = 0;
+    }
+    if (key >= LISA_BUCKETS) key = LISA_BUCKETS - 1;
+    f->next[f->nprim] = f->head[key];
+    f->head[key] = f->nprim++;
+}
+
 /* Bytes taken by each face type in the mesh (handlers advance 0x24c028 by these). */
 static int face_words(int type) {
     switch (type) {
     case 1: case 2: return 3;
     case 12: return 4;
-    case 20: return 5;
+    case 13: return 6;
+    case 7: case 8: return 9;
+    case 15: case 20: return 5;
     default: return 11;
     }
 }
@@ -514,6 +630,12 @@ static void faces(Ctx *c) {
         for (int n = 0; n < o->mesh[1]; n++) {
             int type = face[0] & 0xff;
             switch (type) {
+            case 1: face_point(c, o, vb, face, 0); break;
+            case 2: face_point(c, o, vb, face, 1); break;
+            case 7: face_sprite(c, o, vb, face, 0); break;
+            case 8: face_sprite(c, o, vb, face, 1); break;
+            case 13: face_line(c, o, vb, face); break;
+            case 15: face_flat(c, o, vb, face); break;
             case 17: face_tex(c, o, vb, face, 0); break;
             case 20: face_shade(c, o, vb, face); break;
             case 21: face_tex(c, o, vb, face, 80); break;
@@ -551,6 +673,11 @@ void lisa_draw(const LisaFrame *f, IgnRaster *r) {
         case 0x11: ign_prim_tex(r, p->xy, p->uv, p->tex, NULL); break;
         case 0x12: ign_prim_tex(r, p->xy, p->uv, p->tex, p->lut); break;
         case 0x13: ign_prim_shade(r, p->xy, p->lut); break;
+        case 1: ign_prim_point(r, p->xy[0], p->xy[1], p->lut, p->light[0], 0); break;
+        case 2: ign_prim_point(r, p->xy[0], p->xy[1], p->lut, p->light[0], -1); break;
+        case 7: ign_prim_sprite(r, p->xy[0], p->xy[1], p->uv, p->scale, p->tex, p->lut); break;
+        case 0xd: ign_prim_line(r, p->xy, p->light[0], p->light[1], p->lut); break;
+        case 0xf: ign_prim_flat(r, p->xy, (uint8_t)p->light[0]); break;
         case 0x14: ign_prim_persp(r, p->xy, p->light, p->uv, p->tex, NULL); break;
         case 0x15: ign_prim_persp(r, p->xy, p->light, p->uv, p->tex, p->lut); break;
         default: break;

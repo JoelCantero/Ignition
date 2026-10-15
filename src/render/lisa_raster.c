@@ -905,3 +905,113 @@ void ign_prim_flat(IgnRaster *r, const int32_t xy[6], uint8_t colour) {
     flat_rows(r, colour, T[1], top_rows, &left, &right, lstep, rstep, 0);
     flat_rows(r, colour, M[1] + 1, bot_rows - 1, &lacc2, &racc2, lstep2, rstep2, 1);
 }
+
+/* ---- sprite, primitive 7 (sub_000704a0) ----
+ * A screen-aligned quad around (x, y): half extents (hu, hv) in texels through the 2x2 scale s (8.8 x 16.16,
+ * bits 16..47 of each product), corners top-left, top-right (u1), bottom-left (v1), bottom-right, drawn as two
+ * blended affine triangles (primitive 0x12). */
+void ign_prim_sprite(IgnRaster *r, int32_t x, int32_t y, const int32_t uv[6], const int32_t s[4], const uint8_t *tex,
+                     const uint8_t *lut) {
+    int32_t hu = uv[0], hv = uv[1], u0 = uv[2], v0 = uv[3], u1 = uv[4], v1 = uv[5];
+    int32_t c0 = mid32(-hu, s[0]) + mid32(-hv, s[2]);
+    int32_t c1 = mid32(-hu, s[1]) + mid32(-hv, s[3]);
+    int32_t du = u1 - u0, dv = v1 - v0;
+    int32_t ry = mid32(s[1], du), rx = mid32(s[0], du);
+    int32_t by = mid32(s[3], dv) + c1, bx = mid32(s[2], dv) + c0;
+    int32_t p[8] = {c0 + x, c1 + y, rx + c0 + x, ry + c1 + y, bx + x, by + y, bx + rx + x, by + ry + y};
+    const int32_t a[6] = {p[0], p[1], p[2], p[3], p[4], p[5]}, ta[6] = {u0, v0, u1, v0, u0, v1};
+    const int32_t b[6] = {p[2], p[3], p[4], p[5], p[6], p[7]}, tb[6] = {u1, v0, u0, v1, u1, v1};
+    ign_prim_tex(r, a, ta, tex, lut);
+    ign_prim_tex(r, b, tb, tex, lut);
+}
+
+/* ---- blended line, primitive 0xd (sub_00071cc7) ----
+ * Whole-pixel endpoints, drawn from the left end in run slices: per minor step a run of `run` pixels plus one
+ * when the 16-bit fraction (starting at 0x7fff) carries. The 8.8 colour runs from c0 to c1 and its high byte is
+ * the table row: dst = lut[row * 256 + dst]. Endpoints are clipped with the 1/2-scaled fractions of the original. */
+void ign_prim_line(IgnRaster *r, const int32_t xy[4], int32_t c0, int32_t c1, const uint8_t *lut) {
+    int32_t x0 = xy[0] >> 8, y0 = xy[1] >> 8, x1 = xy[2] >> 8, y1 = xy[3] >> 8;
+    if (x0 > x1) {
+        int32_t t = c0;
+        c0 = c1, c1 = t;
+    }
+    int32_t dc = c1 - c0, cs = c0;
+    if (x0 > x1) {
+        int32_t t = x0;
+        x0 = x1, x1 = t, t = y0, y0 = y1, y1 = t;
+    }
+    int32_t xmin = r->xmin, xmax = r->xmax1 - 1, ymin = r->ymin, ymax = r->ymax1 - 1, t32, e;
+#define LINE_T(n, d) (t32 = (int32_t)(frac32((uint32_t)(n), (uint32_t)(d)) >> 1))
+    if (x0 < xmin) {
+        if (x1 < xmin) return;
+        LINE_T(x1 - xmin + 1, x1 - x0 + 1);
+        e = hi32((y1 - y0) * 2, t32);
+        y0 += (y1 - y0) - e;
+        x0 = xmin;
+        e = hi32(dc * 2, t32);
+        cs = cs + dc - e, dc = e;
+    }
+    if (x1 > xmax) {
+        if (x0 > xmax) return;
+        LINE_T(xmax - x0 + 1, x1 - x0 + 1);
+        y1 = y0 + hi32((y1 - y0) * 2, t32);
+        x1 = xmax;
+        dc = hi32(dc * 2, t32);
+    }
+    if (y0 <= y1) {
+        if (y1 > ymax) {
+            if (y0 > ymax) return;
+            LINE_T(ymax - y0 + 1, y1 - y0 + 1);
+            x1 = x0 + hi32((x1 - x0) * 2, t32);
+            y1 = ymax;
+            dc = hi32(dc * 2, t32);
+        }
+        if (y0 < ymin) {
+            if (y1 < ymin) return;
+            LINE_T(y1 - ymin + 1, y1 - y0 + 1);
+            x0 = x1 - hi32((x1 - x0) * 2, t32);
+            y0 = ymin;
+            e = hi32(dc * 2, t32);
+            cs = cs + dc - e, dc = e;
+        }
+    } else {
+        if (y0 > ymax) {
+            if (y1 > ymax) return;
+            LINE_T(ymax - y1 + 1, y0 - y1 + 1);
+            x0 = x1 - hi32((x1 - x0) * 2, t32);
+            y0 = ymax;
+            e = hi32(dc * 2, t32);
+            cs = cs + dc - e, dc = e;
+        }
+        if (y1 < ymin) {
+            if (y0 < ymin) return;
+            LINE_T(y0 - ymin + 1, y0 - y1 + 1);
+            x1 = x0 + hi32((x1 - x0) * 2, t32);
+            y1 = ymin;
+            dc = hi32(dc * 2, t32);
+        }
+    }
+#undef LINE_T
+    int32_t cols = x1 - x0 + 1, rows = y1 - y0, down = rows >= 0;
+    rows = down ? rows + 1 : -rows + 1;
+    int32_t ystep = down ? r->stride : -r->stride;
+    int ymajor = cols <= rows;
+    int32_t major = ymajor ? rows : cols, minor = ymajor ? cols : rows;
+    if (minor <= 0) return;
+    uint16_t step = (uint16_t)(dc / major);
+    uint16_t run = (uint16_t)(((uint32_t)major & 0xffff) / (uint16_t)minor);
+    uint16_t rem = (uint16_t)(((uint32_t)major & 0xffff) % (uint16_t)minor);
+    uint16_t frac = (uint16_t)(((uint32_t)rem << 16) / (uint16_t)minor);
+    uint16_t acc = 0x7fff, col = (uint16_t)cs;
+    uint8_t *p = r->fb + (size_t)y0 * r->stride + x0;
+    for (uint16_t n = (uint16_t)minor; n; n--) {
+        int extra = (uint32_t)acc + frac > 0xffff;
+        acc = (uint16_t)(acc + frac);
+        for (int k = 0; k < run + extra; k++) {
+            *p = lut[(col & 0xff00) | *p];
+            col = (uint16_t)(col + step);
+            p += ymajor ? ystep : 1;
+        }
+        p += ymajor ? 1 : ystep;
+    }
+}
