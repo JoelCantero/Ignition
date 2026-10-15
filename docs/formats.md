@@ -1091,5 +1091,103 @@ hay menú principal (pista 7).
   pista por color más cercano. Aún no reproduce las coordenadas/condiciones originales, la aguja ni el llenado dinámico
   del turbo, los avisos de `H_PAN2.PIC` ni los estados multilingües.
 - **CDP**: vídeo, `"CDP\0"`, `u16 100`, `u16 frames`, …, `u16 320`, `u16 200`, paleta.
-- **PSQ**, **PFM** (`"li01"`), **BTZ** (config `i32`), **AIS** (texto de IA).
+- **PSQ**, **PFM** (`"li01"`), **BTZ** (véase la sección `IGN_DOS.BTZ` más abajo), **AIS** (texto de IA).
 - Audio: WAV PCM 8 bits mono 22050 Hz, PAT (GUS), XI (FastTracker II); música en pistas CD (`MUSIC/Track02-08.ogg`).
+
+## Configuración y récords: `IGN_DOS.BTZ` (portado en `save.c`, `tools/btz.py`)
+
+Volcado crudo de los **0x597 = 1 431 bytes** de `0x1ff158` (`g_btz`), empaquetado: `i32` y `double` sin alinear.
+El menú trabaja con su propia copia en `0xe9bfc` (`g_menu_btz`) y la escribe al lanzar la carrera (`0x130eb`,
+`0x1314e`); la carrera la lee entera en `race_config_load` `0x2293c` (`read_file_into`, nombre en `[0xc0c64]` =
+`ign_dos.btz`; sin fichero sale con "Error while trying to read"). `btz_save` `0x2cf60` (al final de cada carrera,
+desde `race_end_save` `0x2ccc8`) y `shutdown_save` `0x2b430` la escriben entera con `write_file` `0x61078`
+(`fopen "wb"` + un `fwrite`).
+
+**Arranque del menú** (`menu_load_gfx` `0x126be..0x12762`): `btz_menu_defaults` `0x1a864` rellena la copia (lo que no
+toca queda a cero: BSS), copia los 25 valores iniciales de los controles de opciones y la tabla de récords de fábrica
+`0xbf628`; después lee los 4 primeros bytes de `ign_dos.btz` y solo si valen **30** (versión) carga el fichero entero.
+Luego fija `+0x103 = 3 − +0x107` y limita `+0x00c ≤ +0x587`. Al principio (`0x115f8`) lee solo el idioma
+(`+0x593`) si la versión es 30.
+
+| Offset | Tipo | Destino / significado | Defecto `0x1a864` |
+|---|---|---|---|
+| `+0x000` | `i32` | versión: 30 | 30 |
+| `+0x004` | `i32` | `[0x1fef14]` jugadores humanos − 1 (`[0x1feea0]` = valor + 1) | 0 |
+| `+0x008` | `i32` | modo `[0x1feefc]` (salto `0x2292c`): 0 campeonato, 1 ¿carrera suelta?, 2 contrarreloj, 3 eliminación | 0 |
+| `+0x00c` | `i32` | clase del campeonato `[0x1fedd8]` 0..3 (5, 6, 7 y 7 pistas): fila de `0xc45b4`; ≤ `+0x587` | 0 |
+| `+0x010` | `i32` | `[0x1fee4c]` fantasma; a 0 fuera de contrarreloj o si más de un participante tiene `+0x04 ≠ 1` | 1 |
+| `+0x014`, `+0x018` | `i32` | `[0x1fed64]` (1 en campeonato), ¿? | 1, 1 |
+| `+0x01c` | `i32[9]` | participante `+0x00` (modelo de coche) | 0 2 3 4 5 7 8 8 0 |
+| `+0x040`, `+0x044` | `i32` | coche elegido en el menú por los jugadores 1 y 2 (limitado a los disponibles, `0x167df`) | 0 |
+| `+0x048` | `i32[9]` | participante `+0x0c` | 1 |
+| `+0x06c` | `char[9][15]` | nombres, `sprintf("%s")` a participante `+0x3c` | `PL1` … `PL2` |
+| `+0x0f3` | `i32` | pista (`[0x1fef10]`); en campeonato, ronda: pista = `0xc45b4[clase][ronda]` | 0 |
+| `+0x0f7` | `i32` | `[0x1feed8]`: 0 = valor de la pista `0xc3fd8` (tope `[0x25a934]`), −1 = aleatorio, otro = fijo | 0 |
+| `+0x0fb`, `+0x0ff` | `i32` | `[0x1feef4]`, `[0x1fee94]` = valor × 10 (`[0x1fee28]` = `[0x1fee94] != 0`) | 5, 10 |
+| `+0x103` | `i32` | `3 − +0x107` (menú) | 3 |
+| `+0x107`, `+0x10b` | `i32` | `[0x1fef08]`/`[0x1fefdc]` y `[0x1fefcc]`; `0x2cf60` los reescribe | 0, 0 |
+| `+0x10f`, `+0x113`, `+0x117` | `i32` | `[0x1fee84]`, `[0x1fed80]`, `[0x1fed70]` | 0, 1, 1 |
+| `+0x11b`, `+0x11f` | `i32` | solo menú | 2, 2 |
+| `+0x123`, `+0x12b` | `i32[2]` | participante `+0x08` y `+0x18` de los humanos; `cheat_check` pone `+0x123/+0x127` a 1, 2 o 3 | 0 |
+| `+0x133` | `i32[8]` | orden de salida `0xc33d0` | 0 … 7 |
+| `+0x153` | `i32` | coches en carrera `[0x1fefe4]` | 1 |
+| `+0x15b` | `i32` | `[0x1fee48]` | 0 |
+| `+0x15f` | `i32[8]` | participante `+0x04` (1 = ¿ordenador?) | 0 1 1 1 1 1 1 1 |
+| `+0x17f` | `u8[2][8]` | códigos de tecla DOS de los humanos → participante `+0x1c..+0x23` (los dos primeros se cruzan si clase ≥ 3); jugador 1 con flechas | `cb cd c8 d0 35 34 36 28`, `2e 30 21 2f 2b 2a 2c 1f` |
+| `+0x18f`, `+0x193`, `+0x197` | `i32` | solo menú, solo menú, `[0x1febe0]` | 0 |
+| `+0x19b`, `+0x1aa` | `char[15]` | cadenas del menú ¿? | `"G1"`, `"12"` |
+| `+0x1bf` | 7 × `0x78` | **récords por pista** (`g_track_records` = `0x1ff317`), índice = id de pista del GST (0 CANADA … 6 JAPAN) | `0xbf628` |
+| `+0x507` | `i32[25]` | valores de los controles de opciones (`+0x14` de los controles de `0xea47c`) | 0, salvo el 10 = 1 |
+| `+0x57f`, `+0x583` | `i32` | pantalla de récords `0x1911c`: pista mostrada y tabla (carrera/vuelta) | 0 |
+| `+0x587` | `i32` | `[0x1ff6df]` clase más alta desbloqueada | 0 |
+| `+0x58b` | `i32` | `[0x1ff6e3]` 1 tras ganar la clase 3 | 0 |
+| `+0x58f` | `i32` | solo menú | 0 |
+| `+0x593` | `i32` | idioma `[0x1ff6eb]`: 0 inglés, 1 alemán, 2 italiano, 3 español, 4 sueco, 5 francés | 0 |
+
+Récords de fábrica (`0xbf628`, carrera / vuelta, el primero de cinco): CANADA OSK 145 / 48, USA PEZ 118 / 39,
+CARIB JIG 175 / 58, BRAZIL EMP 203 / 67, AUSTRIA PQL 203 / 67, ICELAND SHR 175 / 58, JAPAN KOT 233 / 77 s.
+
+Bloque de récords de una pista (`0x78` B): `char[5][4]` nombres de carrera, `double[5]` tiempos de carrera (`+0x14`,
+segundos), `char[5][4]` nombres de vuelta (`+0x3c`), `double[5]` tiempos de vuelta (`+0x50`), el mejor primero.
+`reset_race_times` `0x2a442` siembra `g_best_lap` (`0x1fb390`) con la vuelta 0 de la pista. Avisos en carrera
+(`car_update`): "LAP RECORD" (`0x2f43a`, 6 idiomas) cuando una vuelta mejora `g_best_lap`; "TRACK RECORD"
+(`0x2f548`) al completar la vuelta 3 fuera de eliminación con `car+0x3a4` < tiempo de carrera 0. Inserción
+(`render_main` `0x45938..0x45f20`, una vez por coche con `car+0x528 == 1`, solo humanos): si `t <` hueco 4 (`fcomp`
++ `jae`: empate o NaN no entran) se escribe en el hueco 4 con `sprintf("%s", nombre)` y se hace una pasada de
+burbuja 4→1 intercambiando mientras el inferior sea estrictamente menor. Lo mismo para la tabla de vueltas con los
+tres huecos `car+0x3bc/+0x3c4/+0x3cc`.
+
+**Campeonato** (modo 0). `render_main` `0x44a2a`: clasificado si el coche 0 (o el 1 con dos jugadores) acaba entre
+los 4 primeros (`car+0x3a0 < 4`; el bucle no avanza el puntero, así que solo mira esos dos coches). `0x44a66`: la
+ronda 4 de la clase 0, la 5 de la 1 o la 6 de las clases 2/3 completa la clase ("YOU HAVE COMPLETED THIS
+DIFFICULTY LEVEL"); si no, "WELL DONE!" y `[0x1fee54] = pista + 1`. `race_end_save` `0x2ccc8`: con
+`[0x1fee54] > pista`, ronda `+0x0f3` + 1 (máx. 6), suma los puntos de `0xc548c[puesto]` a `[0x1aebb0]` (fuera del
+BTZ) y escribe `+0x133[i] = 6 − puesto`. Desbloqueos (`0x44fd2..0x45095`, solo con un jugador y el coche 0 primero
+en la clasificación): ronda 6 y clase 3 → `+0x58b = 1`; ronda 6 y clase ≤ 2 → `+0x587 ≥ 3`, clase 3; ronda 5 y
+clase ≤ 1 → `+0x587 ≥ 2`, clase 2; ronda 4 y clase 0 → `+0x587 ≥ 1`, clase 1. `btz_save` `0x2cf60`: fuera del
+campeonato con más de un coche hace `ncoches` intercambios del orden de salida con dos índices
+`floor(rand01 × ncoches)` y reescribe `+0x107`/`+0x10b`.
+
+**Contrarreloj** (`[0x1feefc] == 2` y `[0x1fee4c] == 1`): `ghost_load` `0x2adf8` lee `GHOSTS\<nombre>.GST`; si
+falla, `[0x1fee4c] = 0` y `[0x1fee04] = 3 000 000`; si no, `[0x1fee04]` = tiempo de la cabecera (antes de mirar la
+pista), `[0x1fed84]` = modelo, nombre a `0x1fb4b8`, y si la pista de la cabecera no es `[0x1fef10]` no copia las
+muestras y pone `[0x1fee00] = 1` (por tanto no se guardará). Al terminar, `0x2ccc8` graba el fantasma solo si
+`[0x1fee00] == 0` y `[0x1fee04] × 0.01 > car+0x3a4`. Sin la opción de fantasma, `[0x1fee04]` no tiene otro
+escritor (BSS a 0 ¿?) y nunca se graba.
+
+**Port**: `IgnBtz` conserva la imagen como bytes. `tools/btz.py roundtrip` reconstruye desde cero los 1 397 bytes
+mapeados y no queda ningún byte no nulo opaco en el fichero distribuido. `ign_btz_default` es la imagen del menú
+recién arrancado y `tests/btz_defaults_original.py` (opcional, Unicorn) la compara byte a byte con
+`0x1a864` + controles + `0xbf628` ejecutados sobre el original. Verificado: el `IGN_DOS.BTZ` real carga, decodifica,
+recodifica y guarda idéntico (`save_btz`); tras una carrera sin récord el fichero escrito es idéntico; una
+eliminación terminada solo baraja los huecos del orden de salida (`time_trial`). Persistencia en
+`SDL_GetPrefPath("UDS", "Ignition")` (o `IGN_SAVE_DIR`): `IGN_DOS.BTZ` (si falta o su versión no es 30, el fichero del
+juego, que solo se lee, o la imagen por defecto) y `GHOSTS/<nombre>.GST` (primero ahí, luego en la carpeta del juego).
+La ventana la usa siempre; sin ventana solo con `--time-trial` o `IGN_SAVE_DIR`. Al terminar el jugador se insertan
+los récords y se guarda (como `render_main`); cuando todos han terminado se aplica `0x2ccc8`/`0x2cf60` y se guarda
+otra vez. **Desviaciones**: nombres de récord truncados a 3 letras (el original desbordaría al hueco siguiente); un
+coche eliminado o una vuelta vacía (0) no entran en las tablas; el nombre del jugador es el participante 0; los
+récords se guardan ya al terminar el jugador (el original espera al final de la carrera); los desbloqueos
+(`ign_champ_unlock`) no se llaman porque el port no lleva la clasificación por puntos del campeonato (`[0x1aebb0]`,
+fuera del BTZ) ni encadena pistas; el modo de la carrera es el de la línea de órdenes, no `+0x008`; contrarreloj
+sin rivales; la comparación `× 0.01` se hace en `double`, no en x87 de 80 bits; `rand01` es `rand()` de C.

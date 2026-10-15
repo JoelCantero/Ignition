@@ -101,9 +101,12 @@ Pistas: `USA`, `CANADA`, `AUSTRIA`, `BRAZIL`, `CARIB`, `ICELAND`, `JAPAN`. La ru
 | `--model ID yaw giro balanceo cabeceo PISTA` | visor de coches (requiere `--shot` antes) |
 | `--record-ghost F.GST` | con `--sim`: guarda la vuelta del jugador como fantasma del original (302 412 bytes) |
 | `--ghost F.GST` | dibuja el fantasma (sin choques) en ventana y sin ventana; con `--sim` mide la desviación en x/z |
+| `--time-trial` | contrarreloj (`[0x1feefc] == 2`, sin rivales): carga `GHOSTS/<pista>.GST` de la carpeta de usuario y lo graba si se bate |
 
 Variables de entorno de depuración: `IGN_TRACE=1` (traza por tick y estadísticas de tramos y puertas),
 `IGN_TRACE=full` (estado inicial y cada tick, esquema v5 de 112 campos con controles y precisión de 17 cifras),
+`IGN_SAVE_DIR=carpeta/` (carpeta de récords, `IGN_DOS.BTZ` y fantasmas en lugar de `SDL_GetPrefPath`; sin ventana
+activa la persistencia),
 `IGN_TRACK_DUMP=archivo` (vuelca los tramos), `IGN_LIFT=u` (eleva el coche en el visor para ver la sombra) e
 `IGN_BANARNE=1` (carrocería alta en el visor).
 
@@ -224,7 +227,8 @@ sonda anterior en el último tramo y gate `+0x604 == 0`: no basta pisar el últi
 Se conserva el sentinel 10000 y se limita la tercera transición a `< 4*floor(count/4)`.
 Se registran última vuelta y vueltas 1–3, origen desde el sample global y mejor vuelta
 compartida con comparación estricta; `+0x3a0` guarda **posición**, no tiempo.
-**Desviación**: mejor vuelta de sesión inicializada con `DBL_MAX`, sin récord guardado.
+**Desviación**: sin carpeta de usuario (`--shot` sin `--time-trial` ni `IGN_SAVE_DIR`) la mejor vuelta parte de
+`DBL_MAX`; con ella, del récord guardado de la pista, como `0x2a442` (véase `save.c`).
 La geometría de las dos sondas, productor del gate, avisos y persistencia quedan fuera:
 véase [contrato de vueltas](docs/formats.md#vueltas-y-registro-de-tiempos-verificación-por-fragmentos).
 
@@ -302,6 +306,8 @@ python3 build/ppm2png.py coche.ppm && open coche.png
 ./build/ignition CANADA --sim 200 auto --record-ghost /tmp/MOOSEJAW.GST --shot /tmp/x.ppm
 python3 tools/gst.py info /tmp/MOOSEJAW.GST --sections 175
 python3 tools/gst.py plot /tmp/MOOSEJAW.GST -o /tmp/ghost.png
+IGN_SAVE_DIR=/tmp/ign/ ./build/ignition USA --time-trial --sim 150 auto --shot /tmp/x.ppm
+python3 tools/btz.py info /tmp/ign/IGN_DOS.BTZ
 ```
 
 ---
@@ -315,7 +321,8 @@ src/game/physics.{c,h}  cuerpo rígido (modelo bicicleta), par motor, muros, cho
 src/game/car.{c,h}      coche: suelo bajo 4 ruedas, vertical, dirección, acelerador, turbo, pose visual, vueltas
 src/game/track.{c,h}    clases PLC, orden de tramos y bifurcaciones, puertas por tramo (TRI)
 src/game/ai.{c,h}       IA de rivales (port parcial de 0x1aea0)
-src/game/ghost.{c,h}    fantasmas GST: leer, grabar a 72 Hz y guardar con el formato exacto del original
+src/game/ghost.{c,h}    fantasmas GST: leer, grabar a 72 Hz y guardar con el formato exacto del original; reglas de contrarreloj
+src/game/save.{c,h}     IGN_DOS.BTZ: imagen por defecto, récords, campeonato y persistencia en la carpeta de usuario
 src/game/skid.{c,h}     efectos de derrape: marcas en la pista y polvo (`sub_0003731c`)
 src/game/fx.{c,h}       huecos de efectos del original: sprites, piezas, salpicaduras, explosión, turbo, reaparición
 src/render/raster.{c,h} rasterizador por software de 8 bits (320×200 a 800×600, 4:3), z-buffer, texturas afines
@@ -330,6 +337,9 @@ tools/structs.txt       estructuras verificadas (coche, cuerpo, tramo, estado de
 tools/trace_compare.py  primera divergencia entre dos trazas por tick (port vs original en DOSBox-X)
 tests/regress.py        regresión determinista sin ventana (23 casos; `ctest --test-dir build`)
 tests/gearbox.c         prueba unitaria de cambios manuales y marcha atrás (`ctest --test-dir build -R gearbox`)
+tests/save_btz.c        BTZ de ida y vuelta byte a byte, récords, campeonato y reglas del fantasma
+tests/time_trial.py     contrarreloj sin ventana: grabar, recargar y sustituir el fantasma solo si se bate
+tests/btz_defaults_original.py imagen BTZ por defecto contra `0x1a864` + `0xbf628` del original (opcional, Unicorn)
 tests/body_step.c       ejecuta la física C para el verificador diferencial
 tests/physics_original.py replay aislado del integrador LE contra el port, con Unicorn opcional
 tests/car_original.py     replay LE de dirección/agarre/altura/aceleración/freno/turbo contra kernels C
@@ -339,6 +349,7 @@ tests/solo_replay.py    replay sin rivales, exacto por tick, con informe de proc
 tests/test_verification.py controles positivos y negativos de las herramientas de verificación
 tools/ignassets.py      PIC/COL/TEX/DAT/nivel → PNG
 tools/gst.py            fantasmas GST: cabecera, validación, tiempos por vuelta y trayectoria sobre la pista
+tools/btz.py            IGN_DOS.BTZ: campos, participantes, récords por pista y comprobación de ida y vuelta
 tools/symbols.txt       símbolos identificados (funciones, globales, tablas)
 .github/skills/ignition-re/SKILL.md   skill del proyecto para agentes de IA
 ```
@@ -401,8 +412,8 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | LFT / FNT | fuentes | 🔴 solo cabeceras |
 | CDP | vídeos de introducción | 🔴 solo cabecera |
 | PSQ / PFM | coche 3D del menú | 🔴 |
-| GST | coches fantasma | 🟡 leer, escribir y reproducir (`ghost.c`, `tools/gst.py`); falta la contrarreloj |
-| BTZ | configuración y récords | 🔴 |
+| GST | coches fantasma | ✅ leer, escribir, reproducir y contrarreloj (`ghost.c`, `save.c`, `tools/gst.py`) |
+| BTZ | configuración y récords | ✅ todos los bytes del fichero distribuido mapeados; ida y vuelta exacta (`save.c`, `tools/btz.py`) |
 | INF | curvas del sonido del motor por coche | � 4 tablas de 200 B: tono y volumen de `00_A`/`01_A` por régimen (`sound.c`) |
 | WAV / PAT / XI / OGG | sonido (PCM, Gravis, FastTracker, pistas de CD) | 🟢 WAV, PAT y XI (`audio.c`); OGG con stb_vorbis (`music.c`) |
 
@@ -436,7 +447,8 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Pose: dirección visual, inclinación | `0x48a14`, `0x40ec8`, `0x2e6f8` | `car.c`, `raster.c` | fiel |
 | Sombra del coche | `0x48a14` | `raster.c` | geometría fiel; sombreado aproximado |
 | Truco BANARNE | `cheat_check` `0x160c4` | `main.c` | fiel |
-| IA de rivales | `ai_drive` `0x1aea0`, `load_tri` `0x1ce30` | `ai.c`, `track.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, índices PLC directos, dos slots canónicos, selector y topología implementados; ángulos float32/interiores verificados por fragmentos (4 920 comparaciones exactas) y mezcla de rumbo (1 184 casos); faltan recorte del objetivo, pendiente Y, giro por solape, esquiva y cotejo integral de carriles/controlador |
+| BTZ, récords, contrarreloj y campeonato | `0x2293c`, `0x2adf8`, `0x2ccc8`, `0x2cf60`, `render_main` `0x45938`, menú `0x1a864` | `save.c`, `ghost.c` | ida y vuelta byte a byte del BTZ real; imagen por defecto idéntica al original (Unicorn); reglas por pruebas unitarias; sin menú ni clasificación por puntos |
+| IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, registros `load_tri` con mapeo engine→PLC, selector `ai_find_section` y reglas observadas de topología/ramas implementados; la estructura de rutas y registros TRI pasa `track_real_assets` en las 7 pistas, pero falta una comparación independiente con la tabla runtime original y la asignación exacta de registros divididos a carriles; pendiente (Y), giro por solape y frenada de curva (heurística) |
 | Render 3D | motor Lisa 2 | `raster.c` | propio: z-buffer, sin sombreado TAB |
 
 Geometría IA: `tests/ai_geometry_original.py` compara ambos fragmentos LE con `atan2`/`__CHP`
@@ -529,11 +541,13 @@ crear clima `0x26154` · pantalla de carga `0x21d68` · nombres de pista `0x22f3
 `0x4bdf4` · dígitos `0x4be7c` · depuración XYZ *¿?* `0x49fdc` · pausa `0x4395c` · salir o reiniciar `0x43e48` ·
 captura TGA `0x515f8` · fondo del menú `0x541d4`.
 
-**Frontend**: `menu_load_gfx` `0x11504` · opciones y BTZ *¿?* `0x12bb8` · idioma y menú principal *¿?* `0x170ac` ·
+**Frontend**: `menu_load_gfx` `0x11504` · BTZ por defecto `0x1a864` · pantalla de récords `0x1911c` · opciones y
+escritura del BTZ `0x12bb8` · idioma y menú principal *¿?* `0x170ac` ·
 lista de fantasmas `0x17054` · `menu_load_car` `0x1aaf8` · trucos `0x160c4`.
 
-**Fantasmas y persistencia**: cargar o crear fantasma `0x2adf8` · guardar fantasma `0x2ccc8` · mover fantasma
-`0x50e94` · guardar configuración `0x2b430`, `0x2cf60` · apagado `0x2b6b4`.
+**Fantasmas y persistencia**: leer el BTZ en carrera `0x2293c` · cargar fantasma `0x2adf8` · fin de carrera
+(fantasma y campeonato) `0x2ccc8` · mover fantasma `0x50e94` · guardar BTZ `0x2cf60`, `0x2b430` · apagado `0x2b6b4` ·
+récords de fábrica `0xbf628`.
 
 **Sonido**: sonidos de coche (ROLL, SKID…) `0x2a4ec` · cargar muestras `.WAV/.PAT/.RW8` `0x63310` · reproducir sonido
 *¿?* `0x49a8c` · canal *¿?* `0x626fc` · detección de Sound Blaster (`BLASTER`) `0x7a85c` · *Script Player* `0x549b0` ·
@@ -635,8 +649,12 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    motor original). La rotación `Z(Y(X(v)))` y la geometría transformada son aproximaciones; la rejilla SRF conserva
    sus spans estáticos, por lo que la consulta de suelo y las colisiones de objetos trasladados no son completas.
 10. **Sonido**: mezclador propio en SDL3 (mono, 44,1 kHz) en lugar del driver GUS/Sound Blaster; volumen 0..`0x10000`
-   y frecuencia en Hz como en `0x625f4`. Sin panorama estéreo y sin los sonidos de objetos móviles. Música OGG en
-   lugar del CD (`music.c`): mono, F5/F6 en vez de ←/→ del menú de pausa y pista 8 al terminar en el podio.
+   y frecuencia en Hz como en `0x625f4`. Sin panorama estéreo, sin música y sin los sonidos de objetos móviles.
+11. **Persistencia**: `IGN_DOS.BTZ` y `GHOSTS/` en `SDL_GetPrefPath("UDS", "Ignition")` (o `IGN_SAVE_DIR`), nunca en la
+   carpeta del juego, que solo se lee. Sin menú: modo por línea de órdenes, jugador = participante 0, récords
+   guardados ya al terminar el jugador, nombres de 3 letras, sin récords de coches eliminados ni vueltas vacías, y
+   sin desbloqueos del campeonato (falta la clasificación por puntos). "LAP RECORD"/"TRACK RECORD" salen por la salida
+   estándar, no en el HUD. Véase [BTZ](docs/formats.md#configuración-y-récords-ign_dosbtz-portado-en-savec-toolsbtzpy).
 
 ---
 
@@ -827,7 +845,8 @@ implementado.
       (`DEMOTRK.PIC`, `TRK_SPR.PIC`), fondo `MENUBKG.DAT` (`0x541d4`).
 - [ ] **P2** Modos de juego (campeonato, contrarreloj, práctica…), desbloqueos y flujo entre pistas.
 - [ ] **P2** Pantallas de carga (`0x21d68`) e idiomas (inglés, alemán, francés, italiano, español y sueco).
-- [ ] **P2** Configuración y récords en **BTZ** (`0x2b430`, `0x2cf60`, `IGN_DOS.BTZ`).
+- [x] **P2** Configuración y récords en **BTZ** (`0x2b430`, `0x2cf60`, `IGN_DOS.BTZ`): formato completo, imagen por
+      defecto del menú verificada contra el original, récords, avance del campeonato y persistencia (`save.c`).
 - [ ] **P3** Vídeos **CDP** (`IGN1.CDP`, `IGN2.CDP`, `IGN3_*.CDP`) y *Script Player* `0x549b0`.
 - [ ] **P3** Capturas TGA `0x515f8` y superposición de depuración `0x49fdc`.
 
@@ -847,9 +866,11 @@ implementado.
 
 - [x] **P2** Formato **GST**: lectura (`0x2adf8`), grabación por tick (`0x51204`) y guardado con relleno (`0x2ccc8`).
 - [x] **P2** Reproducir el fantasma (`--ghost`): una muestra por tick, sin choques, con el modelo de la cabecera.
-- [ ] **P2** Modo contrarreloj (`[0x1feefc] == 2`): grabar al terminar si se bate `[0x1fee04]` y cargar al empezar.
+- [x] **P2** Modo contrarreloj (`[0x1feefc] == 2`): grabar al terminar si se bate `[0x1fee04]` y cargar al empezar
+      (`--time-trial`, `tests/time_trial.py`).
 - [ ] **P1** Validar física e IA contra un fantasma real: grabar una contrarreloj en DOSBox y usar `--ghost`.
-- [ ] **P2** Récords de vuelta ("LAP RECORD") y su persistencia.
+- [x] **P2** Récords de vuelta ("LAP RECORD") y su persistencia: tablas por pista de `render_main` `0x45938`, mejor
+      vuelta inicial desde el récord guardado (`0x2a442`); los avisos aún no se dibujan en el HUD.
 
 ### Fase 7 — Multijugador
 
