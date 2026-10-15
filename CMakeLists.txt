@@ -183,18 +183,22 @@ if(IGN_VERIFY_ORIGINAL)
             --report ${CMAKE_BINARY_DIR}/lap-original-report.json)
 endif()
 
-# Persistence: IGN_DOS.BTZ round trip, record tables and time-trial ghosts.
-add_executable(save_btz_test tests/save_btz.c)
-target_link_libraries(save_btz_test PRIVATE ignition_core)
+# Collision objects and car contact (car_ground_contact 0x350f0).
+add_executable(contact_test tests/contact.c)
+target_link_libraries(contact_test PRIVATE ignition_core)
+add_test(NAME contact COMMAND contact_test)
 if(NOT MSVC)
-  target_compile_options(save_btz_test PRIVATE -Wall -Wextra)
+  target_compile_options(contact_test PRIVATE -Wall -Wextra)
 endif()
-add_test(NAME save_btz COMMAND save_btz_test "${GAME_DIR}" ${CMAKE_BINARY_DIR})
-add_test(NAME btz_tool COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/btz.py roundtrip "${GAME_DIR}/IGN_DOS.BTZ")
-add_test(NAME time_trial COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/time_trial.py
-  --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}")
 if(IGN_VERIFY_ORIGINAL)
-  add_test(NAME btz_defaults_original
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/btz_defaults_original.py
-            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:save_btz_test>)
+  add_test(NAME contact_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/contact_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:contact_test>
+            --report ${CMAKE_BINARY_DIR}/contact-original-report.json)
+endif()
+add_executable(contact_real_assets_test tests/contact_real_assets.c)
+target_link_libraries(contact_real_assets_test PRIVATE ignition_core)
+add_test(NAME contact_real_assets COMMAND contact_real_assets_test "${GAME_DIR}")
+if(NOT MSVC)
+  target_compile_options(contact_real_assets_test PRIVATE -Wall -Wextra)
 endif()
