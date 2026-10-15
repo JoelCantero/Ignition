@@ -77,6 +77,8 @@ static int tv_index = 3, spectated, spectate_wait;
 static IgnSkids skids;
 static IgnFx fx;
 static IgnCollObjs colls;
+static IgnTexAnims texanims;
+static IgnMessage messages[IGN_MESSAGES];
 static IgnWeather weather;
 
 /* Start grid of sub_00026458: PLC origin of the type-0 object facing the type-1 object; slot i is
@@ -134,7 +136,10 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
     ghost_tick++;
     int started = ign_race_started(&race);
     int was_out = player->out;
+    double best_lap = race.best_lap;
     ign_race_progress(&race, player, t);
+    /* car_update 0x2f43a: the player's lap record, 80 frames blinking every 8 (English). */
+    if (race.best_lap < best_lap) ign_message_add(messages, "LAP RECORD", 80, 8, -1);
     IgnCar *all[MAX_RIVALS + 1] = {player};
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_ai_set_cars(all, nrivals + 1);
@@ -197,13 +202,33 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
                           player->out ? finish_clock : -1.0, focus_x, focus_z);
         ign_fx_emitters(&fx, lv, focus_x, focus_z);
         ign_fx_frame(&fx, all, nrivals + 1, focus_x, focus_z);
+        /* collisions_pass 0x3fdce..0x3feda after the effect handlers. */
+        ign_texanim_frame(&texanims);
         ign_coll_frame(&colls, lv, all, nrivals + 1, &fx, focus_x, focus_z);
+        if (race.mode == IGN_MODE_ELIMINATION && race.clock < 0)
+            for (int i = 0; i <= nrivals; i++)
+                if (!all[i]->wrecked && !all[i]->out &&
+                    ign_race_position((const IgnCar *const *)all, nrivals + 1, i) == race.remaining)
+                    ign_fx_elimination_smoke(&fx, all[i], focus_x, focus_z);
+        ign_messages_age(messages);
         ign_sound_frame(all, nrivals + 1, spectated, &race, player->out ? finish_clock : -1.0, &weather, &fx);
         /* sub_00032d8c at the start of the next frame: the last tick's axle steps. */
         for (int i = 0; i <= nrivals; i++) ign_car_frame_velocity(all[i]);
     }
     ign_skids_step(&skids);
-    if (started) ign_race_step(&race, all, nrivals + 1);
+    if (started) {
+        double blown[MAX_RIVALS + 1];
+        for (int i = 0; i <= nrivals; i++) blown[i] = all[i]->blow;
+        ign_race_step(&race, all, nrivals + 1);
+        /* sub_0002de30 0x2e100: "%s IS OUT" for 80 frames; the port has no driver names. */
+        for (int i = 0; i <= nrivals; i++)
+            if (blown[i] == 0.0 && all[i]->blow != 0.0) {
+                char text[100];
+                if (i == 0) snprintf(text, sizeof text, "PLAYER IS OUT");
+                else snprintf(text, sizeof text, "CPU %d IS OUT", i);
+                ign_message_add(messages, text, 80, 8, -1);
+            }
+    }
     /* car_update 0x2f37f: the player's finish restarts [0x1fb4d0] and selects the car-following camera. */
     if (player->out && !was_out) finish_clock = 0, tv_index = 3, spectate_wait = 100;
     /* sub_00047f94 runs once per rendered frame for every car; the original renders at most 36 frames per second. */
@@ -450,6 +475,11 @@ int main(int argc, char **argv) {
     ign_skids_init(&skids);
     ign_fx_init(&fx);
     ign_fx_emitters_init(&fx, &lv);
+    track_id = ign_ghost_track_id(level);
+    if (ign_texanim_init(&texanims, &lv.track, ign_texanim_period(track_id)) < 0) {
+        fprintf(stderr, "out of memory\n");
+        return 1;
+    }
     if (ign_coll_init(&colls, &lv.track) < 0) {
         fprintf(stderr, "Ingen info om kollisions objektet!!\n");
         return 1;

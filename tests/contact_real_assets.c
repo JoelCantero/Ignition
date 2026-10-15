@@ -123,8 +123,37 @@ int main(int argc, char **argv) {
             for (int f = 0; f < 200; f++) ign_pos_step(&lv.pos, &lv.track);
         }
         CHECK(found == specials, "%s: %d of %d special-object faces found", TRACKS[t], found, specials);
-        printf("%-8s collision objects %2d (rested %2d), special faces %2d/%2d\n", TRACKS[t], n, rested, found,
-               specials);
+        /* Texture animations (0xfa): every frame's faces move tile by tile and are back after one full cycle. */
+        static IgnTexAnims ta;
+        int nanim = ign_texanim_init(&ta, &lv.track, 1), animated_faces = 0, cycled = 1;
+        CHECK(nanim >= 0, "%s: texture animations failed", TRACKS[t]);
+        for (int a = 0; a < ta.n; a++) {
+            const IgnTexAnim *an = &ta.a[a];
+            int nf = 0;
+            for (int k = 0; k < an->n; k++)
+                for (IgnFace **f = an->faces[k]; *f; f++) nf++;
+            animated_faces += nf;
+            IgnFace **saved = malloc(sizeof *saved * (size_t)(nf + 1));
+            IgnFace *copy = malloc(sizeof *copy * (size_t)(nf + 1));
+            int m = 0;
+            for (int k = 0; k < an->n; k++)
+                for (IgnFace **f = an->faces[k]; *f; f++) saved[m] = *f, copy[m++] = **f;
+            IgnTexAnims one = ta;
+            one.a = &ta.a[a], one.n = 1;
+            /* Frames may repeat a tile (it then holds for two steps), so look for motion over the whole cycle. */
+            int moved = 0;
+            for (int s2 = 0; s2 < an->n; s2++) {
+                ign_texanim_step(&one);
+                for (int i = 0; i < m && s2 + 1 < an->n; i++) moved += memcmp(saved[i], &copy[i], sizeof copy[i]) != 0;
+            }
+            CHECK(an->n == 1 || moved > 0, "%s: animation %d did not move", TRACKS[t], a);
+            for (int i = 0; i < m; i++) cycled &= !memcmp(saved[i], &copy[i], sizeof copy[i]);
+            free(saved), free(copy);
+        }
+        CHECK(cycled, "%s: texture animation faces not back after a cycle", TRACKS[t]);
+        ign_texanim_free(&ta);
+        printf("%-8s collision objects %2d (rested %2d), special faces %2d/%2d, texture animations %d (%d faces)\n",
+               TRACKS[t], n, rested, found, specials, nanim, animated_faces);
         ign_free_level(&lv);
     }
     if (failures) fprintf(stderr, "%d failures\n", failures);

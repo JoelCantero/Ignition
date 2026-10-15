@@ -1,6 +1,7 @@
 #include "pos.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -388,4 +389,157 @@ void ign_special_apply(IgnCar *car, int special, int wreck, IgnFx *fx, float foc
         }
     }
     if (push_wait > 0) push_wait--;
+}
+
+int ign_texanim_period(int track) {
+    static const int PERIOD[7] = {6, 20, 2, 4, 12, 9, 12};
+    return track >= 0 && track < 7 ? PERIOD[track] : 12;
+}
+
+static int textured(const IgnFace *f) {
+    int kind = (int)(f->flags & 0xff);
+    return kind >= 0x11 && kind != 0x14;
+}
+
+/* sub_00010c5c: page and the three u/v inside the tile, bounds included. */
+static int in_tile(const IgnFace *f, uint32_t page, int32_t u, int32_t v) {
+    if (f->extra != page) return 0;
+    for (int k = 0; k < 3; k++)
+        if (f->uv[2 * k] < u || f->uv[2 * k] > u + 0x4000 || f->uv[2 * k + 1] < v || f->uv[2 * k + 1] > v + 0x4000)
+            return 0;
+    return 1;
+}
+
+int ign_texanim_init(IgnTexAnims *t, IgnModel *track, int period) {
+    memset(t, 0, sizeof *t);
+    t->period = period;
+    for (int i = 0; i < track->nobj; i++) {
+        const IgnObject *src = &track->objs[i];
+        if (src->type != 0xfa) continue;
+        int n = 0;
+        while (n < src->nf && textured(&src->faces[n])) n++;
+        if (n == 0) continue; /* 0x106d0: nothing kept */
+        IgnTexAnim *na = realloc(t->a, sizeof *t->a * (size_t)(t->n + 1));
+        if (!na) return -1;
+        t->a = na;
+        IgnTexAnim *a = &t->a[t->n++];
+        *a = (IgnTexAnim){.n = n, .cur = 1, .prev = 0};
+        a->uv = calloc((size_t)n, sizeof *a->uv);
+        a->page = calloc((size_t)n, sizeof *a->page);
+        a->faces = calloc((size_t)n, sizeof *a->faces);
+        if (!a->uv || !a->page || !a->faces) return -1;
+        for (int k = 0; k < n; k++) {
+            const IgnFace *f = &src->faces[k];
+            a->uv[k][0] = (int32_t)((uint32_t)f->uv[0] & 0xffffc000u);
+            a->uv[k][1] = (int32_t)((uint32_t)f->uv[1] & 0xffffc000u);
+            a->page[k] = f->extra & 0xffff0000u;
+        }
+        for (int k = 0; k < n; k++) {
+            /* 0x106e9: a frame repeating an earlier tile gets no faces. */
+            int repeat = 0;
+            for (int j = 0; j < k; j++)
+                repeat |= a->page[j] == a->page[k] && a->uv[j][0] == a->uv[k][0] && a->uv[j][1] == a->uv[k][1];
+            size_t count = 0;
+            for (int pass = 0; pass < 2; pass++) {
+                if (pass == 1) {
+                    a->faces[k] = calloc(count + 1, sizeof **a->faces);
+                    if (!a->faces[k]) return -1;
+                    count = 0;
+                }
+                for (int o = 0; o < track->nobj && !repeat; o++) {
+                    IgnObject *obj = &track->objs[o];
+                    for (int f = 0; f < obj->nf && textured(&obj->faces[f]); f++) {
+                        if (!in_tile(&obj->faces[f], a->page[k], a->uv[k][0], a->uv[k][1])) continue;
+                        if (pass == 1) a->faces[k][count] = (IgnFace *)&obj->faces[f]; /* the MSH buffer is ours */
+                        count++;
+                    }
+                }
+            }
+        }
+    }
+    return t->n;
+}
+
+void ign_texanim_free(IgnTexAnims *t) {
+    for (int i = 0; i < t->n; i++) {
+        for (int k = 0; k < t->a[i].n; k++) free(t->a[i].faces[k]);
+        free(t->a[i].faces), free(t->a[i].uv), free(t->a[i].page);
+    }
+    free(t->a);
+    memset(t, 0, sizeof *t);
+}
+
+void ign_texanim_step(IgnTexAnims *t) {
+    for (int i = 0; i < t->n; i++) {
+        IgnTexAnim *a = &t->a[i];
+        for (int k = 0; k < a->n; k++) {
+            int from = (a->prev + k) % a->n, to = (a->cur + k) % a->n;
+            uint32_t dpage = a->page[from] - a->page[to];
+            int32_t du = a->uv[from][0] - a->uv[to][0], dv = a->uv[from][1] - a->uv[to][1];
+            for (IgnFace **f = a->faces[k]; f && *f; f++) {
+                (*f)->extra -= dpage;
+                for (int c = 0; c < 3; c++) (*f)->uv[2 * c] -= du, (*f)->uv[2 * c + 1] -= dv;
+            }
+        }
+        a->prev = a->cur;
+        a->cur++;
+    }
+}
+
+void ign_texanim_frame(IgnTexAnims *t) {
+    t->clock += 1.0f;
+    if ((float)t->period > t->clock || t->period <= 0) return;
+    ign_texanim_step(t);
+    while (t->clock >= (float)t->period) t->clock -= (float)t->period;
+}
+
+int ign_message_add(IgnMessage m[IGN_MESSAGES], const char *text, int duration, int blink, int player) {
+    for (int i = 0; i < IGN_MESSAGES; i++) {
+        if (m[i].active) continue;
+        m[i].active = 1;
+        snprintf(m[i].text, sizeof m[i].text, "%s", text);
+        m[i].age = 0;
+        m[i].blink = blink, m[i].player = player, m[i].duration = duration;
+        return i;
+    }
+    return -1;
+}
+
+void ign_messages_age(IgnMessage m[IGN_MESSAGES]) {
+    for (int i = 0; i < IGN_MESSAGES; i++)
+        if (m[i].active == 1 && ++m[i].age > m[i].duration) m[i].active = 0;
+}
+
+int ign_message_visible(const IgnMessage *m) {
+    return m->active == 1 && !((double)m->blink < fmod((double)m->age, (double)(m->blink * 2)));
+}
+
+void ign_fx_elimination_smoke(IgnFx *fx, const IgnCar *car, float focus_x, float focus_z) {
+    int32_t pos[3] = {(int32_t)trunc(car->x * 1024.0), (int32_t)trunc(car->height * 1024.0),
+                      (int32_t)trunc(car->z * 1024.0)};
+    /* car+0x108/+0xf8/+0x110 x 180 x (1/pi) x 10, in that order. */
+    int32_t ang[3] = {(int32_t)trunc(car->body.roll * 180.0 * 0.31830988618379 * 10.0),
+                      (int32_t)trunc(car->body.heading * 180.0 * 0.31830988618379 * 10.0),
+                      (int32_t)trunc(car->body.pitch * 180.0 * 0.31830988618379 * 10.0)};
+    int rear = (int)car->body_min_x;
+    for (int k = 0; k < 3; k++) {
+        /* 0x4fd08: two EXSMOKE puffs; 0x4feec: then a DARKSMOK one when trunc(rand * 2) == 0. */
+        if (k == 2 && (int)trunc(ign_fx_rand(fx) * 2.0) != 0) break;
+        int dark = k == 2;
+        int32_t t[IGN_FX_WORDS] = {IGN_FX_SPRITE, pos[0], pos[1], pos[2]};
+        t[4] = (int32_t)trunc(ign_fx_rand(fx) * 1024.0 + -512.0 + car->step_x * 0.5 * 1024.0);
+        t[5] = 0x400;
+        t[6] = (int32_t)trunc(ign_fx_rand(fx) * 1024.0 + -512.0 + car->step_z * 0.5 * 1024.0);
+        t[7] = 0x400;
+        t[9] = dark ? 5 : 7;
+        t[11] = dark ? 0x133 : 0x200;
+        t[12] = dark ? 0x25800 : 0x3e800;
+        t[13] = dark ? 0x1000 : -0x1800;
+        t[14] = dark ? 0xc4230 : 0xc43c0;
+        t[15] = (int32_t)trunc(ign_fx_rand(fx) * 10.0 + rear);
+        t[17] = (int32_t)trunc(dark ? ign_fx_rand(fx) * 50.0 + -25.0 : ign_fx_rand(fx) * 30.0 + -15.0);
+        t[18] = ang[0], t[19] = ang[1], t[20] = ang[2];
+        t[22] = dark ? 25 : 14;
+        ign_fx_add(fx, t, focus_x, focus_z);
+    }
 }

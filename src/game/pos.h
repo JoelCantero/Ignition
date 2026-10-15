@@ -73,4 +73,52 @@ int ign_special_probe(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car, in
  * sample (one per 15 car updates, [0x1fee3c]). */
 void ign_special_apply(IgnCar *car, int special, int wreck, IgnFx *fx, float focus_x, float focus_z);
 
+/* Texture animations (sub_0002abdc at world creation, sub_00010508): each PLC object of type 0xfa holds the frames as
+ * the textured faces of its mesh (until the first untextured one): 64 x 64 tiles (u, v & ~0x3fff, page = extra
+ * & 0xffff0000). Every textured face of the world (same leading-run rule) with the same page and its three u/v inside
+ * a frame's tile [u, u + 0x4000] x [v, v + 0x4000] belongs to that frame. sub_00010a00 then moves the faces of frame i
+ * to the tile of frame (i + n) mod frames, n counting up from 1. */
+typedef struct {
+    int n, cur, prev;       /* +0 frames, +4, +8 */
+    int32_t (*uv)[2];       /* +0xc */
+    uint32_t *page;         /* +0x10 */
+    IgnFace ***faces;       /* +0x14: per frame, NULL-terminated */
+} IgnTexAnim;
+
+typedef struct {
+    IgnTexAnim *a;
+    int n;
+    float clock;            /* [0x1feef0] */
+    int period;             /* 0xc4598[track]: frames per step */
+} IgnTexAnims;
+
+/* Frames per animation step by track id (0 CANADA ... 6 JAPAN), table 0xc4598. */
+int ign_texanim_period(int track);
+int ign_texanim_init(IgnTexAnims *t, IgnModel *track, int period);
+void ign_texanim_free(IgnTexAnims *t);
+/* sub_00010a00 */
+void ign_texanim_step(IgnTexAnims *t);
+/* collisions_pass 0x3fdce: [0x1feef0] += 1; at the period, one step and the period subtracted while it fits. */
+void ign_texanim_frame(IgnTexAnims *t);
+
+/* HUD messages (list [0x1fefb8], 5 x 0x78 B): text, frames shown (+0x68), blink half-period (+0x6c), age (+0x70),
+ * player view (+0x74, -1 = whole screen). Drawn by sub_0004c89c (race_hud). */
+#define IGN_MESSAGES 5
+typedef struct {
+    int active;
+    char text[100];
+    int duration, blink, age, player;
+} IgnMessage;
+
+/* sub_0004c7c0: first free slot, or -1 when the five are in use. */
+int ign_message_add(IgnMessage m[IGN_MESSAGES], const char *text, int duration, int blink, int player);
+/* sub_0004c858 (collisions_pass): one frame older; past its duration the message is gone. */
+void ign_messages_age(IgnMessage m[IGN_MESSAGES]);
+/* sub_0004c89c: shown while fmod(age, 2 * blink) <= blink. */
+int ign_message_visible(const IgnMessage *m);
+
+/* sub_0004fcf0 (collisions_pass, elimination mode): the racing car in last place trails two EXSMOKE puffs per frame
+ * from its rear, and one DARKSMOK puff half of the frames. */
+void ign_fx_elimination_smoke(IgnFx *fx, const IgnCar *car, float focus_x, float focus_z);
+
 #endif
