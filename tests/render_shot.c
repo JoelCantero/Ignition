@@ -34,6 +34,7 @@ int main(int argc, char **argv) {
         }
     ign_frame_clear(&frame);
     ign_render_track(&frame, &lv, &cam);
+    ign_render_flush(&frame);
     FILE *f = fopen(argv[9], "wb");
     if (!f || fwrite(frame.color, 1, (size_t)frame.w * frame.h, f) != (size_t)frame.w * frame.h) return 1;
     fclose(f);

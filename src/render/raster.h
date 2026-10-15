@@ -35,7 +35,10 @@ void ign_render_set_level_dir(const char *data_dir, const char *name);
 void ign_render_track(IgnFrame *fb, const IgnLevel *lv, const IgnCamera *cam);
 /* Primitive list of the last ign_render_track (struct LisaFrame of lisa.h), for verification tools. */
 const struct LisaFrame *ign_render_last_frame(void);
+/* Places the car's engine objects (body, wheels, shadow) for this frame. */
 void ign_render_car(IgnFrame *fb, const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam);
+/* render_scene and the rasterizer: draws everything given since the last flush, far to near. */
+void ign_render_flush(IgnFrame *fb);
 /* Skid marks of sub_0003731c; call after the track and before the cars. */
 void ign_render_skids(IgnFrame *fb, const IgnLevel *lv, const IgnSkids *s, const IgnCamera *cam);
 /* Effects of the 0x1d5f10 slots: debris and splash polygons, then the sprites far to near. Call last. */

@@ -63,6 +63,12 @@ int lisa_create(LisaScene *s, const int32_t *mesh, const uint8_t *tex, int tex_p
     return s->nobj++;
 }
 
+/* LI_SETMESH (sub_00056e9c) with an explicit radius. */
+void lisa_set_mesh(LisaScene *s, int id, const int32_t *mesh, int radius) {
+    s->objs[id].mesh = mesh;
+    s->objs[id].radius = (int16_t)radius;
+}
+
 static int *cell_of(LisaScene *s, int32_t x, int32_t z) {
     return &s->grid[div_pow2(z, CELL_SHIFT) * s->gw + div_pow2(x, CELL_SHIFT)];
 }

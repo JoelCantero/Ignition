@@ -126,62 +126,6 @@ void ign_frame_clear(IgnFrame *fb) {
     memset(fb->inv_z, 0, (size_t)fb->w * fb->h * sizeof fb->inv_z[0]);
 }
 
-/* World vertex = t + m * (obj.pos + shift + pre * v); pre (may be NULL) turns a part about its own origin. */
-static void draw_object(IgnFrame *fb, const IgnModel *mdl, const IgnObject *o,
-                        const IgnCamera *cam, const float m[9], const float t[3],
-                        const float pre[9], const float shift[3]) {
-    float cy = cosf(cam->yaw), sy = sinf(cam->yaw);
-    float cp = cosf(cam->pitch), sp = sinf(cam->pitch);
-    int npages = mdl->tex_h / 256;
-    float lx0 = (float)o->pos[0] + shift[0];
-    float ly0 = (float)o->pos[1] + shift[1];
-    float lz0 = (float)o->pos[2] + shift[2];
-
-    for (int fi = 0; fi < o->nf; fi++) {
-        const IgnFace *f = &o->faces[fi];
-        Vert tri[3];
-        int behind = 0, far = 0;
-        for (int k = 0; k < 3; k++) {
-            const int32_t *p = o->verts + f->v[k] * 3;
-            float vx = (float)p[0], vy = (float)p[1], vz = (float)p[2];
-            if (pre) {
-                float rx = pre[0] * vx + pre[1] * vy + pre[2] * vz;
-                float ry = pre[3] * vx + pre[4] * vy + pre[5] * vz;
-                float rz = pre[6] * vx + pre[7] * vy + pre[8] * vz;
-                vx = rx, vy = ry, vz = rz;
-            }
-            float lx = lx0 + vx, ly = ly0 + vy, lz = lz0 + vz;
-            float wx = t[0] + m[0] * lx + m[1] * ly + m[2] * lz - cam->x;
-            float wy = t[1] + m[3] * lx + m[4] * ly + m[5] * lz - cam->y;
-            float wz = t[2] + m[6] * lx + m[7] * ly + m[8] * lz - cam->z;
-            float x = wx * cy - wz * sy;
-            float z = wx * sy + wz * cy;
-            tri[k].x = x;
-            tri[k].y = wy * cp - z * sp;
-            tri[k].z = wy * sp + z * cp;
-            tri[k].u = f->uv[k * 2] / 256.0f;
-            tri[k].v = f->uv[k * 2 + 1] / 256.0f;
-            behind += tri[k].z < NEAR_Z;
-            far += tri[k].z > FAR_Z;
-        }
-        if (behind == 3 || far == 3) continue;
-
-        int npg = (int)(f->extra >> 16);
-        if (npg >= npages) npg = npages - 1;
-        const uint8_t *page = mdl->tex + (size_t)npg * 256 * 256;
-        /* Face modes 17 and 21 are opaque; the blended ones (18, 19, 22, 23) leave index 0 see-through. */
-        unsigned mode = f->flags & 0xffff;
-        int keyed = mode != 17 && mode != 21;
-
-        Vert poly[MAX_POLY];
-        int n = clip_near(tri, 3, poly);
-        ScreenVert sv[MAX_POLY];
-        for (int k = 0; k < n; k++) project(fb, &poly[k], &sv[k]);
-        for (int k = 1; k + 1 < n; k++)
-            draw_tri(fb, &sv[0], &sv[k], &sv[k + 1], page, keyed, NULL);
-    }
-}
-
 /* ---- Lisa 2 engine scene of the level (sub_0002489c) ---- */
 
 static LisaScene scene;
@@ -208,6 +152,21 @@ static void load_level_texture(const IgnModel *m) {
     free(data);
     if (!level_tex) level_tex_pages = m->tex_h / 256;
 }
+#define MAX_ENGINE_CARS 16
+
+typedef struct {
+    const IgnCar *car;
+    int body, wheel[4], shadow;
+    int32_t *mesh_body, *mesh_wheel[4], mesh_shadow[2 + 4 * 3 + 2 * 5];
+    const int32_t *src_wheel[4];
+    int32_t off_wheel[4][3];
+    int seen;
+} EngineCar;
+
+static EngineCar engine_cars[MAX_ENGINE_CARS];
+static int n_engine_cars;
+
+static int n_engine_skids;
 static int *scene_ids; /* PLC index -> engine object */
 static LisaFrame lisa_frame;
 
@@ -220,9 +179,17 @@ static void engine_pos(const IgnObject *o, int32_t *x, int32_t *y, int32_t *z, i
  * class as priority (+0x1e), the computed radius and the zone of type bits 12-15; all detail options on. */
 static int build_scene(const IgnLevel *lv) {
     if (scene_level == lv) return 0;
-    if (scene_level) lisa_scene_free(&scene), free(scene_ids), scene_level = NULL;
+    if (scene_level) {
+        for (int i = 0; i < n_engine_cars; i++) {
+            free(engine_cars[i].mesh_body);
+            for (int w = 0; w < 4; w++) free(engine_cars[i].mesh_wheel[w]);
+        }
+        n_engine_cars = 0;
+        n_engine_skids = 0;
+        lisa_scene_free(&scene), free(scene_ids), scene_level = NULL;
+    }
     const IgnModel *m = &lv->track;
-    if (lisa_scene_init(&scene, 0xc800, 0xc800, m->nobj + 64)) return -1;
+    if (lisa_scene_init(&scene, 0xc800, 0xc800, m->nobj + 2048)) return -1;
     scene.shade = lv->shd;
     load_level_texture(m);
     const uint8_t *tex = level_tex ? level_tex : m->tex;
@@ -274,16 +241,171 @@ static void engine_view(const IgnFrame *fb, const IgnCamera *cam, LisaView *v) {
 
 const LisaFrame *ign_render_last_frame(void) { return &lisa_frame; }
 
+/* ---- the frame: everything goes into one painter's list, drawn by ign_render_flush ---- */
+
+static struct {
+    int active, track;
+    const IgnLevel *lv;
+    IgnCamera cam;
+} pending;
+
+static void begin_frame(const IgnLevel *lv, const IgnCamera *cam) {
+    if (pending.active && pending.lv == lv) return;
+    pending.active = 1, pending.track = 0, pending.lv = lv, pending.cam = *cam;
+}
+
 void ign_render_track(IgnFrame *fb, const IgnLevel *lv, const IgnCamera *cam) {
+    (void)fb;
     if (build_scene(lv)) return;
     sync_scene(lv);
+    begin_frame(lv, cam);
+    pending.track = 1;
+}
+
+/* ---- cars: sub_0002489c creates per car a body (class 100 + car), four wheels (class 210) and a shadow
+ * (class 200, two type-20 faces of SHD row 0x28); car_place_objects (sub_00048a14) moves them every frame. ---- */
+
+
+static int32_t chop_d(double v) { return (int32_t)v; }
+/* car_place_objects: radians to tenths, `fld; fmul 180; fmul 1/pi; fmul 10; __CHP; fistp`. */
+static int16_t tenths(double rad) { return (int16_t)chop_d(rad * 180.0 * 0.31830988618379 * 10.0); }
+
+static int32_t *copy_mesh(const IgnObject *o) {
+    size_t words = 2 + (size_t)o->nv * 3 + (size_t)o->nf * 11;
+    int32_t *m = malloc(words * sizeof *m);
+    if (m) memcpy(m, o->verts - 2, words * sizeof *m);
+    return m;
+}
+
+static EngineCar *engine_car(const IgnLevel *lv, const IgnCar *car) {
+    for (int i = 0; i < n_engine_cars; i++)
+        if (engine_cars[i].car == car) return &engine_cars[i];
+    if (n_engine_cars >= MAX_ENGINE_CARS) return NULL;
+    EngineCar *e = &engine_cars[n_engine_cars];
+    memset(e, 0, sizeof *e);
+    e->car = car;
+    e->body = e->shadow = -1;
+    for (int w = 0; w < 4; w++) e->wheel[w] = -1;
+    const IgnModel *cm = &lv->cars;
+    static const int16_t zero[3] = {0, 0, 0};
+    int32_t px = chop_d(car->x + (double)IGN_SRF_ORIGIN), py = chop_d(car->height), pz = chop_d(car->z + (double)IGN_SRF_ORIGIN);
+    for (int p = 0; p < car->nparts; p++) {
+        const IgnObject *o = &cm->objs[car->parts[p]];
+        int part = (int)(o->type % 10);
+        int32_t *m = copy_mesh(o);
+        if (!m) continue;
+        /* cars_init: part meshes carry their offset in the car frame; the body is stretched by BANARNE */
+        int32_t *v = m + 2;
+        for (int k = 0; k < m[0]; k++, v += 3) {
+            if (part == 0) {
+                v[0] = chop_d(car->part_off[p][0] + v[0]);
+                v[1] = chop_d(car->part_off[p][1] * car->body_stretch + v[1] * car->body_stretch);
+                v[2] = chop_d(car->part_off[p][2] + v[2]);
+            } else {
+                v[0] = chop_d(car->part_off[p][0] + v[0]);
+                v[1] = chop_d(car->part_off[p][1] + v[1]);
+                v[2] = chop_d(car->part_off[p][2] + v[2]);
+            }
+        }
+        if (part == 0) {
+            e->mesh_body = m;
+            e->body = lisa_create(&scene, m, cm->tex, cm->tex_h / 256, 100 + n_engine_cars, 0);
+            if (e->body >= 0) lisa_place(&scene, e->body, px, py, pz, zero);
+        } else if (part <= 4) {
+            int w = part - 1;
+            e->mesh_wheel[w] = m;
+            e->src_wheel[w] = o->verts;
+            for (int k = 0; k < 3; k++) e->off_wheel[w][k] = chop_d(car->part_off[p][k]);
+        }
+    }
+    for (int w = 0; w < 4; w++)
+        if (e->mesh_wheel[w]) {
+            e->wheel[w] = lisa_create(&scene, e->mesh_wheel[w], cm->tex, cm->tex_h / 256, 210, 0);
+            if (e->wheel[w] >= 0) lisa_place(&scene, e->wheel[w], px, py, pz, zero);
+        }
+    /* 0x27ca9: four vertices on the ground, faces (0, 1, 3) and (0, 3, 2) */
+    int32_t *sm = e->mesh_shadow;
+    memset(sm, 0, sizeof e->mesh_shadow);
+    sm[0] = 4, sm[1] = 2;
+    const int32_t faces[2][5] = {{20, 0, 1, 3, 0x28}, {20, 0, 3, 2, 0x28}};
+    memcpy(sm + 14, faces, sizeof faces);
+    e->shadow = lisa_create(&scene, sm, NULL, 0, 200, 0);
+    if (e->shadow >= 0) lisa_place(&scene, e->shadow, px, py, pz, zero);
+    n_engine_cars++;
+    return e;
+}
+
+/* car_place_objects (sub_00048a14) */
+static void place_car(EngineCar *e) {
+    const IgnCar *car = e->car;
+    double cx = car->x + (double)IGN_SRF_ORIGIN, cz = car->z + (double)IGN_SRF_ORIGIN;
+    int32_t px = chop_d(cx), py = chop_d(car->height), pz = chop_d(cz);
+    int16_t heading = tenths(car->body.heading);
+    const int16_t body_ang[3] = {tenths(car->body_roll), heading, tenths(car->body_pitch)};
+    if (e->body >= 0) lisa_move(&scene, e->body, px, py, pz, body_ang);
+    /* the front wheels (0, 1) are turned in their mesh copies by car+0xb0 degrees */
+    double a = car->steer_visual * 3.1415926535898 * 0.005555555555555555, ca = cos(a), sa = sin(a);
+    for (int w = 0; w < 2; w++) {
+        if (!e->mesh_wheel[w]) continue;
+        const int32_t *src = e->src_wheel[w];
+        int32_t *dst = e->mesh_wheel[w] + 2;
+        for (int k = 0; k < e->mesh_wheel[w][0]; k++, src += 3, dst += 3) {
+            dst[0] = chop_d(src[0] * ca - src[2] * sa + e->off_wheel[w][0]);
+            dst[2] = chop_d(src[0] * sa + src[2] * ca + e->off_wheel[w][2]);
+        }
+    }
+    const int16_t wheel_ang[3] = {tenths(car->body.roll), heading, tenths(car->body.pitch)};
+    for (int w = 0; w < 4; w++)
+        if (e->wheel[w] >= 0) lisa_move(&scene, e->wheel[w], px, py, pz, wheel_ang);
+    /* 0x48faa: shadow offset by the height above the ground (light at 45 degrees), sent far away when out of
+     * range; corners from car+0x2fc/+0x31c with z x 1.2 */
+    double lift = car->height - car->ground, sx = cx + lift, sz = cz + lift;
+    if (0 > sx || sx > 50000.0) sx = 28000.0;
+    if (car->ground < -2500.0 || car->ground > 2500.0) sx = 0;
+    if (0 > sz || sz > 50000.0) sz = 28000.0;
+    static const int corner[4] = {2, 3, 1, 0};
+    for (int k = 0; k < 4; k++) {
+        e->mesh_shadow[2 + k * 3] = chop_d(car->corner_x[corner[k]]);
+        e->mesh_shadow[2 + k * 3 + 2] = chop_d(1.2 * car->corner_z[corner[k]]);
+    }
+    if (e->shadow >= 0) lisa_move(&scene, e->shadow, chop_d(sx), chop_d(car->ground), chop_d(sz), wheel_ang);
+}
+
+void ign_render_car(IgnFrame *fb, const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
+    (void)fb;
+    if (build_scene(lv)) return;
+    begin_frame(lv, cam);
+    EngineCar *e = engine_car(lv, car);
+    if (!e) return;
+    place_car(e);
+    e->seen = 1;
+}
+
+static void set_alive(int id, int alive) {
+    if (id >= 0) scene.objs[id].alive = alive;
+}
+
+void ign_render_flush(IgnFrame *fb) {
+    if (!pending.active) return;
+    pending.active = 0;
+    /* objects not drawn this frame are hidden (LI_HIDEOBJECT); without a track pass only cars show */
+    for (int i = 0; i < n_engine_cars; i++) {
+        EngineCar *e = &engine_cars[i];
+        set_alive(e->body, e->seen), set_alive(e->shadow, e->seen);
+        for (int w = 0; w < 4; w++) set_alive(e->wheel[w], e->seen);
+        e->seen = 0;
+    }
+    const IgnModel *m = &pending.lv->track;
+    for (int i = 0; i < m->nobj; i++) set_alive(scene_ids[i], pending.track);
     LisaView v;
-    engine_view(fb, cam, &v);
+    engine_view(fb, &pending.cam, &v);
     lisa_build(&scene, &v, &lisa_frame);
     IgnRaster r = {.fb = fb->color, .stride = fb->w};
     ign_raster_clip(&r, 0, 0, fb->w - 1, fb->h - 1);
     lisa_draw(&lisa_frame, &r);
 }
+
+/* ---- effects not yet in the engine: drawn after the painter's list with the old depth test ---- */
 
 static void mat_mul(const float a[9], const float b[9], float out[9]) {
     for (int r = 0; r < 3; r++)
@@ -304,9 +426,6 @@ static void car_matrix(float heading, double pitch, double roll, float out[9]) {
     mat_mul(yp, r, out);
 }
 
-/* Car shadows darken through SHD row 0x28, as the shadow primitive (0x13) of Ign_win.exe does. */
-#define SHADOW_SHD_ROW 0x28
-
 static void to_camera(const IgnCamera *cam, float wx, float wy, float wz, Vert *out) {
     float cy = cosf(cam->yaw), sy = sinf(cam->yaw);
     float cp = cosf(cam->pitch), sp = sinf(cam->pitch);
@@ -318,127 +437,59 @@ static void to_camera(const IgnCamera *cam, float wx, float wy, float wz, Vert *
     out->u = out->v = 0;
 }
 
-/* sub_00048a14 shadow: wheel rectangle (z x1.2) on the ground, offset diagonally by the height above it. */
-static void draw_shadow(IgnFrame *fb, const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam,
-                        const float m[9]) {
-    float qx[4], qz[4];
-    int n = 0;
-    static const int order[4] = {1, 2, 4, 3};
-    for (int k = 0; k < 4; k++)
-        for (int p = 0; p < car->nparts; p++)
-            if ((int)(lv->cars.objs[car->parts[p]].type % 10) == order[k] && n < 4) {
-                qx[n] = car->part_off[p][0];
-                qz[n] = car->part_off[p][2] * 1.2f;
-                n++;
-            }
-    if (n != 4) return;
-    float d = (float)(car->height - car->ground);
-    float ox = car->x + d, oy = (float)-car->ground, oz = car->z + d;
-    Vert quad[4], poly[MAX_POLY];
-    for (int k = 0; k < 4; k++)
-        to_camera(cam, ox + m[0] * qx[k] + m[2] * qz[k], oy + m[3] * qx[k] + m[5] * qz[k],
-                  oz + m[6] * qx[k] + m[8] * qz[k], &quad[k]);
-    int np = clip_near(quad, 4, poly);
-    if (np < 3) return;
-    ScreenVert sv[MAX_POLY];
-    for (int k = 0; k < np; k++) project(fb, &poly[k], &sv[k]);
-    const uint8_t *shade = lv->shd + SHADOW_SHD_ROW * 256;
-    for (int k = 1; k + 1 < np; k++) {
-        const ScreenVert *a = &sv[0], *b = &sv[k], *c = &sv[k + 1];
-        float area = edge(a->sx, a->sy, b->sx, b->sy, c->sx, c->sy);
-        if (fabsf(area) < 1e-6f) continue;
-        if (area < 0) {
-            const ScreenVert *t = b;
-            b = c;
-            c = t;
-            area = -area;
-        }
-        int x0 = (int)fmaxf(0, floorf(fminf(a->sx, fminf(b->sx, c->sx))));
-        int x1 = (int)fminf(fb->w - 1, ceilf(fmaxf(a->sx, fmaxf(b->sx, c->sx))));
-        int y0 = (int)fmaxf(0, floorf(fminf(a->sy, fminf(b->sy, c->sy))));
-        int y1 = (int)fminf(fb->h - 1, ceilf(fmaxf(a->sy, fmaxf(b->sy, c->sy))));
-        for (int y = y0; y <= y1; y++)
-            for (int x = x0; x <= x1; x++) {
-                float px = x + 0.5f, py = y + 0.5f;
-                float w0 = edge(b->sx, b->sy, c->sx, c->sy, px, py) / area;
-                float w1 = edge(c->sx, c->sy, a->sx, a->sy, px, py) / area;
-                float w2 = edge(a->sx, a->sy, b->sx, b->sy, px, py) / area;
-                if (w0 < 0 || w1 < 0 || w2 < 0) continue;
-                float iz = w0 * a->iz + w1 * b->iz + w2 * c->iz;
-                int idx = y * fb->w + x;
-                /* Lies on the road: accept small depth differences instead of z-fighting. */
-                if (iz < fb->inv_z[idx] * 0.97f) continue;
-                fb->color[idx] = shade[fb->color[idx]];
-            }
-    }
-}
+/* ---- skid marks: sub_0003731c keeps a ring of 700 engine objects (class 200, radius 20, texture slot 0), each
+ * an 8-vertex mesh of two tyre quads as type-20 faces (0, 1, 2), (2, 1, 3) and (4, 5, 6), (6, 5, 7) of the SHD row
+ * of the surface (0xc34e0), placed at the axle point. The port keeps the corners as floats; the original stores
+ * them as integers relative to the truncated axle point, rebuilt here from the current edge. ---- */
 
-/* sub_00048a14: body and four wheels; wheels +1/+2 (front) turn by car+0xb0 degrees about their own axis. */
-void ign_render_car(IgnFrame *fb, const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
-    float t[3] = {car->x, car->y, car->z};
-    float body[9], wheels[9];
-    car_matrix(car->heading, car->body_pitch, car->body_roll, body);
-    car_matrix(car->heading, car->body.pitch, car->body.roll, wheels);
-    draw_shadow(fb, lv, car, cam, wheels);
-    const float stretch[9] = {1, 0, 0, 0, car->body_stretch, 0, 0, 0, 1};
-    float a = (float)(car->steer_visual * (3.14159265358979 / 180.0));
-    float ca = cosf(a), sa = sinf(a);
-    const float steer[9] = {ca, 0, -sa, 0, 1, 0, sa, 0, ca};
-    for (int p = 0; p < car->nparts; p++) {
-        const IgnObject *o = &lv->cars.objs[car->parts[p]];
-        int part = (int)(o->type % 10);
-        float shift[3] = {car->part_off[p][0] - (float)o->pos[0],
-                          car->part_off[p][1] * (part ? 1.0f : car->body_stretch) - (float)o->pos[1],
-                          car->part_off[p][2] - (float)o->pos[2]};
-        draw_object(fb, &lv->cars, o, cam, part ? wheels : body, t,
-                    part == 1 || part == 2 ? steer : part ? NULL : stretch, shift);
-    }
-}
+typedef struct {
+    IgnSkidMark src;
+    int id;
+    int32_t mesh[2 + 8 * 3 + 4 * 5];
+} EngineSkid;
 
-/* Flat polygon lying on the road (accepts small depth differences, like the shadow), darkened through `shade`. */
-static void fill_ground_poly(IgnFrame *fb, const IgnCamera *cam, const float *x, float y, const float *z, int n,
-                             const uint8_t *shade) {
-    Vert quad[MAX_POLY], poly[MAX_POLY];
-    for (int k = 0; k < n; k++) to_camera(cam, x[k], y, z[k], &quad[k]);
-    int np = clip_near(quad, n, poly);
-    if (np < 3) return;
-    ScreenVert sv[MAX_POLY];
-    for (int k = 0; k < np; k++) project(fb, &poly[k], &sv[k]);
-    for (int k = 1; k + 1 < np; k++) {
-        const ScreenVert *a = &sv[0], *b = &sv[k], *c = &sv[k + 1];
-        float area = edge(a->sx, a->sy, b->sx, b->sy, c->sx, c->sy);
-        if (fabsf(area) < 1e-6f) continue;
-        if (area < 0) {
-            const ScreenVert *t = b;
-            b = c;
-            c = t;
-            area = -area;
+static EngineSkid engine_skids[IGN_MAX_SKIDS];
+
+static void place_skid(EngineSkid *e, const IgnSkidMark *m) {
+    e->src = *m;
+    double ax = 0, az = 0;
+    for (int k = 0; k < 2; k++) ax += m->x[k][2] + m->x[k][3], az += m->z[k][2] + m->z[k][3];
+    int32_t ox = chop_d(ax / 4 + IGN_SRF_ORIGIN), oz = chop_d(az / 4 + IGN_SRF_ORIGIN), oy = chop_d(-m->y);
+    int32_t *mesh = e->mesh;
+    mesh[0] = 8, mesh[1] = 4;
+    /* per tyre: previous outer, previous inner, current outer, current inner */
+    static const int corner[4] = {1, 0, 2, 3};
+    for (int k = 0; k < 2; k++)
+        for (int c = 0; c < 4; c++) {
+            int32_t *v = mesh + 2 + (k * 4 + c) * 3;
+            v[0] = chop_d(m->x[k][corner[c]] + IGN_SRF_ORIGIN) - ox;
+            v[1] = 0;
+            v[2] = chop_d(m->z[k][corner[c]] + IGN_SRF_ORIGIN) - oz;
         }
-        int x0 = (int)fmaxf(0, floorf(fminf(a->sx, fminf(b->sx, c->sx))));
-        int x1 = (int)fminf(fb->w - 1, ceilf(fmaxf(a->sx, fmaxf(b->sx, c->sx))));
-        int y0 = (int)fmaxf(0, floorf(fminf(a->sy, fminf(b->sy, c->sy))));
-        int y1 = (int)fminf(fb->h - 1, ceilf(fmaxf(a->sy, fmaxf(b->sy, c->sy))));
-        for (int yy = y0; yy <= y1; yy++)
-            for (int xx = x0; xx <= x1; xx++) {
-                float px = xx + 0.5f, py = yy + 0.5f;
-                float w0 = edge(b->sx, b->sy, c->sx, c->sy, px, py) / area;
-                float w1 = edge(c->sx, c->sy, a->sx, a->sy, px, py) / area;
-                float w2 = edge(a->sx, a->sy, b->sx, b->sy, px, py) / area;
-                if (w0 < 0 || w1 < 0 || w2 < 0) continue;
-                float iz = w0 * a->iz + w1 * b->iz + w2 * c->iz;
-                int idx = yy * fb->w + xx;
-                if (iz < fb->inv_z[idx] * 0.97f) continue;
-                fb->color[idx] = shade[fb->color[idx]];
-            }
+    const int32_t faces[4][5] = {{20, 0, 1, 2, m->color}, {20, 2, 1, 3, m->color}, {20, 4, 5, 6, m->color},
+                                 {20, 6, 5, 7, m->color}};
+    memcpy(mesh + 2 + 8 * 3, faces, sizeof faces);
+    static const int16_t zero[3] = {0, 0, 0};
+    if (e->id < 0) {
+        e->id = lisa_create(&scene, mesh, NULL, 0, 200, 0);
+        if (e->id < 0) return;
+        lisa_set_mesh(&scene, e->id, mesh, 20);
+        lisa_place(&scene, e->id, ox, oy, oz, zero);
+    } else {
+        lisa_set_mesh(&scene, e->id, mesh, 20);
+        lisa_move(&scene, e->id, ox, oy, oz, zero);
     }
 }
 
 void ign_render_skids(IgnFrame *fb, const IgnLevel *lv, const IgnSkids *s, const IgnCamera *cam) {
-    /* The mark face value (0xc34e0) is read as an SHD row: 38/42/92 darken the road, 0 leaves it as it is. */
-    for (int i = 0; i < s->count; i++) {
-        const IgnSkidMark *m = &s->marks[i];
-        if (!m->color) continue;
-        for (int k = 0; k < 2; k++) fill_ground_poly(fb, cam, m->x[k], m->y, m->z[k], 4, lv->shd + m->color * 256);
+    (void)fb;
+    if (build_scene(lv)) return;
+    begin_frame(lv, cam);
+    for (int i = 0; i < s->count && i < IGN_MAX_SKIDS; i++) {
+        EngineSkid *e = &engine_skids[i];
+        if (i >= n_engine_skids) e->id = -1, n_engine_skids = i + 1;
+        else if (!memcmp(&e->src, &s->marks[i], sizeof e->src)) continue;
+        place_skid(e, &s->marks[i]);
     }
 }
 

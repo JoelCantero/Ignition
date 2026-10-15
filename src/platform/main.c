@@ -244,6 +244,7 @@ static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     if (ign_car_visible(car)) ign_render_car(&frame, lv, car, cam);
     IgnCar *all[MAX_RIVALS + 1] = {(IgnCar *)car};
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
+    ign_render_flush(&frame);
     ign_render_fx(&frame, lv, &fx, all, nrivals + 1, cam);
     ign_render_weather(&frame, lv, &weather, cam);
     ign_hud_draw(&hud, &frame, car, nrivals + 1);
@@ -393,6 +394,7 @@ int main(int argc, char **argv) {
             memset(frame.color, bg, sizeof frame.color);
             memset(frame.inv_z, 0, sizeof frame.inv_z);
             ign_render_car(&frame, &ml, &mc, &mcam);
+            ign_render_flush(&frame);
             return write_ppm(shot, &frame, &ml.palette) ? 1 : 0;
         } else if (!strcmp(argv[i], "--cam") && i + 5 < argc) {
             cam.x = strtof(argv[++i], NULL);

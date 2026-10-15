@@ -67,6 +67,7 @@ int lisa_create(LisaScene *s, const int32_t *mesh, const uint8_t *tex, int tex_p
 void lisa_place(LisaScene *s, int id, int32_t x, int32_t y, int32_t z, const int16_t ang[3]);
 void lisa_move(LisaScene *s, int id, int32_t x, int32_t y, int32_t z, const int16_t ang[3]);
 void lisa_remove(LisaScene *s, int id);
+void lisa_set_mesh(LisaScene *s, int id, const int32_t *mesh, int radius);
 
 /* render_scene layers, the flags [0x24c05c]+0x3c/+0x40/+0x50/+0x54 (+0x38, the look-at, is the caller's). */
 enum {
