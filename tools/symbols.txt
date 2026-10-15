@@ -133,6 +133,25 @@
 00049a8c  sound_play           (group, sub, idx, loops, vol, Hz, x, z) distance attenuated  status=ported roadmap=phase4.audio
 0002a4ec  sound_load           banks GENERAL ROLL/SKID/COLL/BOOST/DIV, level, cars + ENGINE.INF  status=ported roadmap=phase4.audio
 00063310  sound_load_dir       load NN_*.WAV/PAT/XI of a directory  status=ported roadmap=phase4.audio
+0006442f  cd_init              MSCDEX present (0x64559) + 0x400 B DOS buffer (DPMI 0x100) -> [0x25ade8]  status=identified roadmap=phase4.audio
+000644c5  cd_free              DPMI 0x101 frees the DOS buffer  status=identified roadmap=phase4.audio
+00064559  cd_mscdex_check      int 0x2f AX=0x1500 via DPMI 0x300; [0xd7d90] drives, [0x25adec] first drive  status=identified roadmap=phase4.audio
+000645e1  cd_request           int 0x2f AX=0x1510 (send device request [0x25ade8]) via DPMI 0x300  status=identified roadmap=phase4.audio
+00064659  cd_request_header    al=command, edx=IOCTL length: 0x0d-byte header, transfer buffer at +0x20  status=identified roadmap=phase4.audio
+00064332  cd_play_audio        command 0x84, eax=start, edx=frames  status=identified roadmap=phase4.audio
+00064391  cd_stop_audio        command 0x85; menu, options and shutdown  status=identified roadmap=phase4.audio
+00064241  cd_play_track        eax=track 1..[0x25a934], start [0x25a938+4n], length [0x25ab90+4n] (music.c ign_music_play)  status=ported roadmap=phase4.audio
+000640b3  cd_read_toc          IOCTL 0x0a disc info (first/last track) and per-track info (0x0b ¿?); MSF -> frames 0x64710  status=identified roadmap=phase4.audio
+00064710  cd_msf_to_frames     m*4500 + s*75 + f - 150  status=identified roadmap=phase4.audio
+00063f3e  cd_set_volume        eax 0..255 on the 4 channels (IOCTL output 3); race [0x1feef4]*2.55, menu [0xe9cf7]*25.5  status=ported roadmap=phase4.audio
+00063cf3  cd_busy              IOCTL 0x0c audio status + busy bit 9 of the request status; 0 = idle (race loop 0x21320 replays the track)  status=identified roadmap=phase4.audio
+00063d56  cd_media_check       IOCTL 4 channel info, 6 device status (bit 0 -> [0x25adf4], 1 = audio usable ¿?), 9 media changed, 0x0c  status=identified roadmap=phase4.audio
+000c3fd8  t_level_cd_track     7 x int by track id [0x1fef10]: {2,3,4,5,6,6,7}  status=ported roadmap=phase4.audio
+001feed8  g_cd_track           current CD track; set by 0x2293c, keys 0xcb/0xcd (0x2c1cb) and joystick (0x4d228)  status=ported roadmap=phase4.audio
+001ff24f  g_cfg_music_track    0 = level's track, -1 = random 1 + rand*[0x25a934], n = fixed (--music-track)  status=ported roadmap=phase4.audio
+001ff253  g_cfg_music_volume   0..10; x10 -> [0x1feef4]; 0 disables the replay in the race loop (--music-volume)  status=ported roadmap=phase4.audio
+000e9cf3  g_menu_music_track   menu copy of the setting; 0 plays track 7 (0x13356)  status=identified roadmap=phase4.audio
+0025a934  g_cd_last_track      last audio track of the disc (TOC)  status=identified roadmap=phase4.audio
 00050824  engine_sound         ENGINE.INF rate/volume by car+0x288  status=ported roadmap=phase4.audio
 00050464  roll_sound           rolling loops by rear wheel surface  status=ported roadmap=phase4.audio
 000360f0  ambient_sound        PLC 0x190+n emitters volume by distance  status=ported roadmap=phase2.effects
