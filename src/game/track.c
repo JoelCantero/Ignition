@@ -256,7 +256,7 @@ static int route_record_for_object(const IgnLevel *lv, int object, IgnAiRouteRec
     record->point[5] = obj->verts[right * 3 + 2] + obj->pos[2] + IGN_SRF_ORIGIN;
     record->object = object;
     record->plc = plc;
-    record->plc_type = (uint8_t)obj->type;
+    record->surface = (int8_t)tri[0]; /* 0x1d2eb..0x1d2f1 */
     record->tri_type = tri[0x6d];
     record->valid = 1;
     return 1;
@@ -266,29 +266,12 @@ static int32_t midpoint(int32_t a, int32_t b) {
     return (int32_t)((int64_t)a + ((int64_t)b - a) / 2);
 }
 
-/* Keep the fractional offset when binary64 would round an almost-integer x87 sum. */
+/* 0x1d9d0..0x1da22 under the runtime control word 0x127f: fcos/fsin are not rounded by the precision
+ * control, but the following fmul/faddp round to binary64 before __CHP truncates. */
 static int32_t inset_coordinate(int32_t origin, double angle, int sine) {
-    double trig = sine ? sin(angle) : cos(angle);
-    double offset = 18 * trig;
-    double residual = fma(18, trig, -offset);
-    if (fabs(trig) == 1 && angle != 0) {
-        double pole = sine ? copysign(1.5707963267948966, trig) :
-                             copysign(3.141592653589793, angle);
-        double half = sin((angle - pole) * 0.5);
-        residual -= 36 * trig * half * half;
-    }
-    double integer = floor(offset);
-    double fraction = offset - integer + residual;
-    if (fraction < 0) {
-        integer--;
-        fraction++;
-    } else if (fraction >= 1) {
-        integer++;
-        fraction--;
-    }
-    int64_t result = (int64_t)origin + (int64_t)integer;
-    if (result < 0 && fraction > 0) result++;
-    return result < INT32_MIN || result > INT32_MAX ? INT32_MIN : (int32_t)result;
+    double value = (double)origin + 18 * (sine ? sin(angle) : cos(angle));
+    double integer = trunc(value);
+    return integer < INT32_MIN || integer > INT32_MAX ? INT32_MIN : (int32_t)integer;
 }
 
 void ign_track_ai_geometry(IgnAiRouteRecord *record, const IgnAiRouteRecord *next) {

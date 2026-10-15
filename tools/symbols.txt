@@ -19,8 +19,8 @@
 000230f4  load_plc             LEVELS\..PLC + CARS\CARS.PLC  roadmap=phase2.world
 0002322c  load_msh             LEVELS\..MSH + CARS\CARS.MSH  roadmap=phase2.world
 00023368  load_tex             LEVELS\..TEX + CARS.TEX  roadmap=phase2.world
-0001ce30  load_tri             direct PLC sections, two canonical slots, float32 angles and integer insets; bounded geometry oracle tests/ai_geometry_original.py, full loader excluded  status=partial roadmap=phase1.ai-route
-0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car; stored TRI heading and original travel blend, full controller excluded  status=partial roadmap=phase1.ai-route
+0001ce30  load_tri             direct PLC sections, two canonical slots, record +1 = TRI block byte 0, float32 angles and binary64 insets (CW 0x127f); bounded geometry oracle tests/ai_geometry_original.py, full loader excluded  status=partial roadmap=phase1.ai-route
+0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car; stored TRI heading, travel blend, lookahead index clamp, target clipping by insets and curvature 0x1b4a2..0x1b823 (oracle tests/ai_target_original.py); record/lane selection, slope, spin, 5/8 gains and avoidance sign excluded  status=partial roadmap=phase1.ai-route
 00026458  cars_init            allocs cars/bodies, torque splines, start grid (slots 0xc33d0); bounded turbo initialization 0x27451..0x27497 verified, full init excluded  roadmap=phase1.car
 00048a14  car_place_objects    per frame: body/wheels/shadow/name engine objects, front wheel steer  roadmap=phase3.render
 00040ec8  cars_body_sway       body tilt car+0x584/+0x58c = ground tilt + lean, smoothed 0.25  roadmap=phase1.car
@@ -100,7 +100,7 @@
 001fefe8  g_bodies             0x1d0 bytes per car
 000c4e20  t_car_mass
 000c4fd0  t_car_gears          12 cars x 3 gears x 8 int
-000c33f0  t_surface_grip       30 doubles
+000c33f0  t_surface_grip       30 doubles; ai_drive 0x1b732 also indexes it with signed TRI bytes -21/79/90/97 (static zero/subnormal words)
 000c4dc0  t_car_grip
 00033ee8  collect_walls        unshared edges of static drivable faces; per-track height, jump mode (ported)  status=ported roadmap=phase1.physics
 0001f708  box_vs_walls         (ported: ign_body_collide)  status=ported roadmap=phase1.physics
@@ -172,6 +172,7 @@
 000350f0  car_ground_contact   moving-object collisions; calls ground_query  status=port-pending roadmap=phase2.collisions
 0002de30  race_elimination    mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), "%s IS OUT"; [0x1fed78]-- ; at 1 left, all finish  roadmap=phase1.race
 0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> wrap/fallback/invalid-record selection ported; route topology remains approximate  status=partial roadmap=phase1.ai-route
+000bf994  t_ai_lookahead        6 i16 section offsets {1,2,3,4,6,8} (read as dword [0xbf992+2k] >> 16)
 000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty
 00010010  main                 lisa_init, video, kbd_init(350,70), timer, loop main_step; replaced by SDL main()  status=native roadmap=phase4.loop

@@ -474,7 +474,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Sombra del coche | `0x48a14` | `raster.c` | geometría fiel; sombreado aproximado |
 | Trucos (BANARNE, SURMULE, SLASKTRATT…) | `menu_page_key` `0x160c4` | `frontend.c`, `main.c` | fiel: se teclean en el menú; BANARNE también en carrera |
 | BTZ, récords, contrarreloj y campeonato | `0x2293c`, `0x2adf8`, `0x2ccc8`, `0x2cf60`, `render_main` `0x45938`, menú `0x1a864` | `save.c`, `ghost.c` | ida y vuelta byte a byte del BTZ real; imagen por defecto idéntica al original (Unicorn); reglas por pruebas unitarias; sin clasificación por puntos |
-| IA de rivales | `ai_drive` `0x1aea0` | `ai.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, registros `load_tri` con mapeo engine→PLC, selector `ai_find_section` y reglas observadas de topología/ramas implementados; la estructura de rutas y registros TRI pasa `track_real_assets` en las 7 pistas, pero falta una comparación independiente con la tabla runtime original y la asignación exacta de registros divididos a carriles; pendiente (Y), giro por solape y frenada de curva (heurística) |
+| IA de rivales | `ai_drive` `0x1aea0`, `load_tri` `0x1ce30` | `ai.c`, `track.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, índices PLC directos, dos slots canónicos, selector y topología implementados; ángulos float32/interiores verificados por fragmentos con el CW real `0x127f` (4 920 comparaciones exactas) y mezcla de rumbo (1 184 casos); recorte del objetivo y curvatura `0x1b4a2..0x1b823` verificados por fragmento (7 562 casos); faltan pendiente Y, giro por solape, ganancias 5/8, esquiva y cotejo integral de carriles/controlador |
 | Render 3D | motor Lisa 2 | `raster.c` | propio: z-buffer, sin sombreado TAB |
 | HUD de carrera y mensajes | `race_hud` `0x4a320`, `0x4be7c`, `0x4c7c0`/`0x4c858`/`0x4c89c`, `0x4a150`, `0x28000` | `hud.c` | fiel: tablas de recortes, colocación y texto de las tres resoluciones, ventanas de uno y dos jugadores; contadores a 36 Hz |
 | Fuentes LFT/FNT | `0x61220`, `0x61399`, `0x616db`, `0x61959`, `0x53d60` | `font.c` | fiel; pruebas del parser |
@@ -489,13 +489,28 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 
 Geometría IA: `tests/ai_geometry_original.py` compara ambos fragmentos LE con `atan2`/`__CHP`
 reales, para 902 fixtures sintéticos y 1 558 registros de las siete pistas; compara bits float32
-y coordenadas enteras. No ejecuta todo el cargador ni el controlador DOS. Los controles humanos
-recto/turbo conservan **14/14** trazas de 576 ticks, 112 campos, estado e imagen idénticos al
-build anterior al bloque. El smoke repetido de 200 s con siete rivales pasa **7/7** en ejecución
-y determinismo, pero persisten atascos: no demuestra carreras completas ni IA terminada.
-Se conserva la referencia histórica sin regenerar.
-Las 12 pruebas focalizadas pasan, incluido el replay de 21 escenarios. Contra la referencia
-histórica permanecen **0/23**: 22 diferencias de estado, 23 de imagen y ninguna de ejecución.
+y coordenadas enteras. Ahora se ejecuta con el control word del runtime **`0x127f`** (53 bits), como
+los demás oracles: con el antiguo `0x037F` (64 bits) el oracle pasaba, pero con `0x127f` el residuo
+extendido del port fallaba en 297 comparaciones de interiores (20 registros reales) y en un límite de
+la mezcla de rumbo. Interiores y mezcla usan ya aritmética binary64 directa; con `0x127f` hay 0 fallos.
+
+Recorte del objetivo: `tests/ai_target_original.py` ejecuta sin parchear `0x1b4a2→0x1b823` de `ai_drive`
+(cambio de rumbo inicial, recorte por interiores, byte TRI de agarre y suma de curvatura) con `atan2` real
+y CW `0x127f`: **7 562 casos** (1 830 sintéticos y 5 432 de registros slot 0 de las siete pistas) sin
+fallos; enteros, centros, signo y doubles comparados bit a bit. Cubre 224 de 228 instrucciones del
+fragmento; mutaciones del port (bucle interior, signo, orden de producto, constante π, centro) se detectan.
+No valida la selección de registros/carril ni el controlador completo. Los consumidores posteriores
+(divisor `3·índice+6` del acelerador, condición `índice>2` del ajuste interior, `look_off[índice]` del turbo,
+`a8 = 1+(agarre+0.8)·curva`) se portan por lectura del desensamblado, sin oracle propio; esa lectura
+corrigió además el divisor invertido del ajuste interior con signo +1 (`0x1c57a..0x1c5a4`).
+
+Controles humanos (`--sim 60` con dirección 0, 1 y turbo): **21/21** trazas `IGN_TRACE` de 60 s e imágenes idénticas al build
+anterior al bloque, en las siete pistas. El smoke repetido de 200 s con siete rivales es determinista en las
+**7/7** pistas y sin NaN. Frente al build anterior (casi todos los rivales en la vuelta 0), en USA, BRAZIL,
+CARIB, ICELAND y JAPAN la mayoría pasa a las vueltas 1–3, pero CANADA (secciones −158/−159) y AUSTRIA
+(196–201, todos en la vuelta 0) siguen atascados y quedan rivales a <10 km/h: no demuestra carreras
+completas ni IA terminada. Se conserva la referencia histórica sin
+regenerar: **0/23** (22 diferencias de estado, 23 de imagen, ninguna de ejecución).
 Véanse [alcance geométrico y límites](docs/formats.md#geometría-derivada-de-load_tri-y-mezcla-de-rumbo-verificación-por-fragmentos).
 
 ---
@@ -658,8 +673,11 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 ## Desviaciones conocidas respecto al original
 
 1. **IA**: port parcial de `0x1aea0` (`ai.c`): tablas de carril, dos slots TRI por sección PLC, ángulos float32
-   y mezcla de rumbo implementados; acelerador/controlador y frenada por curvatura aún incompletos.
-   Los interiores se calculan pero falta aplicarlos al recorte del objetivo. Las puertas antiguas
+   y mezcla de rumbo implementados; el recorte del objetivo por interiores y la suma de curvatura siguen el
+   original, pero acelerador/controlador (pendiente Y, giro por solape, ganancias 5/8, esquiva) aún incompletos.
+   La selección de los seis registros de lookahead usa los helpers de ruta del port; sin geometría TRI (no ocurre
+   en las siete pistas) se apunta al centro de la puerta siguiente, y un byte de agarre fuera de tabla distinto de
+   −21/79/90/97 lee 0 en lugar de memoria del original. Las puertas antiguas
    `ign_track_gates` usadas por progreso/reaparición aún hacen una segunda conversión engine→PLC
    incorrecta para secciones; se conserva su comportamiento en este bloque y se documenta como deuda separada.
 2. **Render**: z-buffer propio en lugar del orden del pintor del motor Lisa 2 (el original no usa profundidad por
@@ -791,9 +809,10 @@ implementado.
 
 - [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: contador de atasco/turnos, tablas de carril/RNG,
       registros PLC y dos slots `load_tri`, selector `0x1decc` y topología observada; geometría derivada con
-      4 920 comparaciones exactas contra fragmentos originales y mezcla de rumbo con 1 184 casos.
-      No acredita cargador/controlador completo. Pendientes: recorte por interiores, asignación final de carriles,
-      pendiente Y, giro por solape, ganancias y esquiva) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
+      4 920 comparaciones exactas contra fragmentos originales con CW `0x127f` y mezcla de rumbo con 1 184 casos;
+      recorte del objetivo por interiores y curvatura `0x1b4a2..0x1b823` con 7 562 casos.
+      No acredita cargador/controlador completo. Pendientes: asignación final de carriles,
+      pendiente Y, giro por solape, ganancias 5/8 y esquiva) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
       byte `+0x6d` de TRI), consulta de puertas `0x1decc`, velocidad objetivo por curvatura y pendiente
       (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
       Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.
@@ -859,10 +878,9 @@ implementado.
       caras 18/19/22). **SHD**: fila 0x28 = sombra de coche (hecho); resto de filas por confirmar en el DOS.
 - [ ] **P1** USA tramos 48–50: la IA no salta el barranco a ~70 km/h, cae al fondo y no hay reaparición
       (`0x00435910` en `Ign_win.exe`), así que se queda atascada.
-- [ ] **P1** IA contra los muros: ahora los bordes contienen a los coches en las 7 pistas, y la IA (que apunta al punto
-      medio de puertas a +1…+8 tramos) corta las curvas contra el borde interior a toda velocidad y se queda empujando
-      (ICELAND tramo 17 a 157 km/h, tramo ~65, JAPAN, CARIB). Falta la línea de carrera y los registros por tramo
-      originales de `load_tri` ya se cargan parcialmente, pero falta reproducir toda su geometría de conducción.
+- [ ] **P1** IA contra los muros: ahora los bordes contienen a los coches en las 7 pistas. La IA ya elige el punto
+      medio de +1…+8 tramos con el recorte original por interiores, pero siguen atascos (CANADA −159, AUSTRIA 198,
+      rivales a 0–8 km/h en ICELAND). Faltan pendiente, giro por solape, esquiva y la selección de carril original.
       El contador de atasco y las ventanas de marcha atrás ya siguen el original; no garantizan desatascarse.
 - [x] **P1** Planificador rotatorio de IA de `cars_update_all`: fase de controles a 36 Hz, pero decisión nueva
       por coche a **36/N Hz**, con N coches totales, incluidos humanos/inactivos. Resto de turnos: replay de

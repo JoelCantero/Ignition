@@ -139,7 +139,7 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   maintain, aggr, sight, curveinflu, slopeinflu). `TEST.AIS` no se lee en el juego.
 - **Desviación**: `src/game/ai.c` sigue siendo parcial: usa los registros TRI y sus ángulos float32, pero el objetivo
   y parte de la ley de control conservan aproximaciones. El atasco ya usa el contador original por turnos, no una
-  distancia o espera inventada; faltan el recorte del objetivo por los puntos interiores, pendiente y controlador completo.
+  distancia o espera inventada; el recorte del objetivo por interiores ya se aplica; faltan pendiente y controlador completo.
 - **Carril (`t_ai_lanes`, `0xbf9a0`)**: portadas las cuatro filas por configuración y la permutación de pistas
   `{1,2,3,6,4,0,5}`. En cada fila coincidente se escribe `selector` en `+0x66`, se consume un `rand()` y se guarda
   `r = (rand() & 0x7fff) / 32768` en `+0x6c`; la elección `+0x64` es 0 si `chance=0`, 1 si `chance=100`, o
@@ -174,7 +174,8 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 
 ### Geometría derivada de `load_tri` y mezcla de rumbo: verificación por fragmentos
 
-El registro original mide `0x4b` bytes: invalidez `+0`, tipo PLC `+1`, bordes L/R xyz i32
+El registro original mide `0x4b` bytes: invalidez `+0`, byte 0 del bloque TRI `+1` (`[0xeb780][plc]`,
+`0x1d2eb..0x1d2f1`; índice con signo de `t_surface_grip`, no el tipo PLC), bordes L/R xyz i32
 `+0x02..+0x16`, cuatro puntos interiores L/R xz i32 `+0x1a..+0x26`, tres rumbos float32
 `+0x2a/+0x2e/+0x32`, tres pendientes float32 `+0x36/+0x3a/+0x3e`, dos ángulos transversales
 float32 `+0x42/+0x46` y tipo TRI `+0x4a`. El sucesor se resuelve con `ai_find_section`,
@@ -184,12 +185,14 @@ Los rumbos son `atan2(Δz, Δx)`; las pendientes son **`atan2(Δy, Δx)`**, no l
 respecto a la distancia horizontal. El centro entero de cada componente es
 `a + trunc((b-a)/2)`, también para diferencias negativas impares. Los ángulos transversales
 se calculan con las restas directas L→R y R→L, idénticas en ambos slots. Los interiores
-son `trunc(borde + 18*cos/sin(ángulo_float32))`; la suma/trigonometría x87 puede quedar
-justo por debajo de un entero aunque binary64 redondee al entero. El port conserva ese
-residuo antes de truncar, en lugar de usar una conversión directa tras sumar en double.
+son `trunc(borde + 18*cos/sin(ángulo_float32))` (`0x1d9d0..0x1da22`). Con el control word del
+runtime `0x127f` (`[0xe6be0]`, 53 bits), `fcos/fsin` no se redondean por la precisión, pero
+`fmul` y `faddp` sí redondean a binary64 antes de `__CHP`: el port usa esa suma binary64 directa.
+Una versión anterior conservaba el residuo de 64 bits; sólo coincidía con el oracle ejecutado
+con `0x037F` y fallaba con `0x127f` en 297 comparaciones (20 registros reales).
 
 `tests/ai_geometry_original.py` ejecuta los dos fragmentos sin parchear
-`0x1d80a→0x1da25` y `0x1da75→0x1dc8f`, con los helpers reales `atan2` y `__CHP`.
+`0x1d80a→0x1da25` y `0x1da75→0x1dc8f`, con los helpers reales `atan2` y `__CHP` y CW `0x127f`.
 Compara bits de los ocho float32 y los cuatro enteros: **4 920 comparaciones exactas**,
 902 fixtures sintéticos y 1 558 registros reales, cada uno contra ambos fragmentos.
 Los registros reales proceden del constructor del port: se verifica su geometría derivada,
@@ -207,13 +210,64 @@ El fragmento `0x1be03→0x1bf60` mezcla rumbo con dirección del movimiento:
 π=`3.1415926535898` y 2π=`6.2831853071796`. Si la separación sin envolver supera π,
 se sustituye por `2π-separación`; si supera `0.78539816339745`, devuelve el rumbo
 original **sin wrap posterior**. En reposo la dirección de movimiento es cero.
-Se conserva la comparación x87 anterior a recargar el valor binary64 en el límite −π.
+Con CW `0x127f` la suma ya está redondeada a binary64 al compararla, así que el port compara
+directamente el double (el residuo extendido anterior sólo coincidía con `0x037F`).
 **1 184 casos** (umbrales y vecinos binary64, más 500 aleatorios), tolerancia absoluta
-`2e-15`; no se afirma igualdad bit a bit de todos los double.
+`2e-15` y error máximo medido 0; no se afirma igualdad bit a bit: con `motion` subnormal el rango
+de exponente x87 puede dar `-0.0` donde binary64 da `+0.0`.
 
-Pendientes de la IA completa: recorte del objetivo `0x1b59d..0x1b631` usando los interiores
-ya calculados, término de pendiente Y, giro por solape, ganancias control 5/8, signo de
-esquiva según el lateral del rival y cotejo integral de selección de carril y controlador.
+### Recorte del objetivo y curvatura (`0x1b1a5..0x1b823`): verificación por fragmento
+
+- **Lookahead** (`0x1b1a5..0x1b278`): seis registros en `s + {1,2,3,4,6,8}` (tabla i16 `0xbf994`),
+  guardados en `[esp+0..0x14]`. Índice con un único wrap (`≥ count → −count`) y después, si
+  `índice ≥ count−3`, se fuerza a `count−1`. Ruta: `+0x64` si la sección no tiene segundo slot,
+  si no la elección de carril `[esp+0x178]`; búsqueda con `ai_find_section(índice, ruta, 1)`.
+  El port reproduce el índice (`ign_ai_lookahead_section`), pero el registro/carril sigue saliendo de
+  sus helpers de ruta: **no** se verifica la selección original de registros.
+- `[esp+0x40]` (`0x1b4a2..0x1b4e9`): `rumbo_centro(r0) − rumbo_centro(actual)` (float32 `+0x2e`),
+  con un wrap de una pasada (primero `< −π` suma 2π, luego `> π` suma −2π; constantes
+  `3.1415926535898`/`6.2831853071796`).
+- **Recorte** (`0x1b4f1..0x1b6f6`): para `k = 5…1`, centro entero de `r[k]` (`a + (b−a)/2` en 32 bits,
+  truncando hacia cero), guardado en `[esp+0xe8]/[esp+0xe0]`, y `aim = atan2(cz − coche_z, cx − coche_x)`
+  en `[esp+0xf0]`. Para cada `j = 0…k`: `dL = wrap(atan2(cz − Lz_in, cx − Lx_in) − aim)`,
+  `dR = wrap(atan2(cz − Rz_in, cx − Rx_in) − aim)` con los interiores `+0x1a..+0x26`. Si `0 > dL·dR`
+  la línea de visión pasa entre ambos interiores; si no (incluido 0 o NaN), el candidato queda bloqueado,
+  `[esp+0x144] = 0 > dL ? −1 : 1` y se prueba `k−1`. Se acepta el primer `k` sin bloqueo; si todos se
+  bloquean, `esi = 0` pero el centro guardado es el de `r[1]` (último probado). `[esp+0x144]` vale 0 sólo si
+  `k = 5` pasa a la primera. El bucle `0x1b4e9..0x1b4ef` es código muerto.
+- `[esp+0x130] = {1,2,3,4,6,8}[esi]`; `ebp = s + offset` con un wrap (entrada de la pendiente, aún no portada).
+- **Agarre** (`0x1b721..0x1b75d`): `max(0, (8 − t_surface_grip[(int8) actual+1]) · 0.125)` con el byte
+  TRI del registro actual. En las siete pistas aparecen índices fuera de la tabla de 30: −21, 79, 90 y 97
+  (BRAZIL 205/206 incluidos); leen datos estáticos de sólo lectura que, como double, son 0 o subnormales,
+  así que el agarre es exactamente 1.0. El port copia esos cuatro patrones de bits; otro índice fuera de la
+  tabla devolvería 0 (desviación no alcanzada por los TRI incluidos).
+- **Curvatura** (`0x1b764..0x1b821`): `n = min(esi+1, 5)`; para `j < n`,
+  `t = |rumbo(r[j]) − rumbo(r[j+1])|`, si `t > π` entonces `t = |t − 2π|`; `w = (s38·0.4 + 0.6)·1.6`;
+  `suma = t·(w·t)/n + suma`. Luego (`0x1b823..0x1b86b`) `a8 = 1 + (agarre + 0.8)·suma`.
+- Consumidores leídos (sin oracle propio): el acelerador divide por `s10·6/(3·esi+6) + 1` (`0x1b995..0x1b9cf`);
+  la dirección recalcula el mismo `aim` con `[esp+0xe0/0xe8]` (`0x1bde2..0x1bdfc`); el ajuste hacia el
+  interior exige `[esp+0x144] = ∓1`, `esi > 2`, `a8 < 2` y `|[esp+0x40]| < 0.3` (`0x1c40d..0x1c5be`);
+  el turbo usa `[esp+0x130] > 3`. Divisor del ajuste: con signo −1, `side·2.5` si `0 ≤ side`, si no 2.5;
+  con signo +1, 2.5 si `side > 0`, si no `side·−2.5` (`0x1c57a..0x1c5a4`; el port lo tenía invertido y daba
+  un divisor negativo). Antes el port usaba un bucle inventado que paraba al cambiar el signo
+  de la curva y el tipo de superficie del coche para el agarre; ambos se sustituyeron.
+- Las coordenadas de los registros son SRF (mundo + 25600) y el original las compara con `car+0x00/+0x10`;
+  el port suma `IGN_SRF_ORIGIN` a la posición del coche antes del recorte.
+
+`tests/ai_target_original.py` ejecuta `0x1b4a2→0x1b823` sin parchear, con `atan2` real (`0x647ef`) y
+CW `0x127f`; sólo permite escrituras en la pila y comprueba registros, punteros, pila x87 y `ebp`.
+**7 562 casos**: 1 830 sintéticos (carreteras curvas, rumbos con ruido y en ±π, 300 colineales
+exactos con `coche = 2·interior − centro`, 300 enteros aleatorios ±100 000, bytes de agarre 0–29 y los
+cuatro fuera de tabla) y 5 432 de las siete pistas (registros slot 0 en los índices recortados, cuatro
+posiciones del coche por sección). Índice, offset, signo, centros, `aim`, cambio inicial, agarre y suma
+coinciden bit a bit. Cubre 224/228 instrucciones; no ejecuta el wrap de `ebp` ni el recorte de agarre
+negativo (inalcanzable: la tabla tiene máximo 4.5). Mutaciones del port (bucle `j < k`, signo desde `dR`,
+`(t·t)·w`, aceptar producto cero, π redondeado, centro con `floor`) se detectan; `t·w·t` frente a `t·(w·t)` y
+el valor exacto de los subnormales fuera de tabla son equivalentes y no se distinguen.
+
+Pendientes de la IA completa: término de pendiente Y (`0x1b86b..0x1b970`, entra en el acelerador como
+`x90`), giro por solape, ganancias control 5/8, signo de esquiva según el lateral del rival y cotejo integral
+de selección de carril/registros y del controlador.
 
 ## Fin de carrera y eliminación (portado a `src/game/race.c`)
 
@@ -619,9 +673,8 @@ esa aproximación se descartó hasta reconstruir la selección de registros/carr
   llama a `car_input` con turbo = 1 (`0x1cb12`), salvo exclusiones por pista/sección.
 - Salida: `car_input(coche, ecx=turbo, edx=freno/atrás, ebx=dirección, …)` en `0x1cbf9`; al final `+0x58 = trunc(acelerador)`.
 - Pendiente de completar y verificar en conjunto: búsqueda de carril (`0x1decc`) y consumo de los dos slots,
-  velocidad objetivo por curvatura (bucle de 6 secciones `0xbf992`, `t_surface_grip`), pendiente, recorte del
-  objetivo y esquiva. Los ángulos `+0x2a..+0x46` y puntos interiores `+0x1a..+0x26` ya se calculan; estos últimos
-  todavía no se aplican al objetivo. Véase el contrato geométrico anterior.
+  pendiente y esquiva. El recorte del objetivo por interiores y la suma de curvatura ya siguen el original
+  (véase «Recorte del objetivo y curvatura»); el resto del controlador no está verificado en conjunto.
 
 ## Planificador de IA y replay de controles (`cars_update_all`, parcial)
 
