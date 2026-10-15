@@ -275,6 +275,43 @@ class Original:
         return [n] + [pool_of[p] for p in self.get(LIST, "%dI" % n)] if n else [0]
 
 
+    def texanim(self, anims):
+        """sub_00010a00 on supplied animations ([0xab5f0] list, [0xab5f4] count)."""
+        self.put(SCRATCH, "%dI" % (0x8000 // 4), *([0] * (0x8000 // 4)))
+        at = SCRATCH + 0x100
+        heads, faces_of = [], []
+        for n, cur, prev, frames in anims:
+            head = at
+            uvs, pages, lists = head + 0x18, head + 0x18 + 8 * n, head + 0x18 + 12 * n
+            at = lists + 4 * n
+            self.put(head, "3i3I", n, cur, prev, uvs, pages, lists)
+            mine = []
+            for k, (u, v, page, faces) in enumerate(frames):
+                self.put(uvs + 8 * k, "2i", u, v)
+                self.put(pages + 4 * k, "I", page)
+                self.put(lists + 4 * k, "I", at)
+                ptrs = at
+                at += 4 * (len(faces) + 1)
+                for f in faces:
+                    self.put(ptrs, "I", at)
+                    self.put(at + 0x10, "6iI", *f)
+                    mine.append(at)
+                    ptrs += 4
+                    at += 44
+                self.put(ptrs, "I", 0)
+            heads.append(head)
+            faces_of.append(mine)
+        self.put(at, "%dI" % len(heads), *heads)
+        self.put(0xAB5F0, "Ii", at, len(heads))
+        self.run(0x10A00, RETURN, [(0x10A00, 0x10B2C)], [(SCRATCH, SCRATCH + 0x8000)], {})
+        out = []
+        for head, mine in zip(heads, faces_of):
+            out += list(self.get(head + 4, "2i"))
+            for f in mine:
+                out += list(self.get(f + 0x10, "6iI"))
+        return out
+
+
 def f32(v):
     return struct.unpack("<f", struct.pack("<f", v))[0]
 
@@ -372,6 +409,20 @@ def cases(seed):
             objects.append((otype, ox, oy, oz, verts, faces))
         out.append(("G", rnd.choice((0, 50)), rnd.choice((-1, 0, 3, 0x12C, 0x15E)), x, y, z, rnd.randrange(2),
                     objects))
+    # Texture animation steps (sub_00010a00): frames on 64 x 64 tiles, repeated tiles, pages and long counters.
+    for i in range(500):
+        anims = []
+        for _ in range(rnd.randrange(1, 4)):
+            n = rnd.randrange(1, 8)
+            frames = []
+            for _ in range(n):
+                u, v = rnd.randrange(4) * 0x4000, rnd.randrange(4) * 0x4000
+                page = rnd.randrange(12) << 16
+                faces = [tuple(rnd.randrange(0x10000) for _ in range(6)) + (page,) for _ in range(rnd.randrange(4))]
+                frames.append((u, v, page, faces))
+            cur = rnd.randrange(1, 300)
+            anims.append((n, cur, cur - 1, frames))
+        out.append(("T", anims))
     # Engine view lists (sub_00058c1c): objects scattered over cells around and beyond the view, with layers.
     for i in range(300):
         x, z = rnd.randrange(5000, 46000), rnd.randrange(5000, 46000)
@@ -396,6 +447,14 @@ def runner_input(case):
         return "R " + " ".join("%.17g" % x for x in case[1] + case[2])
     if kind == "F":
         return "F %d " % case[1][0] + " ".join("%.17g" % x for x in case[1][1:])
+    if kind == "T":
+        parts = ["T %d" % len(case[1])]
+        for n, cur, prev, frames in case[1]:
+            parts.append("%d %d %d" % (n, cur, prev))
+            for u, v, page, faces in frames:
+                parts.append("%d %d %d %d" % (u, v, page, len(faces)))
+                parts += [" ".join(str(x) for x in f) for f in faces]
+        return " ".join(parts)
     if kind == "V":
         return "V %d %d %d %d " % (case[1], case[2], case[3], len(case[4])) + \
             " ".join("%d %d %d" % o for o in case[4])
@@ -429,6 +488,8 @@ def original_output(orig, case):
         return orig.fly(case[1])
     if kind == "Q":
         return orig.query(case[1], case[2], case[3], case[4], case[5])
+    if kind == "T":
+        return orig.texanim(case[1])
     if kind == "V":
         return orig.view(case[1], case[2], case[3], case[4])
     if kind == "G":
@@ -446,12 +507,12 @@ def close(a, b, rel, abs_tol):
 # Port intermediates are binary64 where the x87 keeps 80 bits. sub_000346cc rounds jB0 = -1.25 * j0 (masses 10 and
 # 2) to float32: the exact value can lie on a float midpoint, and the 80-bit rounding of 1 / (mA + mB) breaks the tie,
 # so that intermediate may end one float ulp apart; "I" allows it and the exact cases are counted separately.
-TOLERANCE = {"V": (0, 0), "G": (0, 0), "Q": (0, 0), "P": (2.5e-7, 1e-4), "I": (1e-6, 1e-5), "R": (1e-12, 1e-10), "F": (1e-15, 1e-12), "B": (1e-12, 1e-9)}
+TOLERANCE = {"T": (0, 0), "V": (0, 0), "G": (0, 0), "Q": (0, 0), "P": (2.5e-7, 1e-4), "I": (1e-6, 1e-5), "R": (1e-12, 1e-10), "F": (1e-15, 1e-12), "B": (1e-12, 1e-9)}
 EXACT = (1e-12, 1e-12)
 
 
 def compare(kind, port, orig, tolerance=None):
-    if kind == "V":
+    if kind in "VT":
         return [int(v) for v in port] == [int(v) for v in orig]
     if kind == "G":
         n = len(port)

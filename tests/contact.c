@@ -447,6 +447,46 @@ static int runner(void) {
                 }
                 printf("\n");
             }
+        } else if (mode == 'T') {
+            /* T nanims (n cur prev (u v page nfaces (u0 v0 u1 v1 u2 v2 extra)*)*)* */
+            int na;
+            if (scanf("%d", &na) != 1 || na < 1 || na > 4) return 1;
+            static IgnFace faces[4][8][8];
+            static IgnFace *lists[4][8][9];
+            static IgnFace **flists[4][8];
+            static int32_t uv[4][8][2];
+            static uint32_t page[4][8];
+            IgnTexAnim an[4];
+            for (int a = 0; a < na; a++) {
+                if (scanf("%d %d %d", &an[a].n, &an[a].cur, &an[a].prev) != 3 || an[a].n < 1 || an[a].n > 8) return 1;
+                for (int k = 0; k < an[a].n; k++) {
+                    int nf;
+                    if (scanf("%d %d %u %d", &uv[a][k][0], &uv[a][k][1], &page[a][k], &nf) != 4 || nf < 0 || nf > 8)
+                        return 1;
+                    for (int f = 0; f < nf; f++) {
+                        IgnFace *fc = &faces[a][k][f];
+                        *fc = (IgnFace){0};
+                        for (int c = 0; c < 6; c++)
+                            if (scanf("%d", &fc->uv[c]) != 1) return 1;
+                        if (scanf("%u", &fc->extra) != 1) return 1;
+                        lists[a][k][f] = fc;
+                    }
+                    lists[a][k][nf] = NULL;
+                    flists[a][k] = lists[a][k];
+                }
+                an[a].uv = uv[a], an[a].page = page[a], an[a].faces = flists[a];
+            }
+            IgnTexAnims t = {.a = an, .n = na};
+            ign_texanim_step(&t);
+            for (int a = 0; a < na; a++) {
+                printf("%s%d %d", a ? " " : "", an[a].cur, an[a].prev);
+                for (int k = 0; k < an[a].n; k++)
+                    for (IgnFace **f = an[a].faces[k]; *f; f++) {
+                        for (int c = 0; c < 6; c++) printf(" %d", (*f)->uv[c]);
+                        printf(" %u", (*f)->extra);
+                    }
+            }
+            printf("\n");
         } else if (mode == 'V') {
             int32_t x, z;
             int layer, n;
