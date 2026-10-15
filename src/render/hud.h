@@ -51,6 +51,9 @@ typedef struct {
     double total;           /* [0x1fb4d8]: 1/36 s frames since the level started */
     double best_lap;        /* [0x1fb390] */
     double shake;           /* camera +0x38 of the viewed car */
+    int viewer;             /* player whose HUD is drawn (car index 0 or 1) */
+    int players;            /* [0x1fef14] + 1: one or two viewports (0 counts as one) */
+    int view_size;          /* [0x1fefdc]: window size option 0-3 (factors 0xc0b80) */
 } IgnHudState;
 
 typedef struct {
@@ -76,8 +79,8 @@ typedef struct {
     IgnHudMessage msg[IGN_HUD_MESSAGES];
     IgnHudCar car[IGN_HUD_MAX_CARS];
     double frame_clock;   /* last whole 1/36 s frame processed */
-    double finish_clock;  /* [0x1fb4d0]: frames since the player finished */
-    int finish_frames;    /* [0x1fed9c]: frames since the player finished, up to 120 */
+    double finish_clock;  /* [0x1fb4d0]: frames since a player finished */
+    int finish_frames[2]; /* [0x1fed9c]: frames since each player finished, up to 120 */
     double best_lap;      /* last [0x1fb390] seen */
     int started;
     uint32_t rng;         /* private stand-in for sub_00051714 in the shake jitter */
@@ -90,8 +93,12 @@ void ign_hud_destroy(IgnHud *hud);
 /* Advances the per-frame HUD state (counters, animations, messages) one 1/36 s frame at a time up to
  * state->total. Safe to call every physics tick. */
 void ign_hud_update(IgnHud *hud, const IgnHudState *state);
-/* sub_0004a320 for player 0 over the whole frame, then sub_0004c89c (messages). */
+/* sub_0004a320 for state->viewer in its viewport, then sub_0004c89c (messages). */
 void ign_hud_draw(IgnHud *hud, IgnFrame *frame, const IgnHudState *state);
+/* sub_00049724: viewport of player `index` in a w x h frame (x1, y1 exclusive as the clip window of sub_00055958).
+ * One player: centred, size factors 0xc0b80[size]; two: the width halves, player 0 on the right half and player 1 on
+ * the left, one pixel apart from the middle. */
+void ign_hud_viewport(int w, int h, int size, int players, int index, IgnClip *out);
 /* sub_0004c7c0: queues a message; returns its slot or -1 when the five are busy. */
 int ign_hud_message(IgnHud *hud, const char *text, int duration, int period, int viewport);
 /* sub_0004bdf4: "%.2d:%.2d:%.2d" minutes (at most 99), seconds and hundredths, truncated. */

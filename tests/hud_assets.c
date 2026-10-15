@@ -329,8 +329,8 @@ static void test_game_data(const char *dir, const char *out) {
         ign_hud_update(&hud, &st);
         st.total = 440.0;
         ign_hud_update(&hud, &st);
-        CHECK(hud.car[0].medal_zoom == 25 && hud.finish_frames == 40, "finish clocks %d %d", hud.car[0].medal_zoom,
-              hud.finish_frames);
+        CHECK(hud.car[0].medal_zoom == 25 && hud.finish_frames[0] == 40, "finish clocks %d %d", hud.car[0].medal_zoom,
+              hud.finish_frames[0]);
         memset(frame.color, 0, sizeof frame.color);
         ign_hud_draw(&hud, &frame, &st);
         CHECK(differs_from(0, w / 2, h / 2, w / 2 + 89, h / 2 + 84) > 1000, "first place medal");
@@ -386,6 +386,41 @@ static void test_game_data(const char *dir, const char *out) {
         for (int i = 0; i < IGN_HUD_MESSAGES; i++) out_left += elim.msg[i].active && strstr(elim.msg[i].text, "OUT");
         CHECK(!out_left, "message gone after 80 frames");
         ign_hud_destroy(&elim);
+
+        /* Two players: viewport 0 on the right half, viewport 1 on the left (sub_00049724). */
+        IgnClip v0, v1;
+        ign_hud_viewport(w, h, 0, 2, 0, &v0);
+        ign_hud_viewport(w, h, 0, 2, 1, &v1);
+        CHECK(v0.x0 == w / 4 * 3 - w / 4 + 1 && v0.x1 == w && v1.x0 == 0 && v1.x1 == w / 2 - 1 && v0.y0 == 0 &&
+                  v1.y1 == h,
+              "split viewports %d-%d / %d-%d", v0.x0, v0.x1, v1.x0, v1.x1);
+        static IgnHud split;
+        ign_hud_init(&split, dir, "USA", w, h);
+        memset(cars, 0, sizeof cars);
+        for (int i = 0; i < 4; i++) cars[i].id = i, cars[i].position = i + 1, cars[i].turbo_charge = 60.0;
+        cars[1].gear = 1;
+        st = (IgnHudState){.cars = all, .ncars = 4, .level = &lv, .mode = IGN_MODE_ELIMINATION, .remaining = 4,
+                           .clock = -1.0, .total = 300.0, .best_lap = 1e9, .players = 2};
+        ign_hud_update(&split, &st);
+        cars[1].position = 4, cars[3].position = 2; /* player 2 is last */
+        st.total = 301.0;
+        ign_hud_update(&split, &st);
+        int warned_right = 0;
+        for (int i = 0; i < IGN_HUD_MESSAGES; i++) warned_right += split.msg[i].active && split.msg[i].viewport == 1;
+        CHECK(warned_right == 1, "last-place warning in the second player's viewport");
+        memset(frame.color, 0, sizeof frame.color);
+        st.viewer = 0;
+        ign_hud_draw(&split, &frame, &st);
+        int right_only = differs_from(0, v1.x0, 0, v1.x1, h) == 0 && differs_from(0, v0.x0, 0, v0.x1, h) > 0;
+        st.viewer = 1;
+        ign_hud_draw(&split, &frame, &st);
+        CHECK(right_only && differs_from(0, v1.x0, 0, v1.x1, h) > 0, "each player's HUD stays in its viewport");
+        if (out) {
+            char name[64];
+            snprintf(name, sizeof name, "hud_%s_split", NAMES[layout]);
+            write_ppm(out, name, &lv.palette);
+        }
+        ign_hud_destroy(&split);
         ign_hud_destroy(&hud);
     }
     ign_free_level(&lv);

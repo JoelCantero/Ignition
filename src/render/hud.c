@@ -248,45 +248,42 @@ static const char *car_name(const IgnCar *car) {
     return car->id >= 0 && car->id < 11 ? CAR_NAMES[car->id] : "IGN";
 }
 
-/* One 1/36 s frame of the per-frame state the original keeps in the car structures and globals. */
-static void step_frame(IgnHud *hud, const IgnHudState *st) {
-    const double dt = 1.0;
-    int n = st->ncars < IGN_HUD_MAX_CARS ? st->ncars : IGN_HUD_MAX_CARS;
-    /* sub_0004c858 (collisions pass): message timers. */
-    for (int i = 0; i < IGN_HUD_MESSAGES; i++) {
-        IgnHudMessage *m = &hud->msg[i];
-        if (m->active == 1 && ++m->timer > m->duration) m->active = 0;
+static int viewers(const IgnHudState *st) {
+    int n = st->players == 2 ? 2 : 1;
+    return n < st->ncars ? n : st->ncars;
+}
+
+/* Message viewport of player `who` (0x2f49e..0x2f4f4, 0x4b2d6..0x4b322): the whole screen with one player. */
+static int message_viewport(const IgnHudState *st, int who) {
+    return viewers(st) == 1 ? -1 : who;
+}
+
+void ign_hud_viewport(int w, int h, int size, int players, int index, IgnClip *out) {
+    static const double FACTORS[4][2] = {{1.0, 1.0}, {0.8, 1.0}, {0.6, 1.0}, {0.5, 0.83}};
+    if (size < 0 || size > 3) size = 0;
+    int vw = (int)(w * FACTORS[size][0] * (players == 2 ? 0.5 : 1.0)), vh = (int)(h * FACTORS[size][1]);
+    out->y0 = h / 2 - vh / 2;
+    out->y1 = h / 2 + vh / 2;
+    if (players != 2) {
+        out->x0 = w / 2 - vw / 2;
+        out->x1 = w / 2 + vw / 2;
+    } else if (index == 1) {
+        out->x0 = w / 4 - vw / 2;
+        out->x1 = w / 4 + vw / 2 - 1;
+    } else {
+        out->x0 = w / 4 * 3 - vw / 2 + 1;
+        out->x1 = w / 4 * 3 + vw / 2;
     }
-    for (int i = 0; i < n; i++) {
-        const IgnCar *car = st->cars[i];
-        IgnHudCar *hc = &hud->car[i];
-        /* car_update 0x2fbb2: the previous section is kept whenever the navigation section changes. */
-        if (car->section != hc->section) hc->prev_section = hc->section, hc->section = car->section;
-        /* cars_body_sway 0x41038: the explosion frame runs from the elimination to 10. */
-        if (car->blow > 0.0 && hc->blow == 0.0) hc->blow = car->blow;
-        else if (hc->blow > 0.0 && hc->blow < 10.0) hc->blow += 0.3;
-        if (car->out && !hc->was_out) {
-            hc->was_out = 1;
-            /* race_elimination 0x2e085: the car last at the end of a lap is out. */
-            if (st->mode == IGN_MODE_ELIMINATION && car->blow > 0.0) {
-                char text[100];
-                snprintf(text, sizeof text, OUT_MESSAGE[hud->language], car_name(car));
-                ign_hud_message(hud, text, 0x50, 8, -1);
-            }
-            /* car_update 0x2f38b: the player's finish restarts [0x1fb4d0] and [0x1fed9c]. */
-            if (i == 0) hud->finish_clock = 0.0, hud->finish_frames = 0, hc->medal_zoom = 0;
-        }
-    }
-    const IgnCar *player = st->cars[0];
-    IgnHudCar *pc = &hud->car[0];
-    /* car_update 0x2f40f: a human lap under [0x1fb390] is announced (computer records are silent). */
-    if (st->best_lap < hud->best_lap && player->last_lap == st->best_lap)
-        ign_hud_message(hud, LAP_RECORD[hud->language], 0x50, 8, -1);
-    hud->best_lap = st->best_lap;
-    /* sub_000420cc 0x4280c / 0x4288d / 0x428b0: clocks after the player's finish. */
+}
+
+/* Per-player part of one frame: gauges and counters the HUD of `v` animates. */
+static void step_viewer(IgnHud *hud, const IgnHudState *st, int v, double dt) {
+    const IgnCar *player = st->cars[v];
+    IgnHudCar *pc = &hud->car[v];
+    /* sub_000420cc 0x4280c / 0x428b0: frames after this player's finish and the growing place. */
     if (player->out) {
-        if (hud->finish_frames >= 0 && hud->finish_frames < 120) hud->finish_frames = (int)(hud->finish_frames + dt);
-        hud->finish_clock += dt;
+        if (hud->finish_frames[v] >= 0 && hud->finish_frames[v] < 120)
+            hud->finish_frames[v] = (int)(hud->finish_frames[v] + dt);
         if (pc->medal_zoom < 25) pc->medal_zoom = (int)(pc->medal_zoom + dt);
     }
     /* sub_0004a150 (main loop 0x21089): frames spent facing back along the section, 0..120. */
@@ -327,27 +324,73 @@ static void step_frame(IgnHud *hud, const IgnHudState *st) {
     }
     /* race_hud 0x4b246: the last car of an elimination race is warned every frame (duration 0, period 1). */
     if (st->mode == IGN_MODE_ELIMINATION && st->remaining == player->position && !player->out)
-        ign_hud_message(hud, LAST_WARNING[hud->language], 0, 1, -1);
+        ign_hud_message(hud, LAST_WARNING[hud->language], 0, 1, message_viewport(st, v));
+}
+
+/* One 1/36 s frame of the per-frame state the original keeps in the car structures and globals. */
+static void step_frame(IgnHud *hud, const IgnHudState *st) {
+    const double dt = 1.0;
+    int n = st->ncars < IGN_HUD_MAX_CARS ? st->ncars : IGN_HUD_MAX_CARS, nv = viewers(st);
+    /* sub_0004c858 (collisions pass): message timers. */
+    for (int i = 0; i < IGN_HUD_MESSAGES; i++) {
+        IgnHudMessage *m = &hud->msg[i];
+        if (m->active == 1 && ++m->timer > m->duration) m->active = 0;
+    }
+    for (int i = 0; i < n; i++) {
+        const IgnCar *car = st->cars[i];
+        IgnHudCar *hc = &hud->car[i];
+        /* car_update 0x2fbb2: the previous section is kept whenever the navigation section changes. */
+        if (car->section != hc->section) hc->prev_section = hc->section, hc->section = car->section;
+        /* cars_body_sway 0x41038: the explosion frame runs from the elimination to 10. */
+        if (car->blow > 0.0 && hc->blow == 0.0) hc->blow = car->blow;
+        else if (hc->blow > 0.0 && hc->blow < 10.0) hc->blow += 0.3;
+        if (car->out && !hc->was_out) {
+            hc->was_out = 1;
+            /* race_elimination 0x2e085: the car last at the end of a lap is out; one message per viewport. */
+            if (st->mode == IGN_MODE_ELIMINATION && car->blow > 0.0) {
+                char text[100];
+                snprintf(text, sizeof text, OUT_MESSAGE[hud->language], car_name(car));
+                for (int v = 0; v < nv; v++) ign_hud_message(hud, text, 0x50, 8, message_viewport(st, v));
+            }
+            /* car_update 0x2f38b: a player's finish restarts [0x1fb4d0] and its [0x1fed9c]. */
+            if (i < nv) hud->finish_clock = 0.0, hud->finish_frames[i] = 0, hc->medal_zoom = 0;
+        }
+    }
+    /* car_update 0x2f40f: a lap under [0x1fb390] is announced in the viewport of the player who drove it. */
+    if (st->best_lap < hud->best_lap)
+        for (int v = 0; v < nv; v++)
+            if (st->cars[v]->last_lap == st->best_lap)
+                ign_hud_message(hud, LAP_RECORD[hud->language], 0x50, 8, message_viewport(st, v));
+    hud->best_lap = st->best_lap;
+    /* sub_000420cc 0x4288d: [0x1fb4d0] runs once a player has finished. */
+    for (int v = 0; v < nv; v++)
+        if (st->cars[v]->out) {
+            hud->finish_clock += dt;
+            break;
+        }
+    for (int v = 0; v < nv; v++) step_viewer(hud, st, v, dt);
 }
 
 void ign_hud_update(IgnHud *hud, const IgnHudState *st) {
     if (!st->ncars || !st->cars || !st->cars[0]) return;
     if (!hud->started) {
         /* First frame: the animated gauges start at their targets (the original starts them at 0 with the car). */
-        const IgnCar *player = st->cars[0];
         hud->started = 1;
         hud->frame_clock = floor(st->total);
         hud->best_lap = st->best_lap;
-        hud->car[0].gear_anim = player->gear * 4;
-        hud->car[0].needle = fmin(player->revs * 2.7, 270.0);
+        hud->finish_clock = 0.0;
         for (int i = 0; i < st->ncars && i < IGN_HUD_MAX_CARS; i++) {
-            hud->car[i].section = hud->car[i].prev_section = st->cars[i]->section;
-            hud->car[i].was_out = st->cars[i]->out;
-            hud->car[i].blow = st->cars[i]->blow;
+            const IgnCar *car = st->cars[i];
+            IgnHudCar *hc = &hud->car[i];
+            hc->section = hc->prev_section = car->section;
+            hc->was_out = car->out;
+            hc->blow = car->blow;
+            hc->gear_anim = car->gear * 4;
+            hc->needle = fmin(car->revs * 2.7, 270.0);
+            hc->medal_zoom = car->out ? 25 : 0;
+            if (i < 2) hud->finish_frames[i] = car->out ? 120 : 0;
+            if (i < viewers(st) && car->out) hud->finish_clock = 121.0;
         }
-        hud->finish_frames = st->cars[0]->out ? 120 : 0;
-        hud->finish_clock = st->cars[0]->out ? 121.0 : 0.0;
-        hud->car[0].medal_zoom = st->cars[0]->out ? 25 : 0;
         return;
     }
     while (hud->frame_clock + 1.0 <= st->total) {
@@ -382,13 +425,13 @@ static void draw_sprite(IgnHud *hud, IgnFrame *fb, const IgnClip *clip, const Ig
 /* sub_0004be7c: rev dial, needle and speed digits. */
 static void draw_dial(IgnHud *hud, IgnFrame *fb, const IgnClip *vp, const IgnHudState *st) {
     const int16_t *p = PLACE[hud->layout];
-    const IgnCar *car = st->cars[0];
+    const IgnCar *car = st->cars[st->viewer];
     int x1 = vp->x1, y1 = vp->y1;
     double d;
     if (jitter(hud, st, &d)) x1 = (int)(vp->x1 + d), y1 = (int)(vp->y1 + d);
     draw_sprite(hud, fb, vp, &hud->dial, x1 + p[P_DIAL_X], y1 + p[P_DIAL_Y]);
     /* 0x4bff7: a thin triangle, half width p[11] across the pivot and p[12] long, turned by the needle angle. */
-    double n = hud->car[0].needle, half = p[P_NEEDLE_HALF], len = p[P_NEEDLE_LEN];
+    double n = hud->car[st->viewer].needle, half = p[P_NEEDLE_HALF], len = p[P_NEEDLE_LEN];
     double cx = x1 + p[P_NEEDLE_X], cy = y1 + p[P_NEEDLE_Y];
     double a = (n + 180.0) * 3.1415926535898 * 0.005555555555555555;
     double b = (n + 90.0) * 3.1415926535898 * 0.005555555555555555;
@@ -403,28 +446,38 @@ static void draw_dial(IgnHud *hud, IgnFrame *fb, const IgnClip *vp, const IgnHud
     draw_text(hud, fb, vp, &hud->speed_font, speed, vp->x1 + TEXT[hud->layout][6], vp->y1 + TEXT[hud->layout][7]);
 }
 
-static void draw_messages(IgnHud *hud, IgnFrame *fb, const IgnClip *vp) {
-    /* sub_0004c89c: centred, one line of (feeb0 - 5) * 8 pixels per slot above the bottom of viewport 0. */
-    int line = hud->layout == IGN_HUD_LOW ? 8 : 16;
+static void draw_messages(IgnHud *hud, IgnFrame *fb, const IgnClip *vp, const IgnHudState *st) {
+    /* sub_0004c89c: centred on the screen or on the message's viewport, one line of (feeb0 - 5) * 8 pixels per slot
+     * above the bottom of viewport 0, clipped to the viewport being drawn. */
+    int line = hud->layout == IGN_HUD_LOW ? 8 : 16, players = viewers(st);
+    IgnClip vp0;
+    ign_hud_viewport(fb->w, fb->h, st->view_size, players, 0, &vp0);
     hud->message_font.align = 1;
     for (int i = 0; i < IGN_HUD_MESSAGES; i++) {
         const IgnHudMessage *m = &hud->msg[i];
         if (m->active != 1) continue;
         if (!(fmod((double)m->timer, (double)(m->period * 2)) < (double)m->period)) continue;
-        int x = m->viewport == -1 ? fb->w / 2 : vp->x0 + (vp->x1 - vp->x0) / 2;
-        draw_text(hud, fb, vp, &hud->message_font, m->text, x, vp->y1 - (i + 1) * line);
+        int x = fb->w / 2;
+        if (m->viewport != -1) {
+            IgnClip mv;
+            ign_hud_viewport(fb->w, fb->h, st->view_size, players, m->viewport, &mv);
+            x = mv.x0 + (mv.x1 - mv.x0) / 2;
+        }
+        draw_text(hud, fb, vp, &hud->message_font, m->text, x, vp0.y1 - (i + 1) * line);
     }
     hud->message_font.align = 0;
 }
 
 void ign_hud_draw(IgnHud *hud, IgnFrame *fb, const IgnHudState *st) {
-    if (!st->ncars || !st->cars || !st->cars[0]) return;
-    const IgnCar *car = st->cars[0];
-    const IgnHudCar *hc = &hud->car[0];
-    /* sub_000420cc 0x4310c: no HUD 120 frames after the player's finish. */
+    if (!st->ncars || !st->cars || st->viewer < 0 || st->viewer >= viewers(st) || !st->cars[st->viewer]) return;
+    const int viewer = st->viewer;
+    const IgnCar *car = st->cars[viewer];
+    const IgnHudCar *hc = &hud->car[viewer];
+    /* sub_000420cc 0x4310c / 0x4335c: no HUD 120 frames after the player's finish. */
     if (car->out && hud->finish_clock > 120.0) return;
     const int16_t *p = PLACE[hud->layout], *t = TEXT[hud->layout];
-    const IgnClip vp = {0, 0, fb->w, fb->h}; /* [0x1fefd0]+0x2c..0x38 of player 0 */
+    IgnClip vp; /* [0x1fefd0]+0x2c..0x38 of the player, also the clip window (sub_00055958) */
+    ign_hud_viewport(fb->w, fb->h, st->view_size, viewers(st), viewer, &vp);
     int x0 = vp.x0, y0 = vp.y0, x1 = vp.x1, y1 = vp.y1;
     double d;
     if (jitter(hud, st, &d)) x0 = (int)(vp.x0 + d), y0 = (int)(vp.y0 + d), x1 = (int)(vp.x1 + d), y1 = (int)(vp.y1 + d);
@@ -526,6 +579,11 @@ void ign_hud_draw(IgnHud *hud, IgnFrame *fb, const IgnHudState *st) {
             if (frame < 0 || frame > 9) continue;
             draw_sprite(hud, fb, &vp, &hud->blast[frame], vp.x0, vp.y0 + len - (int)(len * frac[i]));
         }
+        /* 0x4b648: the second player's view draws its own marker once more, on top of the others. */
+        if (viewer == 1 && !st->cars[1]->out) {
+            int model = st->cars[1]->id >= 0 && st->cars[1]->id < 12 ? st->cars[1]->id : 0;
+            draw_sprite(hud, fb, &vp, &hud->marker[model], vp.x0 + 5, vp.y0 + len + 5 - (int)(len * frac[1]));
+        }
     }
 
     /* 0x4b717: start lights 3 in [50, 100), 2 in [100, 150), 1 in [150, 200), GO for the first 250 frames. */
@@ -539,7 +597,7 @@ void ign_hud_draw(IgnHud *hud, IgnFrame *fb, const IgnHudState *st) {
 
     /* 0x4ba79: finishing place for 120 frames, growing for 25 (scale zoom * 0.04). */
     int place_ok = st->mode != IGN_MODE_ELIMINATION ? car->finish_position < 4 : car->finish_position < 2;
-    if (car->out && hud->finish_clock >= 0.0 && hud->finish_frames < 120 && !(st->mode == 2 && st->ncars <= 1) &&
+    if (car->out && hud->finish_clock >= 0.0 && hud->finish_frames[viewer] < 120 && !(st->mode == 2 && st->ncars <= 1) &&
         place_ok && hc->medal_zoom > 0 && car->finish_position >= 1 && car->finish_position < 4) {
         int mx = vp.x0 + (vp.x1 - vp.x0) / 2, my = (y1 - y0) / 2;
         const IgnSprite *medal = &hud->medal[car->finish_position];
@@ -548,5 +606,5 @@ void ign_hud_draw(IgnHud *hud, IgnFrame *fb, const IgnHudState *st) {
         else
             draw_sprite(hud, fb, &vp, medal, mx, my);
     }
-    draw_messages(hud, fb, &vp);
+    draw_messages(hud, fb, &vp, st);
 }
