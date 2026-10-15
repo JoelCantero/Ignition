@@ -774,3 +774,134 @@ void ign_prim_shade(IgnRaster *r, const int32_t xy[6], const uint8_t *row_lut) {
     }
     shade_rows(r, &e, row_lut);
 }
+
+/* ---- points, primitives 1 (sub_00070400: TAB[colour * 256 + light]) and 2 (sub_00070454: SHD[colour * 256 + dst]) */
+
+void ign_prim_point(IgnRaster *r, int32_t x, int32_t y, const uint8_t *lut, int colour, int light) {
+    if (x < r->xmin8 || x > r->xmax8 - 1 || y < r->ymin8 || y > r->ymax8 - 1) return;
+    uint8_t *p = r->fb + (size_t)(y >> 8) * r->stride + (x >> 8);
+    *p = light < 0 ? lut[(colour & 0xff) << 8 | *p] : lut[(colour & 0xff) << 8 | (light & 0xff)];
+}
+
+/* ---- flat triangle, primitive 0xf (sub_000729f3) ----
+ * Vertices in whole pixels; edges are 16.16 accumulators stepped by (dx +- 1) * (65536 / (dy + 1) - 1) (the
+ * table 0xc9168 of sub_00060dc4), starting on the integer x with a 0 or 0xffff fraction (and one step ahead for
+ * some directions); rows are inclusive at both ends and spans cover left..right inclusive. */
+
+static int32_t flat_recip(int32_t dy) { return dy >= 0 && dy < 0x3a9a ? 0x10000 / (dy + 1) - 1 : 0; }
+
+/* One edge from x0 over dy rows: negative slopes (dx < 0, or dx <= 0 where `zero_neg`) start on a 0xffff fraction,
+ * the others on 0; left edges step once at setup when negative, right edges when positive. `int_x` replaces the
+ * integer part (the lower half of a split edge) before that step. */
+static void flat_edge(int32_t x0, int32_t dx, int32_t dy, int left, int zero_neg, int32_t int_x, int32_t *acc,
+                      int32_t *step) {
+    int neg = zero_neg ? dx <= 0 : dx < 0;
+    int32_t s = (neg ? dx - 1 : dx + 1) * flat_recip(dy);
+    int32_t a = (int32_t)(((uint32_t)int_x << 16) | (neg ? 0xffffu : 0));
+    if (left ? neg : !neg) a = (int32_t)((uint32_t)a + (uint32_t)s);
+    (void)x0;
+    *acc = a, *step = s;
+}
+
+static void flat_rows(const IgnRaster *r, uint8_t colour, int32_t y, int32_t rows, int32_t *left, int32_t *right,
+                      int32_t lstep, int32_t rstep, int prestep) {
+    /* rows: count - 1 (the loops run while the counter stays >= 0) */
+    if (y < r->ymin) {
+        int32_t n = r->ymin - y;
+        rows -= n;
+        if (rows < 0) return;
+        *right += rstep * n, *left += lstep * n;
+        y = r->ymin;
+    }
+    if (y + rows > r->ymax1 - 1) {
+        rows -= y + rows - (r->ymax1 - 1);
+        if (rows < 0) return;
+    }
+    for (; rows >= 0; rows--, y++) {
+        if (prestep) *right += rstep, *left += lstep;
+        int16_t xl = (int16_t)((uint32_t)*left >> 16), xr = (int16_t)((uint32_t)*right >> 16);
+        int skip = 0;
+        if (xl < r->xmin) {
+            if (xr < r->xmin) skip = 1;
+            else xl = (int16_t)r->xmin;
+        }
+        if (!skip && xr > r->xmax1 - 1) {
+            if (xl > r->xmax1 - 1) skip = 1;
+            else xr = (int16_t)(r->xmax1 - 1);
+        }
+        if (!skip && (int16_t)(xr - xl) >= 0) memset(r->fb + (size_t)y * r->stride + xl, colour, (size_t)(xr - xl) + 1);
+        if (!prestep) *right += rstep, *left += lstep;
+    }
+}
+
+void ign_prim_flat(IgnRaster *r, const int32_t xy[6], uint8_t colour) {
+    const int32_t *v0 = xy, *v1 = xy + 2, *v2 = xy + 4, *t;
+    if (v1[1] >= v0[1]) {
+        if (!(v1[1] < v2[1])) {
+            t = v2, v2 = v1, v1 = t;
+            if (!(v0[1] < v1[1])) t = v1, v1 = v0, v0 = t;
+        }
+    } else {
+        t = v1, v1 = v0, v0 = t;
+        if (!(v2[1] > v1[1])) {
+            t = v2, v2 = v1, v1 = t;
+            if (!(v1[1] > v0[1])) t = v1, v1 = v0, v0 = t;
+        }
+    }
+    int32_t T[2] = {v0[0] >> 8, v0[1] >> 8}, M[2] = {v1[0] >> 8, v1[1] >> 8}, B[2] = {v2[0] >> 8, v2[1] >> 8};
+    if (B[1] - T[1] > 15000) return;
+    int32_t *xs[3] = {&T[0], &M[0], &B[0]};
+    for (int k = 0; k < 3; k++) {
+        if (*xs[k] < -32000) *xs[k] = -32000;
+        if (*xs[k] > 32000) *xs[k] = 32000;
+    }
+    int32_t left, right, lstep, rstep;
+    if (T[1] == B[1]) { /* 0x7300d: one row */
+        int32_t *a = T, *b = M, *c = B, *s;
+        if (a[0] > b[0]) s = b, b = a, a = s;
+        int32_t xr;
+        if (c[0] > b[0]) xr = c[0];
+        else {
+            if (!(c[0] > a[0])) s = c, c = a, a = s;
+            xr = b[0];
+        }
+        left = (int32_t)((uint32_t)a[0] << 16), right = (int32_t)((uint32_t)xr << 16);
+        flat_rows(r, colour, a[1], 0, &left, &right, 0, 0, 0);
+        return;
+    }
+    if (T[1] == M[1]) { /* 0x73046: flat top */
+        int32_t *a = T, *b = M, *s;
+        if (a[0] > b[0]) s = b, b = a, a = s;
+        int32_t rows = B[1] - a[1];
+        flat_edge(b[0], B[0] - b[0], rows, 0, 1, b[0], &right, &rstep);
+        flat_edge(a[0], B[0] - a[0], rows, 1, 0, a[0], &left, &lstep);
+        flat_rows(r, colour, a[1], rows, &left, &right, lstep, rstep, 0);
+        return;
+    }
+    if (M[1] == B[1]) { /* 0x730ef: flat bottom */
+        int32_t *b = M, *c = B, *s;
+        if (b[0] > c[0]) s = c, c = b, b = s;
+        int32_t rows = c[1] - T[1];
+        flat_edge(T[0], c[0] - T[0], rows, 0, 1, T[0], &right, &rstep);
+        flat_edge(T[0], b[0] - T[0], rows, 1, 0, T[0], &left, &lstep);
+        flat_rows(r, colour, T[1], rows, &left, &right, lstep, rstep, 0);
+        return;
+    }
+    /* 0x72afe: general triangle, the long edge meets the middle row at xm */
+    int32_t top_rows = M[1] - T[1], bot_rows = B[1] - M[1];
+    int32_t xm = (int32_t)(((B[0] - T[0]) * flat_recip(B[1] - T[1]) * top_rows + 0x8000) >> 16) + T[0];
+    int32_t lacc2, racc2, lstep2, rstep2;
+    if (xm < M[0]) {
+        flat_edge(T[0], B[0] - T[0], B[1] - T[1], 1, 1, T[0], &left, &lstep);
+        flat_edge(T[0], B[0] - T[0], B[1] - T[1], 1, 1, xm, &lacc2, &lstep2);
+        flat_edge(T[0], M[0] - T[0], top_rows, 0, 0, T[0], &right, &rstep);
+        flat_edge(M[0], B[0] - M[0], bot_rows, 0, 1, M[0], &racc2, &rstep2);
+    } else {
+        flat_edge(T[0], B[0] - T[0], B[1] - T[1], 0, 0, T[0], &right, &rstep);
+        flat_edge(T[0], B[0] - T[0], B[1] - T[1], 0, 0, xm, &racc2, &rstep2);
+        flat_edge(T[0], M[0] - T[0], top_rows, 1, 1, T[0], &left, &lstep);
+        flat_edge(M[0], B[0] - M[0], bot_rows, 1, 0, M[0], &lacc2, &lstep2);
+    }
+    flat_rows(r, colour, T[1], top_rows, &left, &right, lstep, rstep, 0);
+    flat_rows(r, colour, M[1] + 1, bot_rows - 1, &lacc2, &racc2, lstep2, rstep2, 1);
+}

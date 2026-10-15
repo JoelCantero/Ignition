@@ -32,6 +32,8 @@ int main(int argc, char **argv) {
     if (len > 3) memcpy(shd_path + len - 3, "SHD", 3);
     size_t shd_size;
     uint8_t *shd = ign_read_file(shd_path, &shd_size);
+    if (len > 3) memcpy(shd_path + len - 3, "TAB", 3);
+    uint8_t *tab = ign_read_file(shd_path, &shd_size);
     IgnRaster r = {.fb = fb, .stride = w};
     ign_raster_clip(&r, p[2], p[3], p[4], p[5]);
     int n = (int)((size / 4 - 6) / 32);
@@ -44,6 +46,10 @@ int main(int argc, char **argv) {
         switch (rec[0]) {
         case 0x11:
         case 0x12: ign_prim_tex(&r, rec + 1, rec + 24, page, rec[0] == 0x12 ? lut : NULL); break;
+        case 1: ign_prim_point(&r, rec[1], rec[2], tab, rec[4], (rec[5] >> 8) & 0xff); break;
+        case 2: ign_prim_point(&r, rec[1], rec[2], shd, rec[3], -1); break;
+        case 0xf: ign_prim_flat(&r, (const int32_t[6]){rec[1], rec[2], rec[4], rec[5], rec[7], rec[8]},
+                                tab[(rec[10] & 0xff) << 8 | ((rec[11] >> 8) & 0xff)]); break;
         case 0x13: ign_prim_shade(&r, rec + 1, shd + ((size_t)(rec[7] & 0xff) << 8)); break;
         case 0x14:
         case 0x15: {

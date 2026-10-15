@@ -30,6 +30,11 @@ void ign_prim_persp(IgnRaster *r, const int32_t xy[6], const int32_t light[3], c
 /* Primitive 0x13 (sub_00074d04): flat triangle darkening dst through one table row (row_lut = SHD + row * 256). */
 void ign_prim_shade(IgnRaster *r, const int32_t xy[6], const uint8_t *row_lut);
 
+/* Primitives 1 (lut = TAB, colour * 256 + light) and 2 (light < 0: lut = SHD, colour * 256 + dst): one pixel. */
+void ign_prim_point(IgnRaster *r, int32_t x, int32_t y, const uint8_t *lut, int colour, int light);
+/* Primitive 0xf (sub_000729f3): flat triangle of palette index `colour` (the TAB entry), whole-pixel vertices. */
+void ign_prim_flat(IgnRaster *r, const int32_t xy[6], uint8_t colour);
+
 /* ---- scene engine (lisa.c) ---- */
 
 #define LISA_BUCKETS 6000      /* 0x24c04c */

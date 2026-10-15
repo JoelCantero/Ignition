@@ -208,7 +208,7 @@ class RenderOriginal:
         return lines
 
     # primitive tests: records in the format of tests/lisa_prims.c
-    def setup_raster(self, width, height, tex, shd=None):
+    def setup_raster(self, width, height, tex, shd=None, tab=None):
         self.width, self.height = width, height
         self.call(0x60DC4, eax=width, ebx=height)
         self.tex_base = self.alloc(len(tex) + 0x10000, 0x10000)
@@ -218,6 +218,8 @@ class RenderOriginal:
         self.luts = {1: self.blob(keyed, 0x10000)}
         if shd:
             self.luts[2] = self.blob(shd, 0x10000)
+        if tab:
+            self.put(0xC484C, "I", self.blob(tab, 0x10000))
 
     def raster_records(self, prims):
         header = struct.unpack_from("<6i", prims)
@@ -234,6 +236,10 @@ class RenderOriginal:
                 words[7], words[8], words[9] = uv, page, lut
             elif rec[0] == 0x13:
                 words[8] = self.luts[2]
+            elif rec[0] == 2:
+                words[4] = self.luts[2]
+            elif rec[0] in (1, 0xF):
+                pass
             elif rec[0] in (0x14, 0x15):
                 words[1] = page
                 words[11:17] = rec[24:30]
