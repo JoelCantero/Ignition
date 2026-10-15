@@ -188,9 +188,9 @@ void ign_car_wreck_turbo(IgnCar *car);
 void ign_car_respawn_controls(IgnCar *car);
 /* Moves a wrecked car (glide of sub_0003a788). */
 void ign_car_set_pose(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height);
-/* sub_00041430: puts a wrecked car back at a respawn point, still and airborne. Returns -1 (car untouched) if the
- * port's ground lookup finds nothing there. */
-int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height);
+/* sub_00041430: puts a wrecked car back at a respawn point, still and airborne; `layer` is the respawn object's
+ * (type bits 12-15, [0x24bff0]). Returns -1 (car untouched) if sub_00032dc8 finds no ground there. */
+int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height, int layer);
 int ign_first_car_id(const IgnLevel *lv);
 
 /* Pair pass of cars_update_all (0x2d2f8): |dx|,|dz| < 200, |dy| < 70, then sub_0001ebb4. Each contact goes to `hits`

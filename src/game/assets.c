@@ -520,6 +520,124 @@ int ign_ground_at(const IgnLevel *lv, float x, float z, float y_hint, IgnGroundH
     return face_height(o, &o->faces[hit->face], x, z, &hit->y) ? (hit->object = -1, -1) : 0;
 }
 
+double ign_ground_plane_up(const IgnGroundHit *hit, double x, double z) {
+    const int32_t *p0 = hit->p[0], *p1 = hit->p[1];
+    double a = hit->normal[0], b = hit->normal[1], c = hit->normal[2];
+    double e1x = (double)p1[0] - p0[0], e1y = (double)p1[1] - p0[1], e1z = (double)p1[2] - p0[2];
+    double dx = x - p0[0], dz = z - p0[2];
+    double t = (-a * dx + a * e1x - c * dz + c * e1z + b * e1y) / b;
+    return -(p0[1] + t);
+}
+
+/* 0x32feb / 0x33aa8: crossing test of (px, pz) on the x/z of three vertices. */
+static int covers(const int32_t *v0, const int32_t *v1, const int32_t *v2, int32_t px, int32_t pz) {
+    const int32_t *v[3] = {v0, v1, v2};
+    int inside = 0;
+    for (int i = 0, j = 2; i < 3; j = i++) {
+        int32_t zi = v[i][2], zj = v[j][2];
+        if (!((pz >= zi && pz < zj) || (pz >= zj && pz < zi))) continue;
+        int32_t t = (int32_t)((uint32_t)(v[j][0] - v[i][0]) * (uint32_t)(pz - zi)) / (zj - zi) + v[i][0];
+        if (t > px) inside = !inside;
+    }
+    return inside;
+}
+
+static int32_t last_list_type = -1; /* [0x1ff970] between calls */
+
+void ign_ground_list_state(int32_t type) {
+    last_list_type = type;
+}
+
+int ign_ground_list_query(const IgnLevel *lv, int32_t x, int32_t y, int32_t z, int jump, int layer, int32_t probe,
+                          IgnGroundHit *hit) {
+    static int list[8192];
+    int n = ign_engine_view(&lv->track, x, z, layer, list, 8192);
+    return ign_ground_list_query_in(lv, list, n, x, y, z, jump, probe, hit);
+}
+
+int ign_ground_list_query_in(const IgnLevel *lv, const int *list, int n, int32_t x, int32_t y, int32_t z, int jump,
+                             int32_t probe, IgnGroundHit *hit) {
+    enum { MAX_HITS = 8 };
+    struct {
+        int type, obj;
+        int32_t o[3], v[3][3];
+    } rec[MAX_HITS];
+    int nrec = 0, special = 0;
+    int32_t reach = jump ? 900 : 600;
+    hit->object = -1;
+    for (int k = 0; k < n; k++) {
+        const IgnObject *o = &lv->track.objs[list[k]];
+        int32_t ox = o->pos[0] + IGN_SRF_ORIGIN, oy = -o->pos[1], oz = o->pos[2] + IGN_SRF_ORIGIN;
+        int32_t dx = x - ox, dy = y - oy, dz = z - oz;
+        int klass = (int)(o->type & 0xfff);
+        if (klass < 100) {
+            if (abs(dx) >= reach || abs(dz) >= reach) continue;
+            for (int f = 0; f < o->nf; f++) {
+                const IgnFace *face = &o->faces[f];
+                const int32_t *v0 = o->verts + face->v[0] * 3, *v1 = o->verts + face->v[1] * 3,
+                              *v2 = o->verts + face->v[2] * 3;
+                if (abs((v0[0] + v1[0] + v2[0]) / 3 - dx) >= 200 || abs((v0[2] + v1[2] + v2[2]) / 3 - dz) >= 200)
+                    continue;
+                if (!covers(v0, v1, v2, dx, dz)) continue;
+                int type = (int)(face->flags >> 16);
+                if (type >= 0x28 && type <= 0x4f) continue;
+                /* 0x3324e: the original logs past 8 hits and writes on; the port keeps the first 8. */
+                if (nrec == MAX_HITS) continue;
+                rec[nrec].type = type, rec[nrec].obj = list[k];
+                rec[nrec].o[0] = ox, rec[nrec].o[1] = oy, rec[nrec].o[2] = oz;
+                for (int a = 0; a < 3; a++)
+                    rec[nrec].v[0][a] = v0[a], rec[nrec].v[1][a] = v1[a], rec[nrec].v[2][a] = v2[a];
+                nrec++;
+            }
+        } else if (klass >= 0x12c && klass < 0x15e && last_list_type >= 0 && last_list_type < 0x15e) {
+            if (abs(dx) >= reach || abs(dz) >= reach || abs(dy) >= 190) continue;
+            for (int f = 0; f < o->nf; f++) {
+                const IgnFace *face = &o->faces[f];
+                if (!covers(o->verts + face->v[0] * 3, o->verts + face->v[1] * 3, o->verts + face->v[2] * 3, dx,
+                            dz))
+                    continue;
+                last_list_type = klass;
+                hit->surface_type = klass, hit->object = list[k], hit->face = f;
+                for (int c = 0; c < 3; c++) {
+                    const int32_t *v = o->verts + face->v[c] * 3;
+                    hit->p[c][0] = v[0] + ox, hit->p[c][1] = v[1] - oy, hit->p[c][2] = v[2] + oz;
+                }
+                hit->normal[0] = hit->normal[1] = hit->normal[2] = 0; /* 0x33463: not computed for objects */
+                special = 1;
+                break;
+            }
+        }
+    }
+    if (special) return 0;
+    /* 0x335b6: the face nearest below the probe (first strict minimum, non-vertical). */
+    int best = -1;
+    int32_t best_d = 1000000;
+    for (int r = 0; r < nrec; r++) {
+        const int32_t(*v)[3] = rec[r].v;
+        int32_t ax = v[0][0] - v[1][0], az = v[0][2] - v[1][2], bx = v[2][0] - v[1][0], bz = v[2][2] - v[1][2];
+        int32_t d = ((v[0][1] - rec[r].o[1]) + (v[1][1] - rec[r].o[1]) + (v[2][1] - rec[r].o[1])) / 3 + y + probe;
+        if (d < best_d && d >= 0 && (int32_t)((uint32_t)az * (uint32_t)bx - (uint32_t)bz * (uint32_t)ax) != 0)
+            best_d = d, best = r;
+    }
+    if (best < 0) {
+        last_list_type = -1;
+        return -1;
+    }
+    const int32_t(*v)[3] = rec[best].v;
+    int32_t ax = v[0][0] - v[1][0], ay = v[0][1] - v[1][1], az = v[0][2] - v[1][2];
+    int32_t bx = v[2][0] - v[1][0], by = v[2][1] - v[1][1], bz = v[2][2] - v[1][2];
+    hit->normal[0] = (int32_t)((uint32_t)bz * (uint32_t)ay - (uint32_t)az * (uint32_t)by);
+    hit->normal[1] = (int32_t)((uint32_t)az * (uint32_t)bx - (uint32_t)ax * (uint32_t)bz);
+    hit->normal[2] = (int32_t)((uint32_t)by * (uint32_t)ax - (uint32_t)ay * (uint32_t)bx);
+    for (int c = 0; c < 3; c++)
+        hit->p[c][0] = v[c][0] + rec[best].o[0], hit->p[c][1] = v[c][1] - rec[best].o[1],
+        hit->p[c][2] = v[c][2] + rec[best].o[2];
+    hit->surface_type = rec[best].type, hit->object = rec[best].obj, hit->face = -1;
+    last_list_type = rec[best].type;
+    hit->y = (float)-ign_ground_plane_up(hit, x, z);
+    return 0;
+}
+
 #define WALL_RADIUS 600
 #define WALL_RADIUS_JUMP 700
 #define WALL_HEIGHT_JUMP 2500

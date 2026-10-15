@@ -151,12 +151,7 @@ void ign_coll_reflect(const double n[3], double v[3]) {
 }
 
 double ign_coll_ground_up(const IgnGroundHit *hit, double x, double z) {
-    const int32_t *p0 = hit->p[0], *p1 = hit->p[1];
-    double a = hit->normal[0], b = hit->normal[1], c = hit->normal[2];
-    double e1x = (double)p1[0] - p0[0], e1y = (double)p1[1] - p0[1], e1z = (double)p1[2] - p0[2];
-    double dx = x - p0[0], dz = z - p0[2];
-    double t = (-a * dx + a * e1x - c * dz + c * e1z + b * e1y) / b;
-    return -(p0[1] + t);
+    return ign_ground_plane_up(hit, x, z);
 }
 
 void ign_coll_fly_step(IgnCollObj *o) {
@@ -335,7 +330,18 @@ static int erupting_geyser(const IgnLevel *lv, const IgnFx *fx, const IgnCar *ca
 int ign_special_probe(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car, int iceland, int layer, int *wreck) {
     *wreck = 0;
     double cx = car->body.px * IGN_WORLD_PER_METRE, cz = car->body.pz * IGN_WORLD_PER_METRE;
-    int type = -1;
+    int type = -1, launch = 0;
+    /* 0x2ef9d: while a lightning bolt lives ([0x1fede4], set after its first frame by sub_0003bdac), sub_00032dc8
+     * under the car; a 0x12d answer launches it. */
+    int lightning = 0;
+    for (int i = 0; i < IGN_FX_SLOTS; i++) lightning |= fx->r[i][0] == IGN_FX_LIGHTNING && fx->r[i][5] >= 1;
+    if (lightning && lv->track.cell) {
+        IgnGroundHit hit;
+        if (ign_ground_list_query(lv, (int32_t)trunc(cx + IGN_SRF_ORIGIN), (int32_t)trunc(car->height),
+                                  (int32_t)trunc(cz + IGN_SRF_ORIGIN), car->jump_mode, layer, 50, &hit) == 0 &&
+            hit.surface_type == 0x12d)
+            launch = 1;
+    }
     for (int i = 0; i < lv->track.nobj; i++) {
         const IgnObject *o = &lv->track.objs[i];
         uint32_t klass = o->type & 0xfff;
@@ -354,13 +360,13 @@ int ign_special_probe(const IgnLevel *lv, const IgnFx *fx, const IgnCar *car, in
         break;
     }
     switch (type) {
-    case 0x12c: *wreck = 1; return IGN_SPECIAL_NONE;
+    case 0x12c: *wreck = 1; return launch ? IGN_SPECIAL_LAUNCH : IGN_SPECIAL_NONE;
     case 0x12d: return IGN_SPECIAL_LAUNCH;
-    case 0x131: return erupting_geyser(lv, fx, car) ? IGN_SPECIAL_LAUNCH : IGN_SPECIAL_NONE;
+    case 0x131: return launch || erupting_geyser(lv, fx, car) ? IGN_SPECIAL_LAUNCH : IGN_SPECIAL_NONE;
     case 0x12e: return IGN_SPECIAL_PUSH;
     case 0x12f: return IGN_SPECIAL_MESH;
-    case 0x130: *wreck = 3; return IGN_SPECIAL_NONE;
-    default: return IGN_SPECIAL_NONE;
+    case 0x130: *wreck = 3; return launch ? IGN_SPECIAL_LAUNCH : IGN_SPECIAL_NONE;
+    default: return launch ? IGN_SPECIAL_LAUNCH : IGN_SPECIAL_NONE;
     }
 }
 

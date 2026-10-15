@@ -361,7 +361,7 @@ static void print_obj(const IgnCollObj *o) {
 }
 
 /* Line protocol: P na nb (x z)*  |  I bodyA bodyB cx cz theta  |  R n[3] v[3]  |  F obj  |  B obj hit  |
- * Q x y z jump n (type x y z nv nf verts faces)*. */
+ * Q x y z jump n (type x y z nv nf verts faces)*  |  G probe state x y z jump n (same, faces with flags). */
 static int runner(void) {
     char mode;
     while (scanf(" %c", &mode) == 1) {
@@ -407,9 +407,10 @@ static int runner(void) {
                 ign_coll_bounce(&o, &h);
             }
             print_obj(&o);
-        } else if (mode == 'Q') {
-            int32_t x, y, z;
+        } else if (mode == 'Q' || mode == 'G') {
+            int32_t x, y, z, probe = 0, state = -1;
             int jump, n;
+            if (mode == 'G' && scanf("%d %d", &probe, &state) != 2) return 1;
             if (scanf("%d %d %d %d %d", &x, &y, &z, &jump, &n) != 5 || n < 0 || n > 16) return 1;
             static IgnObject objs[16];
             static int32_t verts[16][16 * 3];
@@ -425,12 +426,27 @@ static int runner(void) {
                     if (scanf("%d", &verts[i][k]) != 1) return 1;
                 for (int f = 0; f < o->nf; f++) {
                     faces[i][f] = (IgnFace){0};
+                    if (mode == 'G' && scanf("%u", &faces[i][f].flags) != 1) return 1;
                     if (scanf("%d %d %d", &faces[i][f].v[0], &faces[i][f].v[1], &faces[i][f].v[2]) != 3) return 1;
                 }
                 o->verts = verts[i], o->faces = faces[i];
             }
             IgnLevel lv = {.track = {.nobj = n, .objs = objs}};
-            printf("%d\n", ign_special_query(&lv, x, y, z, jump, 0));
+            if (mode == 'Q') {
+                printf("%d\n", ign_special_query(&lv, x, y, z, jump, 0));
+            } else {
+                int list[16];
+                for (int i = 0; i < n; i++) list[i] = i;
+                IgnGroundHit h;
+                ign_ground_list_state(state);
+                int r = ign_ground_list_query_in(&lv, list, n, x, y, z, jump, probe, &h);
+                printf("%d", r == 0 ? h.surface_type : -1);
+                if (r == 0 && (objs[h.object].type & 0xfff) < 100) {
+                    for (int k = 0; k < 3; k++) printf(" %d", h.normal[k]);
+                    for (int k = 0; k < 9; k++) printf(" %d", h.p[k / 3][k % 3]);
+                }
+                printf("\n");
+            }
         } else {
             return 1;
         }

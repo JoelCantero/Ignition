@@ -603,13 +603,19 @@ void ign_car_respawn_controls(IgnCar *car) {
     car->jump_mode = car->landed = car->skid_timer = car->spark_timer = 0;
 }
 
-int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height) {
-    /* sub_00041430 0x418ec: one probe at the respawn point; without ground, a second one 20 units towards -x, which
-     * also moves the car there. */
+int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height, int layer) {
+    /* sub_00041430 0x418ec: sub_00032dc8 over the engine view at the respawn point, probe 50 above the car; without
+     * ground, a second one 20 units towards -x, which also moves the car there. Without the engine grid (synthetic
+     * levels) the SRF query stands in. */
     IgnGroundHit hit;
-    if (ign_ground_at(lv, x, z, (float)-height, &hit) != 0) {
+    int32_t ix = (int32_t)trunc(x) + IGN_SRF_ORIGIN, iy = (int32_t)trunc(height), iz = (int32_t)trunc(z) + IGN_SRF_ORIGIN;
+    int found = lv->track.cell ? ign_ground_list_query(lv, ix, iy, iz, car->jump_mode, layer, 50, &hit)
+                               : ign_ground_at(lv, x, z, (float)-height, &hit);
+    if (found != 0) {
         x -= 20.0f;
-        if (ign_ground_at(lv, x, z, (float)-height, &hit) != 0) return -1;
+        found = lv->track.cell ? ign_ground_list_query(lv, ix - 20, iy, iz, car->jump_mode, layer, 50, &hit)
+                               : ign_ground_at(lv, x, z, (float)-height, &hit);
+        if (found != 0) return -1;
     }
     ign_car_set_pose(car, lv, x, z, heading, height);
     IgnBody *b = &car->body;

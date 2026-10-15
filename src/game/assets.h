@@ -133,6 +133,23 @@ int ign_ground_query(const IgnLevel *lv, int32_t sx, int32_t probe_up, int32_t s
 /* Start pose from the first two TRI road sections. Returns 0 on success. */
 int ign_level_start(const IgnLevel *lv, float *x, float *z, float *heading);
 
+/* Height (up) of a ground query's plane at engine (x, z) (0x35967 / car_update). */
+double ign_ground_plane_up(const IgnGroundHit *hit, double x, double z);
+
+/* sub_00032dc8: ground query over the engine's view list (ign_engine_view around (x, z) with `layer`), so moved
+ * objects count. Engine x/z, probe height `y` (up); `jump` widens the reach to 900. Road objects (class < 100) within
+ * 600 in x/z give up to 8 non-wall faces whose centre is within 200 and whose x/z covers the point; the one with the
+ * smallest y + `probe` - mean height >= 0 is the answer. A special object (class 0x12c-0x15d) within 190 in height
+ * whose face covers the point wins, but only while the previous answer ([0x1ff970]) was a type in [0, 0x15e).
+ * Returns 0 and fills `hit` (type, normal, points; `object` = PLC index), or -1. */
+int ign_ground_list_query(const IgnLevel *lv, int32_t x, int32_t y, int32_t z, int jump, int layer, int32_t probe,
+                          IgnGroundHit *hit);
+/* The same over a given object list (PLC indices in the engine list's order). */
+int ign_ground_list_query_in(const IgnLevel *lv, const int *list, int n, int32_t x, int32_t y, int32_t z, int jump,
+                             int32_t probe, IgnGroundHit *hit);
+/* Sets [0x1ff970], the previous answer's type (-1 = none). */
+void ign_ground_list_state(int32_t type);
+
 typedef struct {
     double x0, z0, x1, z1; /* world units */
 } IgnWall;
