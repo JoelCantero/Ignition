@@ -140,6 +140,13 @@ static void sync_scene(const IgnLevel *lv) {
     }
 }
 
+/* [0x24bff0]: zone of the viewed car's section object (race_frame 0x430b6), 0 after 120 post-race frames. */
+static int view_zone;
+
+void ign_render_set_zone(const IgnLevel *lv, int plc_object) {
+    view_zone = plc_object >= 0 && plc_object < lv->track.nobj ? (int)((lv->track.objs[plc_object].type >> 12) & 0xf) : 0;
+}
+
 /* race_frame 0x42c92 / race_setup_video: config block of a full-screen view. */
 static void engine_view(const IgnFrame *fb, const IgnCamera *cam, LisaView *v) {
     const double tenths = 1800.0 / 3.14159265358979323846;
@@ -152,6 +159,7 @@ static void engine_view(const IgnFrame *fb, const IgnCamera *cam, LisaView *v) {
     v->near = fb->w == 320 && fb->h == 200 ? 25 : 10;
     v->cx = fb->w / 2, v->cy = fb->h / 2;
     v->layers = LISA_LAYER_ALL;
+    v->zone = view_zone;
     v->persp = fb->perspective;
     lisa_view_clip(v, 0, 0, fb->w - 1, fb->h - 1);
 }

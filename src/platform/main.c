@@ -583,6 +583,7 @@ int main(int argc, char **argv) {
             printf("rival %d (car %d): section %d phase %d lap %d %.0f km/h wrecks %d\n", i, rivals[i].id,
                    rivals[i].section, rivals[i].phase, rivals[i].lap, rivals[i].kmh, rivals[i].wrecks);
         if (!fixed_cam) race_view(&car, rear_view, &cam);
+        ign_render_set_zone(&lv, car.out && finish_clock >= 120.0 ? -1 : ign_track_section_object(&track, car.section));
         draw(&lv, &car, &cam);
         IgnPalette shown;
         ign_fx_palette(&fx, &lv.palette, &shown);
@@ -702,6 +703,7 @@ int main(int argc, char **argv) {
             SDL_SetWindowTitle(win, title);
         }
 
+        ign_render_set_zone(&lv, car.out && finish_clock >= 120.0 ? -1 : ign_track_section_object(&track, car.section));
         draw(&lv, &car, &cam);
         IgnPalette shown;
         ign_fx_palette(&fx, &lv.palette, &shown);
