@@ -134,3 +134,14 @@ if(IGN_VERIFY_ORIGINAL)
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
             --report ${CMAKE_BINARY_DIR}/lap-original-report.json)
 endif()
+
+# Persistence: IGN_DOS.BTZ round trip, record tables and time-trial ghosts.
+add_executable(save_btz_test tests/save_btz.c)
+target_link_libraries(save_btz_test PRIVATE ignition_core)
+if(NOT MSVC)
+  target_compile_options(save_btz_test PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME save_btz COMMAND save_btz_test "${GAME_DIR}" ${CMAKE_BINARY_DIR})
+add_test(NAME btz_tool COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/btz.py roundtrip "${GAME_DIR}/IGN_DOS.BTZ")
+add_test(NAME time_trial COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/time_trial.py
+  --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}")
