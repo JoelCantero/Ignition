@@ -7,6 +7,9 @@ original (`MAINDOS.EXE`, DOS/4GW, Watcom C). El objetivo es un juego nativo para
 > **Datos del juego**: este repositorio no contiene ni debe contener archivos del juego (son propiedad de sus autores).
 > Hace falta una copia original (p. ej. GOG), por defecto en `/Users/Shared/Epic Games/Ignition/ignition`.
 > `.gitignore` excluye ejecutables, imágenes y volcados derivados.
+> Como las demás tablas portadas (p. ej. los récords de fábrica de `save.c`), las estructuras y textos del menú de
+> `MAINDOS.EXE` están en C (`src/frontend/menu_data.c`, regenerable con `tools/gen_menu_data.py`): así se compila sin
+> Python ni capstone. Imágenes, sonidos, vídeos y fuentes se leen siempre de la copia del juego.
 
 ---
 
@@ -120,8 +123,11 @@ Variables de entorno de depuración: `IGN_TRACE=1` (traza por tick y estadístic
 `IGN_TRACE=full` (estado inicial y cada tick, esquema v5 de 112 campos con controles y precisión de 17 cifras),
 `IGN_SAVE_DIR=carpeta/` (carpeta de récords, `IGN_DOS.BTZ` y fantasmas en lugar de `SDL_GetPrefPath`; sin ventana
 activa la persistencia),
-`IGN_TRACK_DUMP=archivo` (vuelca los tramos), `IGN_LIFT=u` (eleva el coche en el visor para ver la sombra) e
-`IGN_BANARNE=1` (carrocería alta en el visor).
+`IGN_TRACK_DUMP=archivo` (vuelca los tramos), `IGN_LIFT=u` (eleva el coche en el visor para ver la sombra),
+`IGN_BANARNE=1` (carrocería alta en el visor) e `IGN_KEYS="ms:Tecla,ms:Tecla,…"` (pulsaciones guionizadas con nombres
+de tecla de SDL, o `quit`, cada una `ms` después de la anterior). Con esta última se comprobó el ciclo completo en
+ventana: menú → carrera → Esc → menú (idioma confirmado solo, iris) → salida, por ejemplo
+`IGN_SAVE_DIR=/tmp/s/ IGN_KEYS="1500:Return,1500:Space,2500:Space,1500:Return,1000:Return,1000:Return,8000:Escape,5000:quit" ./build/ignition`.
 
 ### Verificación diferencial de la física original
 

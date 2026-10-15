@@ -863,7 +863,10 @@ static int host_cd_tracks(void) {
     fclose(f);
     return IGN_MUSIC_LAST;
 }
-static void host_cd_play(int track) { ign_music_play(menu_data_dir, track, 0); }
+/* Track 1 is the data track: MSCDEX refuses to play it, so the menu just tries again 2 s later, silently. */
+static void host_cd_play(int track) {
+    if (track >= 2) ign_music_play(menu_data_dir, track, 0);
+}
 static int host_sound_play(int sample, int vol, int rate) {
     int h = ign_audio_play(IGN_SND_MENU, 0, sample, 0, vol, rate);
     return h ? h : -1;
@@ -912,6 +915,44 @@ static int dos_scancode(SDL_Scancode sc) {
     return 0;
 }
 
+/* IGN_KEYS="ms:Key,ms:Key,...": scripted key presses (SDL key names, or "quit"), each `ms` after the previous one,
+ * pushed as SDL events so the menu and the race windows react as to the keyboard. For automated end-to-end runs. */
+static char *scripted_keys;
+static Uint32 SDLCALL push_scripted_key(void *user, SDL_TimerID id, Uint32 interval) {
+    (void)user;
+    (void)id;
+    (void)interval;
+    char *tok = scripted_keys, *colon = tok ? strchr(tok, ':') : NULL;
+    if (!colon) return 0;
+    char *end = strchr(colon, ',');
+    if (end) *end = 0;
+    SDL_Event ev = {0};
+    if (!strcmp(colon + 1, "quit"))
+        ev.type = SDL_EVENT_QUIT;
+    else {
+        ev.type = SDL_EVENT_KEY_DOWN;
+        ev.key.scancode = SDL_GetScancodeFromName(colon + 1);
+        ev.key.key = SDL_GetKeyFromScancode(ev.key.scancode, SDL_KMOD_NONE, false);
+        ev.key.down = true;
+    }
+    SDL_PushEvent(&ev);
+    if (ev.type == SDL_EVENT_KEY_DOWN) {
+        SDL_Event up = ev;
+        up.type = SDL_EVENT_KEY_UP;
+        up.key.down = false;
+        SDL_PushEvent(&up);
+    }
+    scripted_keys = end ? end + 1 : NULL;
+    return scripted_keys ? (Uint32)atoi(scripted_keys) : 0;
+}
+
+static void start_scripted_keys(void) {
+    const char *env = getenv("IGN_KEYS");
+    if (!env || !*env || !(scripted_keys = SDL_strdup(env))) return;
+    if (!SDL_InitSubSystem(SDL_INIT_EVENTS)) return;
+    SDL_AddTimer((Uint32)atoi(scripted_keys), push_scripted_key, NULL);
+}
+
 /* Menu, then the race it configures, then back to the menu (sub_00020d60). */
 static int run_frontend(const char *data_dir) {
     menu_data_dir = data_dir;
@@ -936,6 +977,7 @@ static int run_frontend(const char *data_dir) {
         return 1;
     }
     SDL_SetRenderVSync(shared_ren, 1);
+    start_scripted_keys();
     IgnFrontendHost host = {
         .timer_ms = host_timer,
         .set_palette = host_palette,
@@ -1014,8 +1056,10 @@ static int run_frontend(const char *data_dir) {
         }
         argv[argc++] = (char *)ign_frontend_level((int)ign_cfg_get(CFG_TRACK));
         argv[argc] = NULL;
+        printf("menu: race on %s, car %s, %s rivals\n", argv[argc - 1], car, rivals);
         rc = run_game(argc, argv);
         if (rc) break;
+        if (!quit_requested) printf("menu: back from the race\n");
     }
     ign_frontend_destroy();
     SDL_DestroyRenderer(shared_ren);
