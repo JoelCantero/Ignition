@@ -167,3 +167,7 @@
 001fee04  g_ghost_record_cs    time to beat in centiseconds (ghost header, 3000000 without ghost)
 001fee00  g_ghost_overflow     recording over 300 s or ghost of another track: no GST written
 001fee4c  g_ghost_on           BTZ+0x10, kept only in time trial
+0001a864  btz_menu_defaults    fresh menu image at 0xe9bfc: version 30, cars, grid 0..7, PL1/PL2, scancodes, "G1"/"12"  status=ported roadmap=phase4.ui
+0001911c  records_screen       menu records table: BTZ +0x57f track, +0x583 race/lap, '%.2d:%.2d:%.2d'  roadmap=phase4.ui
+000bf628  t_factory_records    7 x 0x78 default record blocks (OSK 145.00 ... K L 84.00), copied by menu_load_gfx 0x126dc
+000e9bfc  g_menu_btz           menu copy of IGN_DOS.BTZ (read only if +0x000 == 30)
