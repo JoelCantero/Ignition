@@ -15,6 +15,7 @@ add_library(ignition_core STATIC
   src/game/ai.c
   src/game/car.c
   src/game/ghost.c
+  src/game/save.c
   src/game/skid.c
   src/game/fx.c
   src/game/weather.c
