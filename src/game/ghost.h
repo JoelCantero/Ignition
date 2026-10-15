@@ -40,6 +40,23 @@ void ign_ghost_record(IgnGhost *g, const IgnCar *car, int sections);
 /* Sets the race time and pads the tail with the last sample (words 0-5 only, as 0x2cd12 does). */
 void ign_ghost_finish(IgnGhost *g, double race_seconds);
 
+#define IGN_MODE_TIME_TRIAL 2 /* [0x1feefc] == 2 */
+
+/* Time trial ([0x1feefc] == 2) with the ghost option ([0x1fee4c] == 1). */
+#define IGN_GHOST_NO_RECORD 3000000 /* 0x2ae5a: [0x1fee04] when GHOSTS\<name>.GST cannot be read */
+
+typedef enum {
+    IGN_TRIAL_NONE,     /* no readable ghost: nothing to play, any finish beats IGN_GHOST_NO_RECORD */
+    IGN_TRIAL_GHOST,    /* ghost of this track loaded for playback */
+    IGN_TRIAL_MISMATCH  /* ghost of another track: no playback and [0x1fee00] = 1, so nothing is saved */
+} IgnTrialGhost;
+
+/* sub_0002adf8 0x2ae16..0x2af0b: loads the ghost of `track`, sets *record_cs ([0x1fee04]) and, on a track
+ * mismatch, marks `rec` as unsaveable as the original does through [0x1fee00]. */
+IgnTrialGhost ign_ghost_trial_load(const char *path, int track, IgnGhost *g, IgnGhost *rec, int *record_cs);
+/* sub_0002ccc8 0x2ccd7..0x2cd06: save only if the recording fits and record_cs * 0.01 > race time. */
+int ign_ghost_trial_beats(const IgnGhost *rec, int record_cs, double race_seconds);
+
 /* Playback (0x50e94): puts a car initialised with ign_car_init in the pose of sample `tick` (clamped). */
 void ign_ghost_pose(const IgnGhost *g, int tick, IgnCar *car);
 

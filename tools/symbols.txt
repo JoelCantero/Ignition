@@ -3,8 +3,8 @@
 000215d0  game_init            sets 640x480 then 320x200, prints banner, loads system gfx  roadmap=phase4.ui
 00021860  load_system_gfx      N_SYSGFX.PIC, N_SYSG_2.PIC, SYS.COL  roadmap=phase4.ui
 000224d0  load_level           LEVELS\%s%s.{TRI,SRF,COL,PIC,POS,MSH,TEX}  roadmap=phase2.world
-000243e0  load_panel_gfx       HUD panels, signs, POKAL.PIC  roadmap=phase4.ui
-00011504  menu_load_gfx        baltazar\data\*.pic  roadmap=phase4.ui
+00011504  menu_load_gfx        LOADING, MENU.COL/TAB, pictures, settings + IGN_DOS.BTZ, menu_init 0x14000 inlined (src/frontend/frontend.c)  status=ported roadmap=phase4.ui
+000243e0  load_panel_gfx       S/N_PANGFX, H_PAN1/2, S/N/H_SIGNS, POKAL.PIC (raw files, pixels at +0x34e); HUD ones loaded by hud.c  status=ported roadmap=phase4.hud
 00060f9c  load_file            eax=filename -> eax=malloc'd contents or 0
 000558e4  set_video_mode       mode params in 0xc5cfc..0xc5d08 (w, h, bpp, ?)
 00062775  sprintf              cdecl (dest, fmt, ...)
@@ -19,23 +19,23 @@
 000230f4  load_plc             LEVELS\..PLC + CARS\CARS.PLC  roadmap=phase2.world
 0002322c  load_msh             LEVELS\..MSH + CARS\CARS.MSH  roadmap=phase2.world
 00023368  load_tex             LEVELS\..TEX + CARS.TEX  roadmap=phase2.world
-0001ce30  load_tri             reads TRI (500 B/object), computes edge angles  roadmap=phase1.ai-route
-0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car  status=partial roadmap=phase1.ai-route
+0001ce30  load_tri             direct PLC sections, two canonical slots, record +1 = TRI block byte 0, float32 angles and binary64 insets (CW 0x127f); bounded geometry oracle tests/ai_geometry_original.py, full loader excluded  status=partial roadmap=phase1.ai-route
+0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car; stored TRI heading, travel blend, lookahead index clamp, target clipping by insets and curvature 0x1b4a2..0x1b823 (oracle tests/ai_target_original.py); record/lane selection, slope, spin, 5/8 gains and avoidance sign excluded  status=partial roadmap=phase1.ai-route
 00026458  cars_init            allocs cars/bodies, torque splines, start grid (slots 0xc33d0); bounded turbo initialization 0x27451..0x27497 verified, full init excluded  roadmap=phase1.car
 00048a14  car_place_objects    per frame: body/wheels/shadow/name engine objects, front wheel steer  roadmap=phase3.render
 00040ec8  cars_body_sway       body tilt car+0x584/+0x58c = ground tilt + lean, smoothed 0.25  roadmap=phase1.car
 0002e6f8  car_body_lean        lean car+0xb8/+0xc0 from per-tick acceleration  roadmap=phase1.car
-000160c4  cheat_check          typed words 0xbf030[7] toggle flags 0x1fb2f0[i] (BANARNE..STRINGS)  roadmap=phase4.ui
+000160c4  menu_page_key        page key callback: cheats (0xbf030), idle, intro skip, sounds, CONTROLS, language confirm + car list, KEY ALREADY ASSIGNED, car/track animations; returns 0x441 to consume  status=ported roadmap=phase4.ui
 0001ebb4  body_vs_body         box-box contact (edges 0xbfe40), returns 1 on impulse  roadmap=phase2.collisions
 0001e638  body_pair_impulse    eax=A, edx=B, stack: cx, cz, theta  roadmap=phase2.collisions
 0002236c  level_prepare        progress bar, load_tri, objects, load_srf_grid  roadmap=phase2.world
 0001fee0  load_srf_grid        eax=path, edx=material table; relocates SRF offsets  roadmap=phase2.world
 00041244  pos_make_relative    converts POS positions to consecutive cyclic frame deltas  roadmap=phase2.world
-000412e8  pos_apply_frame      applies current POS delta/rotation; port in src/game/pos.c, rotation order approximate  status=partial roadmap=phase2.world
+000412e8  pos_apply_frame      applies current POS delta/rotation to move records [0x1fef94] with +0x1c == 1 (LI_PLACEOBJECT), then LI_MOVEOBJECT; port in src/game/pos.c, rotation order approximate (render only: ground/collision queries use translation)  status=partial roadmap=phase2.world
 00060f40  read_file_into       eax=path, edx=buf, ebx=size
-000240f4  load_fonts           IGNITION.FNT + *.lft  roadmap=phase4.ui
+000240f4  load_fonts           IGNITION.FNT -> [0x1feff4]; yellow/pos/speed{_s,,_h}.lft -> [0x1fea0c..0x1fea38] (font.c/hud.c load the layout's three)  status=ported roadmap=phase4.hud
 001febf4  g_level_pos
-0001aaf8  menu_load_car        menucar.plc/msh/tex  roadmap=phase4.ui
+0001aaf8  menu_load_car        DEFAULT2.PSQ, TEST2.PFM, 29 texture pages, CANADA.SHD + solid table, MENUCAR.*  status=ported roadmap=phase4.ui
 001fefd4  g_level_msh
 001fec08  g_cars_msh
 001fefec  g_level_plc          u32 n + 20-byte records
@@ -52,7 +52,7 @@
 0005891c  camera_angles        layer +0x38: camera angles toward a look-at point (tenths of a degree); not used by race views, not ported  status=identified roadmap=phase3.render
 00047f94  chase_camera_update  per-car camera [0x1fef9c]+car*0xc8: yaw smoothing, height, pitch, distance (ported)  status=ported roadmap=phase3.render
 000420cc  race_frame           section palette effects, camera selection, render_scene, HUD  roadmap=phase3.render
-0004a320  race_hud             original HUD routine; partial H_PAN1/LFT port in src/render/hud.c  status=partial roadmap=phase4.hud
+0004a320  race_hud             race overlay per viewport (hud.c): times, place, dial, gear lever, turbo, signs, elimination bar and 0x4b648 second-player marker, start lights, medal, messages; medal sound 0x4bc54 (audio) and the draw-less fireworks loop 0x4bca8 not ported  status=ported roadmap=phase4.hud
 00027df8  chase_camera_init    camera struct: height car+8+1400, 400/400, pitch 420+450 tenths  roadmap=phase3.render
 0002b850  race_clock           normal countdown/transition fragments verified by tests/race_time_original.py; forced start excluded  status=partial roadmap=phase4.loop
 0002b734  frame_time           sampled signed wrapping ms difference * 0.001 at 2b7d6..2b7f9 verified; pause/timer excluded  status=identified
@@ -72,7 +72,7 @@
 000ebb60  g_framebuffer
 001fec04  g_level_tab
 001fef18  g_level_shd
-00020814  ground_query         eax=x, edx=y, ebx=z (SRF space) -> best face, plane, surface type  status=ported roadmap=phase1.physics
+00020814  ground_query         eax=x, edx=probe height (up), ebx=z (SRF space) -> 0xebad8: type, normal (p0-p1)x(p2-p1), points (mesh + pool position, no rotation); integer face_avg_height cost  status=ported roadmap=phase1.physics
 00020c18  srf_walk_list_b      spans with dz >= 0  roadmap=phase1.physics
 00020c81  srf_walk_list_a      spans with dz < 0  roadmap=phase1.physics
 00020bbc  face_avg_height      roadmap=phase1.physics
@@ -100,13 +100,13 @@
 001fefe8  g_bodies             0x1d0 bytes per car
 000c4e20  t_car_mass
 000c4fd0  t_car_gears          12 cars x 3 gears x 8 int
-000c33f0  t_surface_grip       30 doubles
+000c33f0  t_surface_grip       30 doubles; ai_drive 0x1b732 also indexes it with signed TRI bytes -21/79/90/97 (static zero/subnormal words)
 000c4dc0  t_car_grip
 00033ee8  collect_walls        unshared edges of static drivable faces; per-track height, jump mode (ported)  status=ported roadmap=phase1.physics
 0001f708  box_vs_walls         (ported: ign_body_collide)  status=ported roadmap=phase1.physics
 0001f3fc  wall_impulse         (ported)  status=ported roadmap=phase1.physics
 0001fdb4  body_corners         world corners from cuerpo+0xf0/+0x110  roadmap=phase1.physics
-0003fd04  collisions_pass      object/car collisions per frame; effect loop: 200 slots 0x1d5f10 (0x64 B), handlers by type via 0x3fcd8  status=port-pending roadmap=phase2.collisions
+0003fd04  collisions_pass      per frame: effect loop (200 slots 0x1d5f10, 0x64 B, handlers 0x3fcd8), [0x1feef0] += 1 vs 0xc4598[track] -> 0x10a00, car_ground_contact if [0x1feeb4] > 0, 0x360f0/0x3636c/0x36ce0, elimination 0x4fcf0 (mode 3), 0x4c858  status=partial roadmap=phase2.collisions
 0002e234  car_vertical         gravity, jumps, landing (car+0x20); arithmetic verified until 0x2e397 or return, 252 cases/1008 steps; landing effects excluded  status=ported roadmap=phase1.physics
 0003731c  skid_effects         skid marks (700 ring [0x1feeb8], SHD row per surface 0xc34e0) and dust (effect 1)  status=ported roadmap=phase2.effects
 00039d1c  fx_sprite            effect type 1: SMOKE.TEX sprite, damped drift, grows, 8-frame anim 0xc4110  status=ported roadmap=phase2.effects
@@ -129,26 +129,73 @@
 00026154  weather_init         [0x1fee8c] 1 rain / 2 snow / 3 wind by track  status=ported roadmap=phase2.effects
 000400f4  weather_zone         weather flag by player section  status=ported roadmap=phase2.effects
 000403c8  weather_update       weather tiles, density, lightning  status=ported roadmap=phase2.effects
-00051508  palette_blend        palette toward (r,g,b) by fraction
+00051508  palette_blend        eax=src 0x300 B, edx/ebx/ecx=r,g,b, stack: double frac, int32 keep[256]|0; copy to static 0x207afe (returned), c += chop(frac*(t-c)) at CW 0x127f, low byte; keep[i]!=0 skips; callers pass keep=0; palette.c, original-byte replay 253 cases (tests/palette_original.py); fx.c flash not yet routed through it  status=verified roadmap=phase2.effects
+00051a9c  palette_lerp         eax=a, edx=b, ebx=out, ecx=t: t>=256 (signed) copies b, else a+trunc((b-a)*t/256) per byte, low byte; menu crossfade sub_00012bb8; palette.c, original-byte replay 85 cases (tests/palette_original.py)  status=verified roadmap=phase4.ui
+00051a38  palette_step         eax=cur, edx=target, ebx=out, ecx=step: |t-c|<=step -> t, else c+-low byte of step; no call sites or data pointers found (unreferenced)  status=understood
 00049a8c  sound_play           (group, sub, idx, loops, vol, Hz, x, z) distance attenuated  status=ported roadmap=phase4.audio
 0002a4ec  sound_load           banks GENERAL ROLL/SKID/COLL/BOOST/DIV, level, cars + ENGINE.INF  status=ported roadmap=phase4.audio
 00063310  sound_load_dir       load NN_*.WAV/PAT/XI of a directory  status=ported roadmap=phase4.audio
+0006442f  cd_init              MSCDEX present (0x64559) + 0x400 B DOS buffer (DPMI 0x100) -> [0x25ade8]  status=identified roadmap=phase4.audio
+000644c5  cd_free              DPMI 0x101 frees the DOS buffer  status=identified roadmap=phase4.audio
+00064559  cd_mscdex_check      int 0x2f AX=0x1500 via DPMI 0x300; [0xd7d90] drives, [0x25adec] first drive  status=identified roadmap=phase4.audio
+000645e1  cd_request           int 0x2f AX=0x1510 (send device request [0x25ade8]) via DPMI 0x300  status=identified roadmap=phase4.audio
+00064659  cd_request_header    al=command, edx=IOCTL length: 0x0d-byte header, transfer buffer at +0x20  status=identified roadmap=phase4.audio
+00064332  cd_play_audio        command 0x84, eax=start, edx=frames  status=identified roadmap=phase4.audio
+00064391  cd_stop_audio        command 0x85; menu, options and shutdown  status=identified roadmap=phase4.audio
+00064241  cd_play_track        eax=track 1..[0x25a934], start [0x25a938+4n], length [0x25ab90+4n] (music.c ign_music_play)  status=ported roadmap=phase4.audio
+000640b3  cd_read_toc          IOCTL 0x0a disc info (first +0x21, last +0x22, lead-out +0x23), 0x0b per track (start +0x22); [0x25a934] = last-first+1, length = next start - start; MSF -> frames 0x64710  status=identified roadmap=phase4.audio
+00064710  cd_msf_to_frames     m*4500 + s*75 + f - 150  status=identified roadmap=phase4.audio
+00063f3e  cd_set_volume        eax 0..255 on the 4 channels (IOCTL output 3); race [0x1feef4]*2.55, menu [0xe9cf7]*25.5  status=ported roadmap=phase4.audio
+00063cf3  cd_busy              IOCTL 0x0c audio status + busy bit 9 of the request status; 0 = idle (race loop 0x21320 replays the track)  status=identified roadmap=phase4.audio
+00063d56  cd_media_check       IOCTL 4 channel 0 volume -> [0x25adf0]; 6 device status bit 0 (door open) -> [0x25adf4] = 0 and return, else 1; 9 media changed -> [0x25adf8]; 0x0c busy [0x25ae08], resume start/end MSF [0x25ae00]/[0x25adfc]  status=identified roadmap=phase4.audio
+000c3fd8  t_level_cd_track     7 x int by track id [0x1fef10]: {2,3,4,5,6,6,7}  status=ported roadmap=phase4.audio
+001feed8  g_cd_track           current CD track; set by 0x2293c, keys 0xcb/0xcd (0x2c1cb) and joystick (0x4d228)  status=ported roadmap=phase4.audio
+001ff24f  g_cfg_music_track    0 = level's track, -1 = random 1 + rand*[0x25a934], n = fixed; pause menu line (0x43cc8), keys 0xcb/0xcd (--music-track, F5/F6)  status=ported roadmap=phase4.audio
+001ff253  g_cfg_music_volume   0..10; x10 -> [0x1feef4]; 0 disables the replay in the race loop (--music-volume)  status=ported roadmap=phase4.audio
+000e9cf3  g_menu_music_track   menu copy of the setting; 0 plays track 7 (0x13356)  status=identified roadmap=phase4.audio
+001fed54  g_podium_music       track 8 already played on the results (render_main 0x464e2), 0 at race start 0x2aaa1  status=ported roadmap=phase4.audio
+0025adf4  g_cd_door_closed     device status bit 0 clear (0x63d56); the CD calls need it == 1  status=identified roadmap=phase4.audio
+0025a934  g_cd_track_count     tracks on the disc, last - first + 1 (TOC 0x640ff); 8 on the Ignition CD  status=identified roadmap=phase4.audio
 00050824  engine_sound         ENGINE.INF rate/volume by car+0x288  status=ported roadmap=phase4.audio
 00050464  roll_sound           rolling loops by rear wheel surface  status=ported roadmap=phase4.audio
 000360f0  ambient_sound        PLC 0x190+n emitters volume by distance  status=ported roadmap=phase2.effects
 00036ce0  special_emitters     smoke 0x12e (+ embers 1 in 10) / geysers 0x131 every 41 frames (list 0x1fef58)  status=ported roadmap=phase2.effects
 0003636c  smoke_emitters       PLC 0x15e-0x167 and 0x130 smoke, mist and columns (list 0x1fefac, class = type - 0x15e)  status=ported roadmap=phase2.effects
 0003f37c  landing_dust         4 SMOKE puffs at the wheels on landing (car+0x278 == 1) over dusty types 0xc3558  status=ported roadmap=phase2.effects
-00041430  respawn_place        after glide: probe point (or 20 to -x), still, airborne; bounded controls reset verified: gear 1/counter 0, preserves delay/turbo/clocks; geometry/full FX excluded (respawn oracle 7422 cases/31344 steps)  status=ported roadmap=phase1.race
+00041430  respawn_place        after glide: probe point with ground_list_query 0x32dc8 (view at the point, layer of its object; or 20 to -x), still, airborne; bounded controls reset verified: gear 1/counter 0, preserves delay/turbo/clocks; geometry/full FX excluded (respawn oracle 7422 cases/31344 steps)  status=ported roadmap=phase1.race
 0004e688  turbo_start_fx       10 nitro puffs (0xc41a0) when a turbo starts  status=ported roadmap=phase1.controls
 000413fc  ease_curve           table 0xc0678[f*200]*0.005 (ease in-out)  roadmap=phase3.render
 00028f08  build_sections       route topology from PLC-origin distances; parallel branch B, class-6 merge and next-object angles (track.c)  status=partial roadmap=phase1.ai-route
-000247b0  split_plc_types      class = type & 0xfff, attributes -> [0x1fef7c]  roadmap=phase2.world
+000247b0  split_plc_types      rewrites the PLC type to its class (type & 0xfff) before world creation and level_prepare; [0x1fef7c] 12 B per object: layer (bits 12-15), byte 2, byte 3  roadmap=phase2.world
 001ff004  g_section_count
 001feff8  g_sections           24 bytes per section
-000350f0  car_ground_contact   moving-object collisions; calls ground_query  status=port-pending roadmap=phase2.collisions
+000350f0  car_ground_contact   collision objects [0x1fefc0] (0x98 B): resting vs cars (0x349e8 + 0x346cc, 60x60 box, COLL 1 above impact 10), flying: x0.99, -0.4, spin x0.98, clamp, ground_query bounce (0x35f38, 0.9/0.6/0.9, max 20) or rest below speed 2; kind 4 flashes LIGHT.TEX; port src/game/pos.c, flight/bounce fragments verified (tests/contact_original.py)  status=ported roadmap=phase2.collisions
+000349e8  contact_polygons     eax=A, edx=nA, ebx=B, ecx=nB (float x,z): edge crossings (max 8) -> mean [0x1fee9c]/[0x1feea8], farthest-pair angle [0x1fee98]; verified tests/contact_original.py  status=verified roadmap=phase2.collisions
+000346cc  contact_impulse      eax=A, edx=B (0x34 B: x, z, vx, vz, w doubles; mass, inertia, impact floats): impulse with -(1+0.5), impacts |trunc(vn)|; verified (jB0 float ties 1 ulp, x87)  status=verified roadmap=phase2.collisions
+00035f38  reflect_velocity     eax=struct (+0 normal, +0x18 velocity): reflect when moving against the normal, via two atan2 rotations; verified  status=verified roadmap=phase2.collisions
+0003383c  special_query        eax=x, edx=height, ebx=z, ecx=car: type 0x12c-0x15d (word +0x1e) of the last engine object (list [0x24c01c] after 0x58c1c) with a face over x/z, |dx|,|dz| < 600/900, sticky |dy| < 190; result 0x1ffca8; verified on supplied lists  status=verified roadmap=phase2.collisions
+00032dc8  ground_list_query    eax=x, edx=height, ebx=z, ecx=car/-1, stack probe: ground query over the engine view list: up to 8 road faces (class < 100) under the point, nearest below the probe, or a special object (0x12c-0x15d, |dy| < 190) while [0x1ff970] in [0, 0x15e); result 0x1ff970; respawn_place and car_update (lightning, 0x12d launch); verified on supplied lists  status=verified roadmap=phase2.collisions
+00058c1c  engine_view_list     view struct [0x24c05c] -> object list [0x24c01c] (+0x60 count): fixed row pattern 0xc5d8c over the 256-unit grid [0x24c048] (width [0x24c014] = 200), start shifted by 0xc5e40[yaw*0.01, pitch*0.01]; cell chains +0x26 from the head; layer filter [0x24bff0] on word +0x24; verified with view (850, 0)  status=verified roadmap=phase2.collisions
+00031858  car_flatten          copies the car's body mesh scaled x1.2 / y0.2 / z1.6 (set mesh 0x56e9c), COLL 6; car+0x558/+0x55c/+0x560; restored by car_update 0x31316 after 200 ticks with no car within 30 (pop -6, COLL 7)  status=ported roadmap=phase2.collisions
+0002abdc  texanim_create       level_prepare: sub_00010390 then sub_00010508 for every class 0xfa object  status=ported roadmap=phase2.world
+00010508  texanim_build        frames = leading textured faces (64x64 tiles, page), world faces in each tile (sub_00010bc8 count / sub_00010b30 collect / sub_00010c5c match); list [0xab5f0], count [0xab5f4]  status=ported roadmap=phase2.world
+00010a00  texanim_step         faces of frame i to the tile of frame (i + cur) mod n; prev = cur++; from collisions_pass every 0xc4598[track] frames; verified  status=verified roadmap=phase2.world
+0004c7c0  hud_message_add      eax=text, edx=frames, ebx=blink, ecx=view: first free of 5 x 0x78 B [0x1fefb8]  status=ported roadmap=phase4.ui
+0004c858  hud_messages_age     collisions_pass: age +0x70 += 1, past +0x68 the slot is freed  status=ported roadmap=phase4.ui
+0004c89c  hud_messages_draw    race_hud: shown while fmod(age, 2*blink) <= blink, centred per view  roadmap=phase4.ui
+0004fcf0  elimination_smoke    collisions_pass, mode 3: last racing car trails 2 EXSMOKE and (1 in 2) 1 DARKSMOK sprites from its rear  status=ported roadmap=phase2.effects
+001ff970  g_list_ground_result result of ground_list_query, its type gates special objects on the next call
+000c5d8c  t_view_rows          engine view pattern: row/column start, then (cells, next row shift) until -5000
+000c4598  t_texanim_period     frames per texture animation step by track: 6 20 2 4 12 9 12
+00032d8c  car_frame_velocity   car+0x640/+0x648 = (rear + front axle steps car+0x58/+0x78, +0x60/+0x80) * 0.5, once per frame  status=ported roadmap=phase2.collisions
+001fefc0  g_coll_objects       collision objects (PLC 0x96-0xc7), 0x98 B: +0 type-0x96, +4 PLC, +8 flying, +0xc pos, +0x24 vel, +0x3c ang, +0x54 spin, +0x6c contact body, +0x84 mass, +0x88 inertia, +0x8c impact, +0x90 phase, +0x94 period
+001feeb4  g_coll_count         number of collision objects
+001fef58  g_special_objects    PLC 0x12c-0x15d, 16 B: PLC, type, counter, phase (geyser +0xc)
+001fee3c  g_push_sound_wait    0x12e push sample cooldown (15 car updates)
+001fede4  g_lightning_active   set by fx_lightning 0x3bdac
 0002de30  race_elimination    mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), "%s IS OUT"; [0x1fed78]-- ; at 1 left, all finish  roadmap=phase1.race
 0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> wrap/fallback/invalid-record selection ported; route topology remains approximate  status=partial roadmap=phase1.ai-route
+000bf994  t_ai_lookahead        6 i16 section offsets {1,2,3,4,6,8} (read as dword [0xbf992+2k] >> 16)
 000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty
 # Lisa 2 engine and rasterizer (src/render/lisa.c, lisa_raster.c)

@@ -6,6 +6,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
+# The original rounds every x87 operation to binary64 (control word 0x127f); fused multiply-adds would not.
+if(NOT MSVC)
+  add_compile_options(-ffp-contract=off)
+endif()
 
 find_package(SDL3 REQUIRED CONFIG)
 
@@ -15,8 +19,10 @@ add_library(ignition_core STATIC
   src/game/ai.c
   src/game/car.c
   src/game/ghost.c
+  src/game/save.c
   src/game/skid.c
   src/game/fx.c
+  src/game/palette.c
   src/game/weather.c
   src/game/physics.c
   src/game/race.c
@@ -25,7 +31,16 @@ add_library(ignition_core STATIC
   src/render/lisa.c
   src/render/lisa_raster.c
   src/render/hud.c
+  src/render/sprite.c
+  src/render/font.c
   src/render/camera.c
+  src/frontend/cdp.c
+  src/frontend/frontend.c
+  src/frontend/gfx2d.c
+  src/frontend/gui.c
+  src/frontend/menu_data.c
+  src/frontend/pfm.c
+  src/frontend/settings.c
 )
 target_include_directories(ignition_core PUBLIC src)
 if(NOT MSVC)
@@ -38,6 +53,16 @@ target_link_libraries(ignition PRIVATE ignition_core SDL3::SDL3)
 if(NOT MSVC)
   target_compile_options(ignition PRIVATE -Wall -Wextra)
 endif()
+
+# Music: MUSIC/TrackNN.ogg (the original CD audio) decoded by the vendored stb_vorbis.
+add_library(stb_vorbis STATIC third_party/stb_vorbis/stb_vorbis.c)
+target_compile_definitions(stb_vorbis PRIVATE STB_VORBIS_NO_PUSHDATA_API STB_VORBIS_NO_STDIO)
+if(NOT MSVC)
+  target_compile_options(stb_vorbis PRIVATE -w)
+  target_link_libraries(stb_vorbis PRIVATE m)
+endif()
+target_sources(ignition PRIVATE src/platform/music.c)
+target_link_libraries(ignition PRIVATE stb_vorbis)
 
 # Flat ELF image of the original executable for disassemblers.
 set(GAME_DIR "/Users/Shared/Epic Games/Ignition/ignition" CACHE PATH "Original game data")
@@ -81,9 +106,16 @@ add_test(NAME track_topology COMMAND track_topology_test)
 add_executable(track_real_assets_test tests/track_real_assets.c)
 target_link_libraries(track_real_assets_test PRIVATE ignition_core)
 add_test(NAME track_real_assets COMMAND track_real_assets_test "${GAME_DIR}")
+# 2D race overlay: LFT/FNT fonts, sprites, HUD frames (the game data part is skipped without the directory).
+add_executable(hud_assets_test tests/hud_assets.c)
+target_link_libraries(hud_assets_test PRIVATE ignition_core)
+add_test(NAME hud_assets COMMAND hud_assets_test "${GAME_DIR}")
 add_executable(pos_test tests/pos.c)
 target_link_libraries(pos_test PRIVATE ignition_core)
 add_test(NAME pos COMMAND pos_test)
+add_executable(palette_test tests/palette.c)
+target_link_libraries(palette_test PRIVATE ignition_core)
+add_test(NAME palette COMMAND palette_test)
 
 # Lisa 2 renderer: track-only frames of the port for tests/render_original.py comparisons.
 add_executable(render_shot tests/render_shot.c)
@@ -105,10 +137,30 @@ if(NOT MSVC)
   target_compile_options(track_real_assets_test PRIVATE -Wall -Wextra)
   target_compile_options(ai_route_choice_test PRIVATE -Wall -Wextra)
   target_compile_options(ai_schedule_test PRIVATE -Wall -Wextra)
+  target_compile_options(hud_assets_test PRIVATE -Wall -Wextra)
+  target_compile_options(palette_test PRIVATE -Wall -Wextra)
 endif()
 option(IGN_VERIFY_ORIGINAL "Compare physics and car kernels with original LE bytes (requires Python unicorn)" OFF)
 if(IGN_VERIFY_ORIGINAL)
+  # Triangle primitive 0x729f3 and matrix sprites 0x82950 against the original LE bytes (Unicorn).
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME hud_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/hud_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:hud_assets_test>
+            --report ${CMAKE_BINARY_DIR}/hud-original-report.json)
+endif()
+if(IGN_VERIFY_ORIGINAL)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME ai_geometry_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_geometry_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:track_ai_records_test>
+            --assets-runner $<TARGET_FILE:track_real_assets_test> --data "${GAME_DIR}"
+            --report ${CMAKE_BINARY_DIR}/ai-geometry-original-report.json)
+  add_test(NAME ai_target_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_target_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:ai_route_choice_test>
+            --assets-runner $<TARGET_FILE:track_real_assets_test> --data "${GAME_DIR}"
+            --report ${CMAKE_BINARY_DIR}/ai-target-original-report.json)
   add_test(NAME ai_schedule_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_schedule_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:ai_schedule_test>
@@ -136,8 +188,63 @@ if(IGN_VERIFY_ORIGINAL)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/respawn_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
             --report ${CMAKE_BINARY_DIR}/respawn-original-report.json)
+  add_test(NAME palette_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/palette_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:palette_test>
+            --report ${CMAKE_BINARY_DIR}/palette-original-report.json)
   add_test(NAME lap_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/lap_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
             --report ${CMAKE_BINARY_DIR}/lap-original-report.json)
+endif()
+# Frontend (needs the game data): menu background animation and a full menu run up to a race start.
+add_executable(menu_shot tests/menu_shot.c)
+target_link_libraries(menu_shot PRIVATE ignition_core)
+add_executable(pfm_frames tests/pfm_frames.c)
+target_link_libraries(pfm_frames PRIVATE ignition_core)
+add_test(NAME menu_background COMMAND pfm_frames "${GAME_DIR}" --hash)
+set_tests_properties(menu_background PROPERTIES PASS_REGULAR_EXPRESSION "frames 209 hash c5d5aca8")
+# Language page, intro (skipped), credits (ended), SINGLE PLAYER, SINGLE RACE, car, track: the race must start.
+# The settings go to a scratch user folder (IGN_SAVE_DIR); the game's IGN_DOS.BTZ is only read.
+add_test(NAME menu_flow COMMAND ${CMAKE_COMMAND} -E env IGN_SAVE_DIR=${CMAKE_BINARY_DIR}/menu-flow-save/
+  $<TARGET_FILE:menu_shot> "${GAME_DIR}" ${CMAKE_BINARY_DIR}/menu-flow
+  w5 k1c w20 k39 w100 k39 w300 k1c w60 k1c w60 kd0 w5 k1c w60 k1c w60 kd0 w12 k1c w80 r)
+set_tests_properties(menu_flow PROPERTIES FIXTURES_REQUIRED menu_flow_clean)
+add_test(NAME menu_flow_clean COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/menu-flow-save)
+set_tests_properties(menu_flow_clean PROPERTIES FIXTURES_SETUP menu_flow_clean)
+
+# Collision objects and car contact (car_ground_contact 0x350f0).
+add_executable(contact_test tests/contact.c)
+target_link_libraries(contact_test PRIVATE ignition_core)
+add_test(NAME contact COMMAND contact_test)
+if(NOT MSVC)
+  target_compile_options(contact_test PRIVATE -Wall -Wextra)
+endif()
+if(IGN_VERIFY_ORIGINAL)
+  add_test(NAME contact_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/contact_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:contact_test>
+            --report ${CMAKE_BINARY_DIR}/contact-original-report.json)
+endif()
+add_executable(contact_real_assets_test tests/contact_real_assets.c)
+target_link_libraries(contact_real_assets_test PRIVATE ignition_core)
+add_test(NAME contact_real_assets COMMAND contact_real_assets_test "${GAME_DIR}")
+if(NOT MSVC)
+  target_compile_options(contact_real_assets_test PRIVATE -Wall -Wextra)
+endif()
+
+# Persistence: IGN_DOS.BTZ round trip, record tables and time-trial ghosts.
+add_executable(save_btz_test tests/save_btz.c)
+target_link_libraries(save_btz_test PRIVATE ignition_core)
+if(NOT MSVC)
+  target_compile_options(save_btz_test PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME save_btz COMMAND save_btz_test "${GAME_DIR}" ${CMAKE_BINARY_DIR})
+add_test(NAME btz_tool COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/btz.py roundtrip "${GAME_DIR}/IGN_DOS.BTZ")
+add_test(NAME time_trial COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/time_trial.py
+  --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}")
+if(IGN_VERIFY_ORIGINAL)
+  add_test(NAME btz_defaults_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/btz_defaults_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:save_btz_test>)
 endif()

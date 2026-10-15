@@ -47,7 +47,23 @@ typedef struct {
     int nobj;
     IgnObject *objs;
     uint8_t *plc, *msh;
+    /* Engine object grid (256-unit cells, 200 x 200, [0x24c048]): each cell chains its objects from the last one
+     * placed or moved into it (LI_PLACEOBJECT / LI_MOVEOBJECT insert at the head). Track model only. */
+    int32_t *cell;    /* per object: z cell * 200 + x cell, engine coordinates */
+    uint32_t *stamp;  /* per object: insertion order into its cell */
+    uint32_t clock;
 } IgnModel;
+
+#define IGN_ENGINE_GRID 200
+
+/* World creation 0x2489c: objects of class < 100 are placed first, then the rest, both in PLC order. */
+int ign_engine_place(IgnModel *m);
+/* LI_MOVEOBJECT 0x56d24: an object whose cell changed goes to the head of its new cell. */
+void ign_engine_moved(IgnModel *m, int obj);
+/* sub_00058c1c with the view of sub_0003383c (850, 0): objects of the cells of the original fixed pattern around
+ * engine (x, z), cell by cell, each cell from its head. With `layer` != 0 only objects of layer 0 or `layer` (PLC
+ * type bits 12-15, [0x24bff0]). Returns the count written to `out`. */
+int ign_engine_view(const IgnModel *m, int32_t x, int32_t z, int layer, int *out, int max);
 
 typedef struct {
     uint8_t *data;
@@ -95,17 +111,44 @@ void ign_free_level(IgnLevel *lv);
 void ign_object_rotation_matrix(const IgnObject *o, float out[9]);
 void ign_object_vertex(const IgnObject *o, int vertex, float out[3]);
 
+/* The engine's ground query and collisions see an object's mesh vertices plus its current (POS or collision object)
+ * position: the rotation only reaches the renderer. Engine coordinates: x/z + IGN_SRF_ORIGIN, y down. */
+void ign_object_point(const IgnObject *o, int vertex, int32_t out[3]);
+
 typedef struct {
     float y;          /* ground height (y down) */
     int surface_type; /* face flags >> 16 */
     int object, face;
+    /* sub_00020814 result 0xebad8: +4 normal (p0 - p1) x (p2 - p1), +0x10/+0x1c/+0x28 the face points (engine). */
+    int32_t normal[3];
+    int32_t p[3][3];
 } IgnGroundHit;
 
-/* sub_00020814: ground face under world (x, z) for a car whose height (y down) is y_hint. Returns 0 if found. */
+/* sub_00020814: ground face under world (x, z) for a car whose height (y down) is y_hint, probed 50 above it.
+ * Returns 0 if found. */
 int ign_ground_at(const IgnLevel *lv, float x, float z, float y_hint, IgnGroundHit *hit);
+/* sub_00020814 with its own integer arguments: engine x/z (world + IGN_SRF_ORIGIN) and the probe height (up). */
+int ign_ground_query(const IgnLevel *lv, int32_t sx, int32_t probe_up, int32_t sz, IgnGroundHit *hit);
 
 /* Start pose from the first two TRI road sections. Returns 0 on success. */
 int ign_level_start(const IgnLevel *lv, float *x, float *z, float *heading);
+
+/* Height (up) of a ground query's plane at engine (x, z) (0x35967 / car_update). */
+double ign_ground_plane_up(const IgnGroundHit *hit, double x, double z);
+
+/* sub_00032dc8: ground query over the engine's view list (ign_engine_view around (x, z) with `layer`), so moved
+ * objects count. Engine x/z, probe height `y` (up); `jump` widens the reach to 900. Road objects (class < 100) within
+ * 600 in x/z give up to 8 non-wall faces whose centre is within 200 and whose x/z covers the point; the one with the
+ * smallest y + `probe` - mean height >= 0 is the answer. A special object (class 0x12c-0x15d) within 190 in height
+ * whose face covers the point wins, but only while the previous answer ([0x1ff970]) was a type in [0, 0x15e).
+ * Returns 0 and fills `hit` (type, normal, points; `object` = PLC index), or -1. */
+int ign_ground_list_query(const IgnLevel *lv, int32_t x, int32_t y, int32_t z, int jump, int layer, int32_t probe,
+                          IgnGroundHit *hit);
+/* The same over a given object list (PLC indices in the engine list's order). */
+int ign_ground_list_query_in(const IgnLevel *lv, const int *list, int n, int32_t x, int32_t y, int32_t z, int jump,
+                             int32_t probe, IgnGroundHit *hit);
+/* Sets [0x1ff970], the previous answer's type (-1 = none). */
+void ign_ground_list_state(int32_t type);
 
 typedef struct {
     double x0, z0, x1, z1; /* world units */

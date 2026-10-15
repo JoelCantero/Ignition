@@ -147,12 +147,22 @@ static int sample_ground(IgnCar *car, const IgnLevel *lv, int types[4], double w
             sum -= h[w];
         }
     }
-    if (!car->airborne) {
+    if (!car->airborne && !car->launch) {
         double run_x = fabs(car->corner_x[0] - car->corner_x[3]) * scale / (special + 1);
         double run_z = fabs(car->corner_z[0] - car->corner_z[1]) * scale / (special + 1);
         /* y points down: a lower front (larger y) gives positive pitch, i.e. downhill acceleration. */
         b->pitch = slope_angle((h[2] + h[3]) * 0.5 - (h[0] + h[1]) * 0.5, run_x, 1.0, b->pitch, limit);
         b->roll = slope_angle((h[1] + h[2]) * 0.5 - (h[0] + h[3]) * 0.5, run_z, 0.6, b->roll, limit);
+    } else if (limit && car->launch > 0) {
+        /* 0x30d05: the somersault turns the pitch (car+0x110) 0.078 rad per tick; after 80 ticks the car is level. */
+        car->launch++;
+        b->pitch = fmod(car->launch * 0.078, 6.2831853071796);
+        if (car->launch > 80) {
+            car->body_pitch = 0;
+            b->pitch = 0;
+            car->body_roll = b->roll; /* car+0x584 = car+0x108 (the engine keeps it in tenths of a degree) */
+            car->launch = 0;
+        }
     } else if (limit && b->pitch < PI / 4) {
         b->pitch += 0.01; /* 0x30d98: car+0x130, the nose drops in the air */
     }
@@ -276,6 +286,27 @@ static void place(IgnCar *car) {
     car->y = (float)-car->height;
 }
 
+void ign_car_flatten(IgnCar *car) {
+    car->flat = 1;
+    car->flat_saved_stretch = car->body_stretch;
+    car->body_stretch *= 0.2f;
+    car->flat_sound = 6;
+}
+
+void ign_car_flat_tick(IgnCar *car, IgnCar *const *cars, int n, int index) {
+    if (car->flat <= 0) return;
+    if (++car->flat < 200) return;
+    for (int i = 0; i < n; i++)
+        if (i != index && fabs((double)cars[i]->x - car->x) < 30.0 && fabs((double)cars[i]->z - car->z) < 30.0) {
+            car->flat = 200;
+            return;
+        }
+    car->flat = 0;
+    car->body_stretch = car->flat_saved_stretch;
+    if (!car->airborne) car->fall_speed += -6.0;
+    car->flat_sound = 7;
+}
+
 int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, int *nhits) {
     int count = 0, nh = 0;
     for (int i = 0; i < n; i++)
@@ -283,6 +314,10 @@ int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, 
             IgnCar *a = cars[i], *b = cars[j];
             if (fabsf(a->x - b->x) >= 200 || fabsf(a->z - b->z) >= 200 || fabsf(a->y - b->y) >= 70)
                 continue;
+            /* 0x2d3c2: two cars 25 apart in x and z, neither flattened: the one falling slower (underneath) is. */
+            if (!a->wrecked && !b->wrecked && !a->flat && !b->flat && fabsf(a->x - b->x) < 25 &&
+                fabsf(a->z - b->z) < 25)
+                ign_car_flatten(a->fall_speed < b->fall_speed ? a : b);
             if (!ign_body_collide_pair(&a->body, &b->body)) continue;
             count++;
             if (hits && nh < max_hits)
@@ -292,6 +327,141 @@ int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, 
         }
     if (nhits) *nhits = nh;
     return count;
+}
+
+/* cars_update_all 0x2da32: rear axle car+0x5b0 behind and front axle car+0x5ac ahead of the car along car+0xf8. */
+static void axle_points(const IgnCar *car, double out[2][2]) {
+    double x = car->body.px * IGN_WORLD_PER_METRE, z = car->body.pz * IGN_WORLD_PER_METRE;
+    double c = cos(car->body.heading), s = sin(car->body.heading);
+    double rear = car->axle_rear, front = car->axle_front;
+    out[0][0] = x - c * rear, out[0][1] = z - s * rear;
+    out[1][0] = x + front * c, out[1][1] = z + front * s;
+}
+
+static void axle_reset(IgnCar *car) {
+    axle_points(car, car->axle);
+    memset(car->axle_step, 0, sizeof car->axle_step);
+}
+
+/* 0x2da9d: the axle points' steps of this tick. */
+static void axle_update(IgnCar *car) {
+    double now[2][2];
+    axle_points(car, now);
+    for (int a = 0; a < 2; a++)
+        for (int k = 0; k < 2; k++) car->axle_step[a][k] = now[a][k] - car->axle[a][k], car->axle[a][k] = now[a][k];
+}
+
+void ign_car_frame_velocity(IgnCar *car) {
+    car->contact_v[0] = (car->axle_step[0][0] + car->axle_step[1][0]) * 0.5;
+    car->contact_v[1] = (car->axle_step[0][1] + car->axle_step[1][1]) * 0.5;
+}
+
+void ign_car_contact_box(const IgnCar *car, int engine, float out[4][2]) {
+    double c = cos(car->body.heading), s = sin(car->body.heading);
+    double x = car->body.px * IGN_WORLD_PER_METRE, z = car->body.pz * IGN_WORLD_PER_METRE;
+    if (engine) x += IGN_SRF_ORIGIN, z += IGN_SRF_ORIGIN;
+    for (int i = 0; i < 4; i++) {
+        double cx = car->corner_x[i], cz = car->corner_z[i];
+        out[i][0] = (float)(cx * c + x - cz * s);
+        out[i][1] = (float)(cz * c + z + cx * s);
+    }
+}
+
+/* Sign of an x87 comparison against 0 (NaN would give -2 in the original). */
+static int sign0(double v) {
+    return v > 0 ? 1 : v < 0 ? -1 : 0;
+}
+
+int ign_contact_polygons(const float (*a)[2], int na, const float (*b)[2], int nb, float *cx, float *cz,
+                         float *theta) {
+    float hx[8], hz[8];
+    int n = 0;
+    for (int i = 0; i < na; i++) {
+        const float *p0 = a[i], *p1 = a[i + 1 < na ? i + 1 : 0];
+        float ex = p0[0] - p1[0], ez = p0[1] - p1[1];
+        for (int j = 0; j < nb; j++) {
+            const float *q0 = b[j], *q1 = b[j + 1 < nb ? j + 1 : 0];
+            /* 0x34aa0: q0 and q1 on the same side of edge p (signs of float32 products). */
+            float px1 = p0[0] - q1[0], pz1 = p0[1] - q1[1];
+            int s0 = sign0(((double)p0[1] - q0[1]) * ex - ((double)p0[0] - q0[0]) * ez);
+            int s1 = sign0((double)ex * pz1 - (double)px1 * ez);
+            if (s0 == s1) continue;
+            /* 0x34c3c: p0 and p1 on the same side of edge q. */
+            float fx = q0[0] - q1[0], fz = q0[1] - q1[1];
+            float qx1 = q0[0] - p1[0], qz1 = q0[1] - p1[1];
+            int s2 = sign0((double)fx * ((double)q0[1] - p0[1]) - ((double)q0[0] - p0[0]) * fz);
+            int s3 = sign0((double)fx * qz1 - (double)qx1 * fz);
+            if (s2 == s3) continue;
+            /* 0x34db1: crossing point (float32 denominators; parallel edges are skipped). */
+            float exfz = ex * fz, ezfx = ez * fx;
+            float den = exfz - ezfx;
+            if (den == 0) continue;
+            float ix = (float)((((double)p0[1] - q0[1]) * ((double)ex * fx) - (double)fx * ((double)p0[0] * ez) +
+                                (double)ex * ((double)q0[0] * fz)) / den);
+            den = ezfx - exfz;
+            if (den == 0) continue;
+            float iz = (float)((((double)p0[0] - q0[0]) * ((double)ez * fz) - (double)fz * ((double)p0[1] * ex) +
+                                (double)ez * ((double)q0[1] * fx)) / den);
+            if (n >= 8) return 0;
+            hx[n] = ix, hz[n] = iz, n++;
+        }
+    }
+    if (n < 1) return 0;
+    double sx = (float)0, sz = (float)0;
+    for (int k = 0; k < n; k++) sx += hx[k], sz += hz[k];
+    double inv = 1.0 / n;
+    *cx = (float)((float)sx * inv);
+    *cz = (float)(inv * (float)sz);
+    /* 0x34fd1: the farthest pair, the first strict maximum; the unrounded distance is compared with the float32
+     * maximum kept so far (fst/fcomp). */
+    float best = 0;
+    int bi = 0, bj = 0;
+    for (int i = 0; i <= n - 2; i++)
+        for (int j = i; j <= n - 1; j++) {
+            double d = pow((double)hx[i] - hx[j], 2.0) + pow((double)hz[i] - hz[j], 2.0);
+            if (d > best) best = (float)d, bi = i, bj = j;
+        }
+    *theta = (float)atan2((double)hz[bi] - hz[bj], (double)hx[bi] - hx[bj]);
+    return 1;
+}
+
+int ign_contact_impulse(IgnContactBody *a, IgnContactBody *b, float cx, float cz, float theta) {
+    /* 0x346d8: lever arm angle/length of A and its side of the contact line. */
+    double dxa = (double)cx - a->x, dza = (double)cz - a->z;
+    float aa = (float)atan2(dza, dxa);
+    float ra = (float)sqrt(dxa * dxa + dza * dza);
+    double t = theta;
+    int side = sign0((float)(dza * cos(t) - dxa * sin(t)));
+    double dxb = (double)cx - b->x, dzb = (double)cz - b->z;
+    float ab = (float)atan2(dzb, dxb);
+    float rb = (float)sqrt(dxb * dxb + dzb * dzb);
+    /* 0x34775: contact point velocities and their relative normal speed; separating bodies are left alone. */
+    float uax = (float)(a->vx - sin((double)aa) * (ra * a->w)), uaz = (float)(cos((double)aa) * (ra * a->w) + a->vz);
+    float ubx = (float)(b->vx - sin((double)ab) * (rb * b->w)), ubz = (float)(cos((double)ab) * (rb * b->w) + b->vz);
+    float un = (float)(((double)uaz - ubz) * cos(t) - ((double)uax - ubx) * sin(t));
+    if (sign0(un) != side) return 0;
+    double st = sin(t), ct = cos(t);
+    float j0 = (float)(((double)ubx * st - (double)ubz * ct) - ((double)uax * st - (double)uaz * ct));
+    int32_t imp = (int32_t)trunc(j0);
+    a->impact = b->impact = (float)(imp < 0 ? -(int64_t)imp : imp);
+    /* 0x348a5: k = cos(theta - a) * r * m / I, impulses split by mass with -(1 + 0.5). */
+    float ka = (float)(cos((double)theta - aa) * ra * a->mass / a->inertia);
+    float kb = (float)(cos((double)theta - ab) * rb * b->mass / b->inertia);
+    double inv = 1.0 / ((double)a->mass + b->mass);
+    double j0e = (double)j0 * -1.5;
+    double ja0 = b->mass * inv * j0e;
+    float jb0 = (float)(inv * a->mass * j0e);
+    double ca = sin((double)aa) * st + cos((double)aa) * ct;
+    float ja = (float)(ja0 / (ca * ((double)ra * ka) + 1.0));
+    double cb = sin((double)ab) * st + cos((double)ab) * ct;
+    double jb = jb0 / (cb * ((double)kb * rb) + 1.0);
+    a->w += (double)ja * ka;
+    a->vx -= (double)ja * st;
+    a->vz += (double)ja * ct;
+    b->w -= kb * jb;
+    b->vx += jb * st;
+    b->vz -= jb * ct;
+    return 1;
 }
 
 int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, float heading) {
@@ -324,6 +494,9 @@ int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, floa
             car->part_off[p][0] = dx;
             car->part_off[p][1] = 0;
             car->part_off[p][2] = dz;
+            /* cars_init 0x267be: per-model tables, |x| of wheel 1 (front axle) and wheel 3 (rear axle). */
+            if (o->type % 10 == 1) car->axle_front = abs(o->pos[0] - car->origin[0]);
+            if (o->type % 10 == 3) car->axle_rear = abs(o->pos[0] - car->origin[0]);
             if (dx > car->front) car->front = dx;
             if (dx < car->rear) car->rear = dx;
             if (fabsf(dz) > car->half_width) car->half_width = fabsf(dz);
@@ -388,6 +561,10 @@ int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, floa
     car->height = car->ground + VERT_REST;
     car->ground_prev = car->ground;
     car->wall_x = car->wall_z = INFINITY;
+    /* cars_init 0x273b3: the car as a car_ground_contact body. */
+    car->contact_mass = 10.0f;
+    car->contact_inertia = 4000.0f;
+    axle_reset(car);
     place(car);
     return 0;
 }
@@ -402,6 +579,7 @@ void ign_car_set_pose(IgnCar *car, const IgnLevel *lv, float x, float z, double 
     car->z = z;
     car->heading = (float)(HALF_PI - heading);
     car->height = height;
+    axle_reset(car);
     place(car);
 }
 
@@ -425,13 +603,19 @@ void ign_car_respawn_controls(IgnCar *car) {
     car->jump_mode = car->landed = car->skid_timer = car->spark_timer = 0;
 }
 
-int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height) {
-    /* sub_00041430 0x418ec: one probe at the respawn point; without ground, a second one 20 units towards -x, which
-     * also moves the car there. */
+int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height, int layer) {
+    /* sub_00041430 0x418ec: sub_00032dc8 over the engine view at the respawn point, probe 50 above the car; without
+     * ground, a second one 20 units towards -x, which also moves the car there. Without the engine grid (synthetic
+     * levels) the SRF query stands in. */
     IgnGroundHit hit;
-    if (ign_ground_at(lv, x, z, (float)-height, &hit) != 0) {
+    int32_t ix = (int32_t)trunc(x) + IGN_SRF_ORIGIN, iy = (int32_t)trunc(height), iz = (int32_t)trunc(z) + IGN_SRF_ORIGIN;
+    int found = lv->track.cell ? ign_ground_list_query(lv, ix, iy, iz, car->jump_mode, layer, 50, &hit)
+                               : ign_ground_at(lv, x, z, (float)-height, &hit);
+    if (found != 0) {
         x -= 20.0f;
-        if (ign_ground_at(lv, x, z, (float)-height, &hit) != 0) return -1;
+        found = lv->track.cell ? ign_ground_list_query(lv, ix - 20, iy, iz, car->jump_mode, layer, 50, &hit)
+                               : ign_ground_at(lv, x, z, (float)-height, &hit);
+        if (found != 0) return -1;
     }
     ign_car_set_pose(car, lv, x, z, heading, height);
     IgnBody *b = &car->body;
@@ -484,7 +668,7 @@ void ign_car_steer(IgnCar *car, int input, double grip_avg, int analog) {
     double limit = 0.3;
     if (fabs(car->kmh) < ign_car_steer_speed[p])
         limit = (ign_car_steer_speed[p] - car->kmh) / ign_car_steer_div[p] + 0.3;
-    double target = 5.0 / grip_avg * (input * 0.01) * limit;
+    double target = 5.0 / grip_avg * (input * 0.01 * limit); /* 0x501e8: 5/grip x (input x 0.01 x limit) */
     if (car->ai || analog) {
         b->steer = target;
         return;
@@ -513,18 +697,9 @@ double ign_car_update_grip(IgnCar *car, const int types[4]) {
     return avg;
 }
 
+/* The game's x87 control word (0x127f) rounds the product to binary64 before __CHP truncates it. */
 static int speed_index(double velocity) {
-    double kmh = velocity * 3.6;
-    int speed = (int)kmh;
-    /* x87 truncates the extended product, not a binary64 product rounded to an integer. */
-    if (speed && kmh == speed) {
-        double residual = fma(velocity, 3.6, -kmh);
-        double half_ulp = ldexp(1.0, ilogb(fabs(kmh)) - 64);
-        if (speed > 0 && residual < -half_ulp) speed--;
-        if (speed < 0 && residual > half_ulp) speed++;
-    }
-
-    return abs(speed);
+    return abs((int)(velocity * 3.6));
 }
 
 int ign_car_input_throttle(const IgnCar *car, int accel, int brake, int automatic) {
@@ -570,11 +745,7 @@ int ign_car_throttle(IgnCar *car, int input) {
     static const double SPEED_DIV[4] = {1.0, 1.15, 1.3, 1.3};
     IgnBody *b = &car->body;
     int magnitude = speed_index(b->v_fwd);
-    double divisor = SPEED_DIV[difficulty], quotient = magnitude / divisor;
-    int idx = (int)quotient;
-    if (idx && quotient == idx &&
-        fma(-idx, divisor, magnitude) < -ldexp(1.0, ilogb(quotient) - 64) * divisor)
-        idx--;
+    int idx = (int)(magnitude / SPEED_DIV[difficulty]);
     if (idx > IGN_TORQUE_POINTS - 1) idx = IGN_TORQUE_POINTS - 1;
     /* 0x4dd05: wheelspin against the motion gives no torque. */
     if (car->slip > 1.5707963267949 && car->slip < 4.7123889803847 && car->kmh > 2.0 && input > 0)
@@ -722,24 +893,7 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     double wheel_up[4];
     sample_ground(car, lv, types, wheel_up, 1);
 
-    /* car_update 0x2f01f: near a special object (PLC type 0x12c-0x15d, list 0x1fef58, built at 0x255cb) the ground
-     * under the car centre is probed; type 0x130 (AUSTRIA) starts wreck 3 (sub_0003db4c). The other types drive
-     * moving objects that the port does not have. */
-    for (int i = 0; i < lv->track.nobj; i++) {
-        const IgnObject *o = &lv->track.objs[i];
-        if (o->type < 0x12c || o->type >= 0x15e || fabsf(car->x - (float)o->pos[0]) >= 200.0f ||
-            fabsf(car->z - (float)o->pos[2]) >= 200.0f)
-            continue;
-        IgnGroundHit hit;
-        if (ign_ground_at(lv, car->x, car->z, (float)-car->height, &hit) != 0 ||
-            lv->track.objs[hit.object].type < 0x12c)
-            continue;
-        if (lv->track.objs[hit.object].type == 0x130) {
-            wreck_why(car, 3, "object 0x130");
-            return;
-        }
-        break;
-    }
+    /* car_update 0x2f01f: special objects are probed by the caller (ign_special_probe / ign_special_apply). */
 
     /* car_update 0x2fd63: no ground under any wheel wrecks the car; 0x2fd9a: neither do more than 5 grounded ticks
      * with every wheel on a type above 0x28. A wheel without ground keeps its last type (0x30265). */
@@ -798,6 +952,7 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     car->x = (float)(b->px * IGN_WORLD_PER_METRE);
     car->z = (float)(b->pz * IGN_WORLD_PER_METRE);
     car->heading = (float)(HALF_PI - b->heading);
+    axle_update(car);
 
     /* cars_update_all 0x2d229: car_vertical runs after body_step with the ground car_update found before it. */
     double drop;

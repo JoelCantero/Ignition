@@ -37,6 +37,25 @@ void ign_ai_set_cars(IgnCar *const *cars, int n);
 void ign_ai_update_route_choice(IgnAi *ai, int section, IgnFx *fx);
 /* 0x1c630..0x1c777: one decision, finite road-angle error, total car count (including inactive cars). */
 void ign_ai_stuck_step(IgnAi *ai, const IgnCar *car, double road_error, int ncars);
+/* 0x1be03..0x1bf60: original road/velocity heading blend, including angular wrap. */
+double ign_ai_travel(double heading, double motion);
+/* 0x1b1b0..0x1b1f3: section of lookahead k (0..5) at s + {1,2,3,4,6,8}, wrapped once; a result in the
+ * last three sections becomes count - 1. */
+int ign_ai_lookahead_section(int section, int k, int count);
+/* Outputs of 0x1b4a2..0x1b823 (stack slots of sub_0001aea0). */
+typedef struct {
+    int index;    /* esi: accepted lookahead record 0..5 */
+    int offset;   /* [esp+0x130]: section offset {1,2,3,4,6,8}[index] */
+    int sign;     /* [esp+0x144]: 0, or -1/+1 from the last blocking record */
+    double x, z;  /* [esp+0xe8]/[esp+0xe0]: integer centre of the last tested record */
+    double aim;   /* [esp+0xf0]: atan2(z - car z, x - car x) */
+    double first; /* [esp+0x40]: wrapped centre-heading change to the first lookahead record */
+    double grip;  /* [esp+0x80]: max(0, (8 - t_surface_grip[current TRI byte]) * 0.125) */
+    double curve; /* [esp+0xa8] at 0x1b823, before a8 = 1 + (grip + 0.8) * curve */
+} IgnAiTarget;
+/* 0x1b4a2..0x1b823: target clipping by the inset points and curvature of six lookahead records. */
+void ign_ai_target(const IgnAiRouteRecord *current, const IgnAiRouteRecord *const ahead[6],
+                   double s38, double car_x, double car_z, IgnAiTarget *out);
 /* sub_0001aea0: steering, throttle/brake and turbo as a car_input call. */
 void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, IgnInput *in);
 /* Call after physics/collisions; no RNG or control mutation outside an eligible control turn. */

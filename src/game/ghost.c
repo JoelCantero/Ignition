@@ -135,3 +135,21 @@ void ign_ghost_pose(const IgnGhost *g, int tick, IgnCar *car) {
     car->body.pitch = car->body_pitch = s->pitch / 1024.0;
     car->steer_visual = 0;
 }
+
+IgnTrialGhost ign_ghost_trial_load(const char *path, int track, IgnGhost *g, IgnGhost *rec, int *record_cs) {
+    if (ign_ghost_load(path, g)) {
+        *record_cs = IGN_GHOST_NO_RECORD;
+        return IGN_TRIAL_NONE;
+    }
+    /* The record is taken from the header before the track is checked (0x2ae93). */
+    *record_cs = g->time_cs;
+    if (g->track != track) {
+        rec->overflow = 1; /* 0x2b410 */
+        return IGN_TRIAL_MISMATCH;
+    }
+    return IGN_TRIAL_GHOST;
+}
+
+int ign_ghost_trial_beats(const IgnGhost *rec, int record_cs, double race_seconds) {
+    return !rec->overflow && record_cs * 0.01 > race_seconds;
+}

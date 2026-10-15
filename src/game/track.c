@@ -233,10 +233,10 @@ void ign_track_gates(IgnTrack *t, const IgnLevel *lv) {
 }
 
 static int route_record_for_object(const IgnLevel *lv, int object, IgnAiRouteRecord *record) {
-    if (object < 0 || object >= lv->track.nobj || !lv->tri || !lv->surface.engine_to_plc ||
-        object >= lv->surface.nengine)
+    if (object < 0 || object >= lv->track.nobj || !lv->tri)
         return 0;
-    int plc = lv->surface.engine_to_plc[object];
+    /* g_sections indexes g_level_plc (0x1d246..0x1d261), not engine objects. */
+    int plc = object;
     if (plc < 0 || plc >= lv->track.nobj || lv->tri_size < 4 + 0x6e ||
         (size_t)plc > (lv->tri_size - 4 - 0x6e) / 500)
         return 0;
@@ -245,7 +245,7 @@ static int route_record_for_object(const IgnLevel *lv, int object, IgnAiRouteRec
     const uint8_t *tri = lv->tri + 4 + (size_t)plc * 500;
     int left = tri[1] | (int)tri[2] << 8;
     int right = tri[0x17] | (int)tri[0x18] << 8;
-    if (!obj->verts || left >= obj->nv || right >= obj->nv || left == right)
+    if (!obj->verts || left >= obj->nv || right >= obj->nv)
         return 0;
 
     record->point[0] = obj->verts[left * 3] + obj->pos[0] + IGN_SRF_ORIGIN;
@@ -256,7 +256,7 @@ static int route_record_for_object(const IgnLevel *lv, int object, IgnAiRouteRec
     record->point[5] = obj->verts[right * 3 + 2] + obj->pos[2] + IGN_SRF_ORIGIN;
     record->object = object;
     record->plc = plc;
-    record->plc_type = (uint8_t)obj->type;
+    record->surface = (int8_t)tri[0]; /* 0x1d2eb..0x1d2f1 */
     record->tri_type = tri[0x6d];
     record->valid = 1;
     return 1;
@@ -266,8 +266,15 @@ static int32_t midpoint(int32_t a, int32_t b) {
     return (int32_t)((int64_t)a + ((int64_t)b - a) / 2);
 }
 
-void ign_track_ai_geometry(IgnAiRouteRecord *record, const IgnAiRouteRecord *next,
-                           int secondary) {
+/* 0x1d9d0..0x1da22 under the runtime control word 0x127f: fcos/fsin are not rounded by the precision
+ * control, but the following fmul/faddp round to binary64 before __CHP truncates. */
+static int32_t inset_coordinate(int32_t origin, double angle, int sine) {
+    double value = (double)origin + 18 * (sine ? sin(angle) : cos(angle));
+    double integer = trunc(value);
+    return integer < INT32_MIN || integer > INT32_MAX ? INT32_MIN : (int32_t)integer;
+}
+
+void ign_track_ai_geometry(IgnAiRouteRecord *record, const IgnAiRouteRecord *next) {
     int32_t current[3][3], following[3][3];
     for (int axis = 0; axis < 3; axis++) {
         current[0][axis] = record->point[axis];
@@ -287,14 +294,12 @@ void ign_track_ai_geometry(IgnAiRouteRecord *record, const IgnAiRouteRecord *nex
     double dx = (double)record->point[3] - record->point[0];
     double dz = (double)record->point[5] - record->point[2];
     record->across[0] = (float)atan2(dz, dx);
-    /* The second original slot really swaps these arguments (0x1dc27..0x1dc34). */
-    record->across[1] = secondary ? (float)atan2(-dx, -dz) : (float)atan2(-dz, -dx);
+    record->across[1] = (float)atan2((double)record->point[2] - record->point[5],
+                                   (double)record->point[0] - record->point[3]);
     for (int edge = 0; edge < 2; edge++) {
-        long double angle = record->across[edge];
-        record->inset[edge * 2] =
-            (int32_t)(record->point[edge * 3] + 18.0L * cosl(angle));
-        record->inset[edge * 2 + 1] =
-            (int32_t)(record->point[edge * 3 + 2] + 18.0L * sinl(angle));
+        double angle = record->across[edge];
+        record->inset[edge * 2] = inset_coordinate(record->point[edge * 3], angle, 0);
+        record->inset[edge * 2 + 1] = inset_coordinate(record->point[edge * 3 + 2], angle, 1);
     }
     record->geometry_valid = 1;
 }
@@ -318,14 +323,24 @@ static void split_route_record(IgnAiRouteRecord *first, IgnAiRouteRecord *second
     }
 }
 
-int ign_track_ai_records(IgnTrack *t, const IgnLevel *lv) {
+const IgnAiRouteRecord *ign_track_ai_record(const IgnTrack *t, int section, int slot) {
+    if (!t->ai_records || !t->ai_record_count || section < 0 || section >= t->count ||
+        (slot != 0 && slot != 1))
+        return NULL;
+    int path = slot, record = 0;
+    if (t->ai_record_count[section][0] > 1) path = 0, record = slot;
+    return t->ai_record_count[section][path] > record ?
+               &t->ai_records[section][path][record] : NULL;
+}
+
+int ign_track_ai_records(IgnTrack *t, const IgnLevel *lv, int track_id) {
     if (!t || !lv) return -1;
     free(t->ai_records);
     free(t->ai_record_count);
     t->ai_records = NULL;
     t->ai_record_count = NULL;
     if (t->count <= 0 || !t->section || !t->section_obj || !lv->tri ||
-        !lv->surface.engine_to_plc || !lv->track.objs)
+        !lv->track.objs)
         return -1;
     t->ai_records = calloc((size_t)t->count, sizeof *t->ai_records);
     t->ai_record_count = calloc((size_t)t->count, sizeof *t->ai_record_count);
@@ -345,32 +360,27 @@ int ign_track_ai_records(IgnTrack *t, const IgnLevel *lv) {
             if (!route_record_for_object(lv, objects[path], &record)) continue;
             if (t->ai_record_count[s][path] >= IGN_AI_ROUTE_RECORDS) goto fail;
             t->ai_records[s][path][t->ai_record_count[s][path]++] = record;
-            if (record.tri_type == 1 || record.tri_type == 2) {
+            if (path == 0 && (record.tri_type == 1 || record.tri_type == 2)) {
                 if (t->ai_record_count[s][path] >= IGN_AI_ROUTE_RECORDS) goto fail;
                 IgnAiRouteRecord split = record;
                 split_route_record(&t->ai_records[s][path][t->ai_record_count[s][path] - 1], &split);
                 t->ai_records[s][path][t->ai_record_count[s][path]++] = split;
+                break; /* The main split already owns both original slots. */
             }
         }
     }
     for (int s = 0; s < t->count; s++) {
-        for (int path = 0; path < IGN_AI_ROUTE_PATHS; path++) {
-            for (int r = 0; r < t->ai_record_count[s][path]; r++) {
-                int slot = path || r, next_section, next_path;
-                if (!ign_track_find_section(t, s + 1, slot, 1, -1,
-                                            &next_section, &next_path, NULL))
-                    continue;
-                int next_record = 0;
-                if (t->ai_record_count[next_section][0] > 1) {
-                    next_path = 0;
-                    next_record = slot;
-                }
-                if (t->ai_record_count[next_section][next_path] <= next_record) continue;
-                const IgnAiRouteRecord *next =
-                    &t->ai_records[next_section][next_path][next_record];
-                if (next->valid)
-                    ign_track_ai_geometry(&t->ai_records[s][path][r], next, slot);
-            }
+        for (int slot = 0; slot < 2; slot++) {
+            int path = t->ai_record_count[s][0] > 1 ? 0 : slot;
+            int r = path == slot ? 0 : slot;
+            if (t->ai_record_count[s][path] <= r) continue;
+            IgnAiRouteRecord *record = &t->ai_records[s][path][r];
+            int next_section, next_slot;
+            if (!record->valid || !ign_track_find_section(t, s + 1, slot, 1, track_id,
+                                                         &next_section, &next_slot, NULL))
+                continue;
+            const IgnAiRouteRecord *next = ign_track_ai_record(t, next_section, next_slot);
+            if (next && next->valid) ign_track_ai_geometry(record, next);
         }
     }
     return 0;
@@ -394,6 +404,8 @@ int ign_track_section_object(const IgnTrack *t, int s) {
 }
 
 static int route_object(const IgnTrack *t, int section, int branch) {
+    if (t->ai_record_count && t->ai_record_count[section][0] > 1)
+        return t->section_obj ? t->section_obj[section] : -1;
     if (branch) {
         if (!t->has_b || !t->has_b[section]) return -1;
         return ign_track_section_object(t, -section);
@@ -402,9 +414,8 @@ static int route_object(const IgnTrack *t, int section, int branch) {
 }
 
 static int route_record_valid(const IgnTrack *t, int section, int branch) {
-    return t->ai_records && t->ai_record_count &&
-           t->ai_record_count[section][branch] > 0 &&
-           t->ai_records[section][branch][0].valid;
+    const IgnAiRouteRecord *record = ign_track_ai_record(t, section, branch);
+    return record && record->valid;
 }
 
 int ign_track_find_section(const IgnTrack *t, int section, int branch, int step, int track_id,
