@@ -688,6 +688,31 @@ static void body_pose(IgnCar *car, double dx, double dz) {
     car->body_pitch += (target_pitch - car->body_pitch) * 0.25;
 }
 
+void ign_car_auto_gearbox(IgnCar *car) {
+    /* 0x502ee/0x502fe use model zero's shared curves, not this car's model or difficulty. */
+    static int16_t curves[3][IGN_TORQUE_POINTS];
+    static int curves_ready;
+    if (!curves_ready) {
+        for (int g = 1; g < 3; g++) ign_torque_curve(ign_car_gears[0][g], curves[g]);
+        curves_ready = 1;
+    }
+    ign_car_gearbox(car, curves);
+}
+
+void ign_car_apply_input(IgnCar *car, const IgnInput *in, int turbo_request) {
+    int accel = in->analog ? in->a_accel : in->accel ? 100 : 0;
+    int brake = in->analog ? in->a_brake : in->brake ? 100 : 0;
+    int automatic = !in->manual_gear;
+    int throttle_in = ign_car_input_throttle(car, accel, brake, automatic);
+    int torque_index = ign_car_throttle(car, throttle_in);
+    ign_car_update_revs(car, throttle_in, torque_index);
+    ign_car_turbo(car);
+    ign_car_input_direction(car, accel, brake, automatic);
+    ign_car_steer(car, in->analog ? in->a_steer : (in->left ? 100 : 0) - (in->right ? 100 : 0),
+                  car->grip_avg, in->analog);
+    ign_car_turbo_request(car, turbo_request);
+}
+
 void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     IgnBody *b = &car->body;
     double px0 = b->px, pz0 = b->pz;
@@ -739,34 +764,14 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     double grip_avg = ign_car_update_grip(car, types); /* car+0x148 */
     car->surface_type = types[0] < 0 ? 0 : types[0];
 
-    int request = car->ai ? (in->turbo && !car->wrecked) :
-                           ign_car_turbo_input(car, in->turbo, car->race_elapsed);
-    int accel = in->analog ? in->a_accel : in->accel ? 100 : 0;
-    int brake = in->analog ? in->a_brake : in->brake ? 100 : 0;
-    int automatic = !in->manual_gear;
-    int throttle_in = ign_car_input_throttle(car, accel, brake, automatic);
-    int torque_index = ign_car_throttle(car, throttle_in);
-    ign_car_update_revs(car, throttle_in, torque_index);
-    ign_car_turbo(car);
-    ign_car_input_direction(car, accel, brake, automatic);
-    /* Positive body steering turns towards +z from +x, i.e. left as seen from above. */
-    ign_car_steer(car, in->analog ? in->a_steer : (in->left ? 100 : 0) - (in->right ? 100 : 0), grip_avg, in->analog);
-    ign_car_turbo_request(car, request);
-
-    if (!automatic) {
-        ign_car_shift(car, in->gear_shift);
-    } else if (car->gear != 0) {
-        /* 0x502ee/0x502fe use model zero's shared curves, not this car's model or difficulty. */
-        static int16_t curves[3][IGN_TORQUE_POINTS];
-        static int curves_ready;
-        if (!curves_ready) {
-            for (int g = 1; g < 3; g++) ign_torque_curve(ign_car_gears[0][g], curves[g]);
-            curves_ready = 1;
-        }
-        ign_car_gearbox(car, curves);
+    if (in) {
+        int request = car->ai ? (in->turbo && !car->wrecked) :
+                               ign_car_turbo_input(car, in->turbo, car->race_elapsed);
+        ign_car_apply_input(car, in, request);
+        if (in->manual_gear) ign_car_shift(car, in->gear_shift);
+        else if (car->gear != 0) ign_car_auto_gearbox(car);
+        car->turbo_key = request;
     }
-
-    car->turbo_key = request;
 
     if (barrier) {
         /* cars_update_all 0x2d77a: the wall list (car+0x9b0) is rebuilt only after moving 150 units in x or z. */

@@ -39,15 +39,18 @@ IA fiel, el sombreado original, los menús, la música y el multijugador.
 |---|---|
 | Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 488 clasificadas como runtime) |
 | Instrucciones únicas desensambladas | **128 832** (20 323 de runtime/libc/DOS/4G) |
-| Código del juego marcado como portado | **18 115 de 108 509 instrucciones (16,7 %)**; **42 de 624 funciones (6,7 %)** |
-| Código del segmento anterior a `0x60000` | 83 768 instrucciones (25 655 identificadas, 30,6 %) |
+| Código del juego marcado como portado/verificado | **17 334 de 108 509 instrucciones (16,0 %)**; **45 de 624 funciones (7,2 %)** |
+| Código del juego marcado como parcial | **9 537 instrucciones en 12 funciones**; excluido del numerador portado |
+| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **95 de 624 (15,2 %)**; runtime excluido y `unmapped` no significa fuera de alcance |
 | Formatos de datos propios descifrados | 10 de 21 (TRI, POS y TAB solo en parte) |
 | Código del port | ≈ 4 865 líneas de C (`src/`) |
 
-El porcentaje portado cuenta las instrucciones únicas que pertenecen a funciones marcadas `ported` o `verified` en
-`tools/symbols.txt`, excluyendo las funciones clasificadas como runtime; mide cobertura de funciones originales, no
-equivalencia instrucción por instrucción. El **98,5 %** es cobertura del desensamblado, no del port. Queda código del
-ejecutable sin desensamblar y la clasificación de runtime es heurística.
+Los totales anteriores se regeneran con `disasm.py coverage`; el detalle completo está en
+[`docs/function-coverage.txt`](docs/function-coverage.txt) y el inventario conciliable por función en
+[`docs/function-roadmap.tsv`](docs/function-roadmap.tsv). La cobertura cuenta instrucciones únicas de las funciones
+marcadas `ported` o `verified`, excluye `partial` y las funciones clasificadas heurísticamente como `library`.
+Mide cobertura de código original asociado a funciones, no equivalencia instrucción por instrucción. El **98,5 %**
+es cobertura del desensamblado, no del port; la clasificación runtime también es heurística.
 
 ---
 
@@ -438,21 +441,41 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 
 ## Cobertura del desensamblado
 
-Instrucciones únicas por zona del segmento de código. "Identificado" cuenta las instrucciones de funciones con nombre en
-`symbols.txt`, estén portadas o solo identificadas.
+Estado de las funciones del juego en el último informe generado (el detalle por dirección, nombre, estado y número de
+instrucciones está en `docs/function-coverage.txt`):
 
-| Zona | Contenido | Funciones | Instrucciones | Identificado |
-|---|---|---:|---:|---:|
-| `0x10000–0x1a000` | frontend: menús, idioma, opciones, fantasmas, coche del menú | 61 | 10 943 | 20 % |
-| `0x1a000–0x20000` | IA, cuerpo físico, choques entre coches | 20 | 5 941 | **91 %** |
-| `0x20000–0x2b000` | arranque, carga, creación del mundo, coches, sonido de coche | 55 | 11 951 | 46 % |
-| `0x2b000–0x34000` | bucle de carrera, actualización de coches, eventos | 24 | 8 622 | 56 % |
-| `0x34000–0x43000` | objetos móviles, colisiones con objetos, efectos, clima | 37 | 14 983 | **9 %** |
-| `0x43000–0x4c000` | resultados, pausa, HUD, colocación de objetos | 20 | 9 028 | 49 % |
-| `0x4c000–0x54000` | controles, entrada, turbo, fantasmas, utilidades | 50 | 8 292 | 18 % |
-| `0x54000–0x60000` | motor Lisa 2: escena, rasterizador, sprites, fuentes | 126 | 14 008 | **4 %** |
-| `0x60000–0x86000` | libc de Watcom, DOS/4G, drivers de sonido (20 323 instrucciones clasificadas como `library`) | 719 | 45 290 | 1 % |
-| **Total** | | **1 112** | **128 832** | **20 %** |
+| Estado | Funciones | Interpretación |
+|---|---:|---|
+| `unknown` | 519 | Sin identificación fiable; requiere análisis |
+| `identified` | 46 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
+| `understood` | 0 | Comportamiento entendido, todavía no implementado |
+| `port-pending` | 2 | Pendiente explícita y priorizada: `car_ground_contact`, `collisions_pass` |
+| `partial` | 12 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
+| `ported` | 40 | Implementada en el port, sin afirmar verificación completa |
+| `verified` | 5 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
+| `native` | 0 | Sustitución nativa explícita; no se asigna por inferencia |
+| `library` | 488 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
+
+El inventario de 1 112 filas se puede regenerar con
+`.venv/bin/python tools/disasm.py roadmap -o docs/function-roadmap.tsv`; la cobertura con
+`.venv/bin/python tools/disasm.py coverage > docs/function-coverage.txt`. En el TSV, `unmapped` significa que aún no
+se ha asociado la función a una tarea concreta, no que esté fuera de alcance. La conciliación cubre **95 de 624
+funciones de juego (15,2 %)**; el informe conserva también el recuento bruto de 95/1 112 para que no se confunda con
+una proporción del código de juego. Las tareas `roadmap=` usadas son identificadores estables de subsistema; las
+sustituciones de la biblioteca estándar, DOS/4G y el motor gráfico se deben decidir por separado, no contabilizar
+automáticamente como porte literal.
+
+La libc y DOS/4G se agrupan en `library` mediante la clasificación heurística del desensamblador. El motor Lisa 2
+no se mezcla con esa categoría: el port usa SDL3 y un rasterizador nativo propio, así que no necesita replicar
+literalmente cada rutina interna del motor original. `native` se reserva para sustituciones función-a-función
+explícitas; actualmente hay cero, para no confundir una sustitución de subsistema con equivalencia de cada rutina.
+Las tareas de render sí siguen registradas por separado cuando afectan al comportamiento visible del juego.
+
+Las etiquetas de roadmap se agrupan así: `phase1.*` carrera, controles, física y rutas; `phase2.*` mundo, efectos y
+colisiones móviles; `phase3.*` actualización del coche y render; `phase4.*` HUD, bucle, audio y frontend.
+
+No se publica aquí un desglose regional heredado: sus cifras no se regeneran desde el informe actual y podrían inducir
+a error. El total de instrucciones y cobertura de bytes sí se toma directamente de `disasm.py coverage`.
 
 Quedan 7 402 bytes (1,5 %) de código sin cubrir: tablas, relleno y datos intercalados. `tools/gap_seeds.txt` guarda
 303 inicios añadidos por el barrido; se aceptaron 277 candidatos directos a partir de huecos y 26 funciones llamadas.
@@ -622,7 +645,8 @@ implementado.
    (`0x1decc`, 94): selección de carril y puertas reales, velocidad según curvatura/pendiente, adelantamientos y
    frenada. Ya hay un núcleo portado; véase Fase 1.
 4. **Fidelidad del paso de coche (P1, muy grande):** portar por partes `car_update` (`0x2ed00`, 2 335) y
-   `cars_update_all` (`0x2d008`, 846), empezando por paridad de IA a 36 Hz y actualización de superficies. Requiere
+   `cars_update_all` (`0x2d008`, 846). El planificador rotatorio de IA ya está conectado; siguen pendientes la
+   actualización completa de superficies y el resto del dispatcher. Requiere
    mantener las regresiones de las siete pistas; no conviene abordarlo como un único porte monolítico. Véase Fase 3.
 
 ### Fase 0 — Infraestructura de ingeniería inversa
@@ -637,8 +661,10 @@ implementado.
       (277 candidatos de huecos aceptados; 303 inicios validados persistidos, incluidos los llamados).
 - [x] **P2** Exportar `symbols.txt` como script de Ghidra o IDA (nombres, comentarios y tipos de estructura):
       `disasm.py export ghidra|ida -o FICHERO` (estructuras en `tools/structs.txt`). No probado en Ghidra/IDA reales.
-- [x] **P2** Generar estados por función en `symbols.txt` (`unknown` / `identified` / `ported` / `verified`, más
-      `library` automático) y un informe automático de cobertura (`disasm.py coverage`).
+- [x] **P2** Generar estados por función en `symbols.txt`: `unknown`, `identified`, `understood`, `port-pending`,
+      `partial`, `ported`, `verified`, `native`; `library` se clasifica automáticamente y se mantiene aparte.
+      `disasm.py coverage` excluye parciales del numerador y `disasm.py roadmap` exporta las 1 112 funciones con
+      estado y tarea asociada. Estados detallados y definiciones en "Cobertura del desensamblado".
 - [x] **P2** Pruebas de regresión deterministas: `tests/regress.py` (23 casos: 7 pistas solo, con 3 rivales y con turbo,
       visor y cámara de parrilla; sección, fase, vuelta, NaN y hash del framebuffer; `ctest --test-dir build`).
       Los resultados esperados son una instantánea histórica, reproducida por `76bfca1`, no del estado actual
@@ -740,9 +766,19 @@ implementado.
 - [ ] **P1** IA contra los muros: ahora los bordes contienen a los coches en las 7 pistas, y la IA (que apunta al punto
       medio de puertas a +1…+8 tramos) corta las curvas contra el borde interior a toda velocidad y se queda empujando
       (ICELAND tramo 17 a 157 km/h, tramo ~65, JAPAN, CARIB). Falta la línea de carrera y los registros por tramo
-      originales de `load_tri`; la marcha atrás de 0.75 s no basta para reorientar el coche.
-- [ ] **P1** IA a 36 Hz: el DOS alterna la paridad `[0x1fed68]` en cada paso de 1/72 s (`0x2de01`) y solo llama a
-      `ai_drive` con paridad 1 (`0x2dcbc`); el port la llama en cada paso.
+      originales de `load_tri` ya se cargan parcialmente, pero falta reproducir toda su geometría de conducción.
+      El contador de atasco y las ventanas de marcha atrás ya siguen el original; no garantizan desatascarse.
+- [x] **P1** Planificador rotatorio de IA de `cars_update_all`: fase de controles a 36 Hz, pero decisión nueva
+      por coche a **36/N Hz**, con N coches totales, incluidos humanos/inactivos. Resto de turnos: replay de
+      pedales, dirección y solicitud de turbo; caja automática antes de controles, física a 72 Hz.
+      Contador de atasco incrementado por N, sin espera artificial. Verificación contra fragmentos LE:
+      **17 640 casos sin diferencias** y **32 comprobaciones de caché**. Cadencia en el ejecutable con N=1..8,
+      replay independiente 21/21 y conducción humana recta/turbo exacta frente al binario previo (14/14).
+      Smoke de 200 s con siete rivales en siete pistas, repetido con estados/trazas/imágenes idénticos y sin
+      valores no finitos. No verifica la IA completa ni el dispatcher: `car+0x350` sigue sin modelar y la
+      geometría del error de rumbo aún es aproximada. La referencia histórica no se regenera.
+      Comparación histórica actual: 1/23, con 22 diferencias de estado y 22 de imagen, sin fallos de ejecución;
+      ya existían divergencias previas y este cambio altera deliberadamente la conducción de IA.
 - [x] **P1** Cámara de persecución original (`sub_00047f94`, `sub_000420cc`, focales de `race_setup_video`).
 - [x] **P2** Cámara trasera (`car+0x5a4`, campos `+0x90/+0xa0/+0x70`) y cámaras fijas tras la meta (`0xc464c`).
 - [x] **P1** Cuenta atrás y reloj de salida (`sub_0002b850`) con sus pitidos; faltan los sprites 3-2-1-GO.

@@ -15,6 +15,11 @@ typedef struct {
     uint8_t plc_type;
     uint8_t tri_type;
     uint8_t valid;
+    float heading[3]; /* load_tri +0x2a/+0x2e/+0x32: left, integer centre, right */
+    float slope[3];   /* +0x36/+0x3a/+0x3e: atan2(dy, dx), not a slope magnitude */
+    float across[2];  /* +0x42/+0x46 */
+    int32_t inset[4]; /* +0x1a..+0x26: left x/z, right x/z, 18 units inward */
+    uint8_t geometry_valid;
 } IgnAiRouteRecord;
 
 typedef struct IgnTrack {
@@ -40,6 +45,9 @@ typedef struct IgnTrack {
 void ign_track_gates(IgnTrack *t, const IgnLevel *lv);
 /* load_tri 0x1ce30: rebuilds the ordered gate records, including TRI split types 1 and 2. */
 int ign_track_ai_records(IgnTrack *t, const IgnLevel *lv);
+/* load_tri 0x1d80a..0x1da22 / 0x1da75..0x1dc8c, for two valid records. */
+void ign_track_ai_geometry(IgnAiRouteRecord *record, const IgnAiRouteRecord *next,
+                           int secondary);
 /* Object of a signed section: g_sections+0 on the main route, +0xc (branch B object) for negative sections. */
 int ign_track_section_object(const IgnTrack *t, int s);
 /* ai_find_section 0x1decc: select a route record, applying branch fallback and invalid-record advancement. */

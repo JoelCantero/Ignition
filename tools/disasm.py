@@ -602,8 +602,16 @@ def main():
             100 * len(ported_insns) / len(game_insns) if game_insns else 0,
         ))
         print("game instructions marked partial: %d (excluded from ported/verified)" % len(insns_by_status["partial"]))
-        print("functions explicitly linked to roadmap tasks: %d/%d" % (
-            sum(1 for fa in funcs if fa in ROADMAPS), len(funcs),
+        mapped_game = sum(1 for fa in funcs
+                          if fa in ROADMAPS and function_status(fa) != "library")
+        game_functions = sum(1 for fa in funcs if function_status(fa) != "library")
+        mapped_all = sum(1 for fa in funcs if fa in ROADMAPS)
+        print("game functions linked to roadmap tasks: %d/%d (%.1f%%)" % (
+            mapped_game, game_functions,
+            100 * mapped_game / game_functions if game_functions else 0,
+        ))
+        print("all functions linked to roadmap tasks (including library): %d/%d" % (
+            mapped_all, len(funcs),
         ))
         print("code bytes covered: %d/%d (%.1f%%)" % (
             covered_bytes, total_bytes, 100 * covered_bytes / total_bytes if total_bytes else 0,

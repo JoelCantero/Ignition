@@ -122,7 +122,7 @@ static int spectate(IgnCar *const *all, int n) {
     return spectated;
 }
 
-static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player) {
+static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, IgnAi *player_ai, int autopilot) {
     ghost_tick++;
     int started = ign_race_started(&race);
     int was_out = player->out;
@@ -131,10 +131,8 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player) {
     for (int i = 0; i < nrivals; i++) all[i + 1] = &rivals[i];
     ign_ai_set_cars(all, nrivals + 1);
     for (int i = 0; i < nrivals; i++) {
-        IgnInput in = {0};
         if (!rivals[i].wrecked) {
-            if (started || race.clock > IGN_RACE_AI_WAKE) ign_ai_drive(&rival_ai[i], &rivals[i], t, &fx, &in);
-            ign_car_tick(&rivals[i], lv, &in);
+            ign_car_tick(&rivals[i], lv, NULL);
             ign_race_progress(&race, &rivals[i], t);
         }
         all[i + 1] = &rivals[i];
@@ -142,6 +140,12 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player) {
     IgnCarHit impacts[MAX_RIVALS * (MAX_RIVALS + 1) / 2 + 1];
     int nimpacts = 0;
     int hits = ign_cars_collide(all, nrivals + 1, impacts, (int)(sizeof impacts / sizeof impacts[0]), &nimpacts);
+    /* cars_update_all 0x2dcbc: control phase follows physics and pair collisions for all cars. */
+    if (autopilot || player->progress_lock == 1)
+        ign_ai_control_tick(player_ai, player, t, &fx, &race, 0);
+    for (int i = 0; i < nrivals; i++)
+        ign_ai_control_tick(&rival_ai[i], &rivals[i], t, &fx, &race, i + 1);
+    ign_race_ai_step(&race, nrivals + 1);
     ign_race_wrecks(all, nrivals + 1, lv, t);
     float focus_x = all[spectated]->x, focus_z = all[spectated]->z;
     /* sub_0003f37c runs in the frame pass, where car+0x278 is still 1 only after a landing in the frame's last tick. */
@@ -513,15 +517,13 @@ int main(int argc, char **argv) {
         }
         float t = 0;
         for (int step = 0; sim_ticks >= 0 ? step < sim_ticks : t < sim_seconds; step++, t += SIM_DT) {
-            if (autopilot) {
-                if (ign_race_started(&race) || race.clock > IGN_RACE_AI_WAKE)
-                    ign_ai_drive(&player_ai, &car, &track, &fx, &in);
-                else in = (IgnInput){0};
-            }
             if (!car.wrecked) {
-                ign_car_tick(&car, &lv, &in);
+                if (!autopilot && car.progress_lock != 1) player_ai.input = in;
+                ign_car_tick(&car, &lv, autopilot || car.progress_lock == 1 ? NULL : &in);
+                if (!autopilot && car.progress_lock != 1) player_ai.turbo_request = car.turbo_key;
             }
-            car_hits += tick_rivals(&lv, &track, &car);
+            car_hits += tick_rivals(&lv, &track, &car, &player_ai, autopilot);
+            if (autopilot) in = player_ai.input;
             if (++pos_ticks == 2) {
                 ign_pos_step(&lv.pos, &lv.track);
                 pos_ticks = 0;
@@ -675,9 +677,11 @@ int main(int argc, char **argv) {
                 tick_input.gear_shift = pending_gear_shift;
                 pending_gear_shift = 0;
                 if (!car.wrecked) {
-                    ign_car_tick(&car, &lv, &tick_input);
+                    if (car.progress_lock != 1) player_ai.input = tick_input;
+                    ign_car_tick(&car, &lv, car.progress_lock == 1 ? NULL : &tick_input);
+                    if (car.progress_lock != 1) player_ai.turbo_request = car.turbo_key;
                 }
-                tick_rivals(&lv, &track, &car);
+                tick_rivals(&lv, &track, &car, &player_ai, 0);
                 if (++pos_ticks == 2) {
                     ign_pos_step(&lv.pos, &lv.track);
                     pos_ticks = 0;

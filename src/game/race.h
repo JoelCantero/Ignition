@@ -17,9 +17,21 @@ typedef struct {
     int64_t timer_ticks, origin_ms; /* deterministic virtual millisecond source/origin */
     double elapsed; /* [0x1fb540]: sampled seconds since origin */
     double best_lap; /* [0x1fb390]; port starts a session record, not a saved track record */
+    int ai_parity, ai_car; /* [0x1fed68], [0x1fed8c]: independent of the countdown and race tick */
 } IgnRace;
 
-#define IGN_RACE_AI_WAKE 170.0 /* cars_update_all 0x2dd3c: ai_drive runs from this clock value */
+#define IGN_RACE_AI_WAKE 170.0 /* cars_update_all 0x2dd3c: strictly greater than this value */
+
+typedef enum {
+    IGN_AI_CONTROLS_NONE,
+    IGN_AI_CONTROLS_REPLAY,
+    IGN_AI_CONTROLS_DRIVE
+} IgnAiControlAction;
+
+/* cars_update_all 0x2dcbc..0x2dd68; computer also selects the headless autopilot. */
+IgnAiControlAction ign_race_ai_action(const IgnRace *r, const IgnCar *car, int index, int computer);
+/* Once after every physics substep, including countdown/wrecks. ncars includes human/out cars. */
+void ign_race_ai_step(IgnRace *r, int ncars);
 
 void ign_race_init(IgnRace *r, int mode, int ncars);
 /* Starts the race at once instead of after the countdown. */

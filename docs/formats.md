@@ -556,15 +556,51 @@ esa aproximación se descartó hasta reconstruir la selección de registros/carr
 - Dirección base: `dir = Δángulo(rumbo objetivo − rumbo coche) · k · (1 + (aggr+…)·…)`, ×`[0xa7af8]` si control 5/8, ×factor por
   dificultad `[0x1ff164]` (1: `[0xa7b00]`, 2: `[0xa7a70]`, 3: `[0xa7b08]`); recorte a ±100. Se invierte si `car+0x558 != 0`
   (giro de choque) y `|car+0x558| < 0x48−dif·…`.
-- Atasco: si `|ángulo| ≤ [0xa7b88]` y (`body+0x98` < `[0xa7b90]` o `car+0x270`≠0) o casos de pista concretos (`[0x1fef10]`=1/4/5),
-  `+0x60 += nº coches`; si no, `+0x60 = 0`. Con `+0x60 ≥ [0xa7ba0]` se resetea. Entre `[0xa7b98]` y `[0xa7ba8]` marcha atrás
-  (dirección 0 o ±70 según `+0x74`; acelerador = −`[0xa7be0]…`), con `car+0x270`≠0 la dirección se anula.
+- Atasco (`0x1c630..0x1c777`): si `abs(error_rumbo)>1.4` **o**
+  (`v_longitudinal<6.944444444444445` **y** `airborne==0`) **o** (`contador>43.2` **y** zona especial),
+  `+0x60 += N` con N coches **totales**; en caso contrario se pone a cero. Si el resultado es `>=151.2`,
+  también se pone a cero. La velocidad lleva signo, no valor absoluto. Zona especial: USA `84<abs(sección)<95`
+  y `side<0`; AUSTRIA `61<sección<65` **con signo**; ICELAND `146<=abs(sección)<=148`.
+  Reversa en `43.2<contador<97.19999999999997`, sin giro antes de `53.99999999999999`;
+  `97.19999999999997<contador<108` anula la dirección. Se conserva la anulación en el aire.
+  El port ya no añade edad/espera artificial. El error original mezcla rumbo y velocidad con factor 0.15 y
+  usa el ángulo TRI `record+0x2e`; el port aún reconstruye geométricamente ese ángulo. El oracle suministra
+  el error, por lo que no verifica esa geometría.
 - Turbo: si `car+0x534/538` == 100.0 (turbo lleno), sin `car+0x270`, `+0x20·[0xa7bb8]+[0xa7bc0] > curva` y la curva lejana > 3, se
   llama a `car_input` con turbo = 1 (`0x1cb12`), salvo exclusiones por pista/sección.
 - Salida: `car_input(coche, ecx=turbo, edx=freno/atrás, ebx=dirección, …)` en `0x1cbf9`; al final `+0x58 = trunc(acelerador)`.
 - Pendiente de portar: búsqueda de carril (`0x1decc`, tablas `[0xeb7c4]/[0xeb7e0]`), velocidad objetivo por curvatura (bucle
   de 6 secciones `0xbf992`, `t_surface_grip`), registro por sección con ángulos `+0x2a..+0x46` calculados en `load_tri`
   (`atan2` entre bordes de secciones consecutivas, y puntos de carril `+0x1a..+0x26` = borde + `cos/sin·[0xa7c18]`).
+
+## Planificador de IA y replay de controles (`cars_update_all`, parcial)
+
+`[0x1fed68]` (paridad) y `[0x1fed8c]` (selector) empiezan a cero. En fase 0 se incrementa el selector, con
+wrap al número **total** `[0x1fefe4]`, y al final se alterna la paridad (`0x2dd99..0x2de0a`).
+La fase 1 aplica controles después de física/colisiones: decisión nueva solo para el índice elegido y
+`clock<0 || clock>170`; durante la cuenta atrás o en otros índices se repiten los controles anteriores.
+No se saltan los slots de humanos ni coches inactivos: controles a 36 Hz, decisiones a 36/N Hz.
+`progress_lock==1` habilita el control de IA; otros valores no lo hacen por sí solos.
+La caja automática precede tanto a la decisión como al replay, también en reversa con ese lock.
+
+`car_input` con EAX=`0x1f02` recupera cuatro i32 de `[0x1dade0 + índice*16]`: acelerador, freno, dirección y
+solicitud de turbo (`0x4d5f4..0x4d655`). El port conserva la caché por coche y el argumento de turbo 0/1/2
+ya resuelto: el replay no vuelve a muestrear la tecla humana, ni repite cambios manuales de marcha.
+Una decisión nueva tampoco cambia la configuración de caja manual del conductor humano.
+Los dos bucles del ejecutable conservan la última entrada humana para una transición a `progress_lock==1`.
+
+`tests/ai_schedule_original.py` ejecuta fragmentos LE sin sustituir callees: 17 640 casos sin diferencias en
+selección/fase/gates y atasco; 32 comprobaciones adicionales de caché multicoche. Se detiene antes de los
+callees de decisión, replay y caja, que no quedan verificados por este oracle. El gate temprano de wreck
+se aporta como fixture; `car+0x350` sigue desconocido y **no se equipara a `out`**.
+`tests/ai_schedule.c` prueba integración nativa, RNG, replay, orden de caja y física sin controles.
+El contrato headless comprueba la cadencia de entrada del autopilot con N=1..8 en el ejecutable.
+Conducción humana recta/turbo: 14/14 comparaciones exactas frente al binario anterior, 576 ticks y 112 campos.
+Replay independiente: 21/21. Smoke: siete pistas, 200 s y siete rivales, dos ejecuciones con estados, traza y
+framebuffer idénticos y sin valores no finitos. Persisten atascos: no prueba carreras completas en DOS,
+geometría fiel de conducción ni equivalencia de toda la IA. Contra el baseline histórico pasan 1/23:
+22 casos difieren en estado y 22 en imagen, sin fallos de ejecución; había divergencias previas y el
+planificador cambia deliberadamente la conducción de IA. No se regenera ese baseline.
 
 ## Hipótesis (pendiente)
 

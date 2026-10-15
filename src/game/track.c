@@ -266,6 +266,39 @@ static int32_t midpoint(int32_t a, int32_t b) {
     return (int32_t)((int64_t)a + ((int64_t)b - a) / 2);
 }
 
+void ign_track_ai_geometry(IgnAiRouteRecord *record, const IgnAiRouteRecord *next,
+                           int secondary) {
+    int32_t current[3][3], following[3][3];
+    for (int axis = 0; axis < 3; axis++) {
+        current[0][axis] = record->point[axis];
+        current[1][axis] = midpoint(record->point[axis], record->point[axis + 3]);
+        current[2][axis] = record->point[axis + 3];
+        following[0][axis] = next->point[axis];
+        following[1][axis] = midpoint(next->point[axis], next->point[axis + 3]);
+        following[2][axis] = next->point[axis + 3];
+    }
+    for (int edge = 0; edge < 3; edge++) {
+        double dx = (double)following[edge][0] - current[edge][0];
+        double dy = (double)following[edge][1] - current[edge][1];
+        double dz = (double)following[edge][2] - current[edge][2];
+        record->heading[edge] = (float)atan2(dz, dx);
+        record->slope[edge] = (float)atan2(dy, dx);
+    }
+    double dx = (double)record->point[3] - record->point[0];
+    double dz = (double)record->point[5] - record->point[2];
+    record->across[0] = (float)atan2(dz, dx);
+    /* The second original slot really swaps these arguments (0x1dc27..0x1dc34). */
+    record->across[1] = secondary ? (float)atan2(-dx, -dz) : (float)atan2(-dz, -dx);
+    for (int edge = 0; edge < 2; edge++) {
+        long double angle = record->across[edge];
+        record->inset[edge * 2] =
+            (int32_t)(record->point[edge * 3] + 18.0L * cosl(angle));
+        record->inset[edge * 2 + 1] =
+            (int32_t)(record->point[edge * 3 + 2] + 18.0L * sinl(angle));
+    }
+    record->geometry_valid = 1;
+}
+
 static void split_route_record(IgnAiRouteRecord *first, IgnAiRouteRecord *second) {
     *second = *first;
     int32_t original[6];
@@ -317,6 +350,26 @@ int ign_track_ai_records(IgnTrack *t, const IgnLevel *lv) {
                 IgnAiRouteRecord split = record;
                 split_route_record(&t->ai_records[s][path][t->ai_record_count[s][path] - 1], &split);
                 t->ai_records[s][path][t->ai_record_count[s][path]++] = split;
+            }
+        }
+    }
+    for (int s = 0; s < t->count; s++) {
+        for (int path = 0; path < IGN_AI_ROUTE_PATHS; path++) {
+            for (int r = 0; r < t->ai_record_count[s][path]; r++) {
+                int slot = path || r, next_section, next_path;
+                if (!ign_track_find_section(t, s + 1, slot, 1, -1,
+                                            &next_section, &next_path, NULL))
+                    continue;
+                int next_record = 0;
+                if (t->ai_record_count[next_section][0] > 1) {
+                    next_path = 0;
+                    next_record = slot;
+                }
+                if (t->ai_record_count[next_section][next_path] <= next_record) continue;
+                const IgnAiRouteRecord *next =
+                    &t->ai_records[next_section][next_path][next_record];
+                if (next->valid)
+                    ign_track_ai_geometry(&t->ai_records[s][path][r], next, slot);
             }
         }
     }

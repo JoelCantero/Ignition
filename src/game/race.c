@@ -137,6 +137,21 @@ void ign_race_init(IgnRace *r, int mode, int ncars) {
     r->timer_ticks = r->origin_ms = 0;
     r->elapsed = 0;
     r->best_lap = DBL_MAX;
+    r->ai_parity = r->ai_car = 0;
+}
+
+IgnAiControlAction ign_race_ai_action(const IgnRace *r, const IgnCar *car, int index, int computer) {
+    if (car->wrecked || r->ai_parity != 1 || (!computer && car->progress_lock != 1))
+        return IGN_AI_CONTROLS_NONE;
+    if (index == r->ai_car && (r->clock < 0 || r->clock > IGN_RACE_AI_WAKE))
+        return IGN_AI_CONTROLS_DRIVE;
+    return IGN_AI_CONTROLS_REPLAY;
+}
+
+void ign_race_ai_step(IgnRace *r, int ncars) {
+    /* 0x2dd99..0x2ddba: advance before toggling, even when the selected car cannot drive. */
+    if (r->ai_parity == 0 && ++r->ai_car >= ncars) r->ai_car = 0;
+    r->ai_parity ^= 1;
 }
 
 void ign_race_skip_countdown(IgnRace *r) {

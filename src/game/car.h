@@ -124,6 +124,12 @@ int ign_get_difficulty(void);
 int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, float heading);
 /* Advances one original physics tick (1/72 s). */
 void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in);
+/* NULL input in ign_car_tick advances physics without dispatching controls.
+ * Scheduled AI applies input after the all-car physics/collision pass.
+ * turbo_request is the resolved car_input argument (0/1/2), not a sampled human key. */
+void ign_car_apply_input(IgnCar *car, const IgnInput *in, int turbo_request);
+/* Original shared forward curves; caller owns automatic/reverse/progress-lock eligibility. */
+void ign_car_auto_gearbox(IgnCar *car);
 /* Isolated production kernels: steering input -100..100, positive mean surface grip; valid car spec 0..11. */
 void ign_car_steer(IgnCar *car, int input, double grip_avg, int analog);
 /* Retains mean/front/rear grip if any wheel type is outside 0..29; mean starts at 0.4. */

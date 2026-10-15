@@ -470,6 +470,29 @@ class HeadlessTests(unittest.TestCase):
             self.assertEqual(row["lap_elapsed"], seconds)
             self.assertEqual(row["lap_origin"], 0)
 
+    def test_autopilot_controls_follow_total_car_rotation(self):
+        controls = ("in_a_accel", "in_a_brake", "in_a_steer", "in_turbo")
+        for ncars in range(1, 9):
+            with self.subTest(ncars=ncars):
+                ticks = ncars * 12
+                _, result = regress.run_case(
+                    str(self.binary), "AI rotation",
+                    ["CANADA", "--sim-ticks", str(ticks), "auto", "--rivals", str(ncars - 1)],
+                    env=regress.controlled_environment(self.data, "full"), trace=True)
+                self.assertEqual(result["rc"], 0, result["output"])
+                self.assertEqual(len(result["states"]), ncars)
+                self.assertIsNotNone(result["image"])
+                rows = solo_replay.validate_trace(result["trace"], ticks)
+                changed = []
+                for tick in range(1, len(rows)):
+                    before = tuple(rows[tick - 1][field] for field in controls)
+                    after = tuple(rows[tick][field] for field in controls)
+                    if before != after:
+                        changed.append(tick)
+                        self.assertEqual(tick % (2 * ncars), 0)
+                self.assertTrue(changed, "autopilot never produced a control decision")
+                self.assertEqual(changed[0], 2 * ncars)
+
     def test_invalid_tick_arguments_fail(self):
         for args in (["--sim-ticks"], ["--sim-ticks", "1"],
                      ["--sim-ticks", "-1", "0", "--shot", "unused.ppm"],

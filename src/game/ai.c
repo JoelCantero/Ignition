@@ -33,6 +33,7 @@ void ign_ai_init(IgnAi *ai, int index) {
     (void)index;
     memset(ai, 0, sizeof *ai);
     ai->p = base;
+    ai->input.analog = true;
 }
 
 /* Curve speed limits {section & ~1, km/h} of [0xbfa48 + idx*32]; 500 = no limit. */
@@ -88,6 +89,22 @@ static double wrap(double a) {
 }
 
 static double clampd(double v, double lo, double hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+static int reverse_zone(const IgnAi *ai, int section) {
+    int s = abs(section);
+    return (track_id == 1 && s > 0x54 && s < 0x5f && ai->side < 0) ||
+           (track_id == 4 && section > 0x3d && section < 0x41) ||
+           (track_id == 5 && s >= 0x92 && s <= 0x94);
+}
+
+void ign_ai_stuck_step(IgnAi *ai, const IgnCar *car, double road_error, int ncars) {
+    if (fabs(road_error) > 1.4 || (car->body.v_fwd < 6.944444444444445 && !car->airborne) ||
+        (ai->stuck > 43.2 && reverse_zone(ai, car->section)))
+        ai->stuck += ncars;
+    else
+        ai->stuck = 0;
+    if (ai->stuck >= 151.2) ai->stuck = 0;
+}
 
 typedef struct {
     double lx, lz, rx, rz;
@@ -260,19 +277,12 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, Ig
     }
     ai->steer = dir;
 
-    /* Stuck detection (0x1c6a0-0x1c8d0). The original waits for the standing start through its race
-     * phase; the port uses an age counter. */
-    if (ai->age < 144) ai->age++;
-    int force_back = (track_id == 1 && s > 0x54 && s < 0x5f && ai->side < 0) || (track_id == 4 && s > 0x3d && s < 0x41) ||
-                     (track_id == 5 && s >= 0x92 && s <= 0x94);
-    if (ai->age >= 144 && ((fabs(b->v_fwd) < 6.944 || car->airborne) || force_back))
-        ai->stuck++;
-    else
-        ai->stuck = 0;
-    if (ai->stuck >= 151.2) ai->stuck = 0;
-    int reverse = ai->stuck > 43.2 && ai->stuck < 97.2;
+    /* 0x1bfc1: TRI road angle minus blended travel, not the lookahead aiming angle. */
+    ign_ai_stuck_step(ai, car, wrap(cur_ang - travel), n_cars);
+    int force_back = reverse_zone(ai, car->section);
+    int reverse = ai->stuck > 43.2 && ai->stuck < 97.19999999999997;
     if (reverse) {
-        if (ai->stuck < 54)
+        if (ai->stuck < 53.99999999999999)
             ai->steer = 0;
         else if (force_back)
             ai->steer = -100;
@@ -286,7 +296,7 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, Ig
         ai->section = s;
         return;
     }
-    if (ai->stuck > 97.2 && ai->stuck < 108) ai->steer = 0;
+    if (ai->stuck > 97.19999999999997 && ai->stuck < 108) ai->steer = 0;
     if (car->airborne) ai->steer = 0;
 
     /* Turbo (0x1ca15): full charge, on the ground, no braking; a hard steering input in a gentle
@@ -304,4 +314,21 @@ void ign_ai_drive(IgnAi *ai, const IgnCar *car, const IgnTrack *t, IgnFx *fx, Ig
         in->a_accel = (int)T;
     ai->accel = (int)T;
     ai->section = s;
+}
+
+IgnAiControlAction ign_ai_control_tick(IgnAi *ai, IgnCar *car, const IgnTrack *t, IgnFx *fx,
+                                       const IgnRace *race, int index) {
+    IgnAiControlAction action = ign_race_ai_action(race, car, index, 1);
+    if (action == IGN_AI_CONTROLS_NONE) return action;
+    /* 0x2dcea..0x2dd1b: automatic gearbox precedes both fresh and replayed input. */
+    if ((!ai->input.manual_gear && car->gear != 0) || car->progress_lock == 1)
+        ign_car_auto_gearbox(car);
+    if (action == IGN_AI_CONTROLS_DRIVE) {
+        int manual = ai->input.manual_gear;
+        ign_ai_drive(ai, car, t, fx, &ai->input);
+        ai->input.manual_gear = manual;
+        ai->turbo_request = ai->input.turbo;
+    }
+    ign_car_apply_input(car, &ai->input, ai->turbo_request);
+    return action;
 }
