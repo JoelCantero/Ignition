@@ -892,6 +892,81 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   decorados, así que solo en USA y CANADA coinciden los índices. Se reconstruye la correspondencia asignando a cada objeto
   del motor el siguiente PLC cuya malla admite todos sus desplazamientos de cara: autocoincidencia 88–98 % en todas las pistas.
 
+## HUD de carrera, fuentes y sprites (portado a `src/render/hud.c`, `font.c`, `sprite.c`)
+
+- **LFT** (`sub_00061399`, verificado con las 12 fuentes): `strcmp(archivo, "LFT")`, `u16 100` en `+4`, `u16`
+  glifos en `+6`, ancho de celda `+8`, alto `+0x0a`; 224 offsets `u32` (−1 = sin glifo) desde `+0x0c`, 224 anchos
+  **con signo** (`movsx`) desde `+0x68c`, bitmaps (ancho × alto, índices de 8 bits) desde `+0x84c`. El glifo `j` de
+  `MINI.LFT` mide −6 y apunta al final del archivo: solo retrocede la pluma. Cada fuente ocupa una ranura de `0x63e` B
+  en `0x24c214` (30 ranuras, `sub_00061220`): `+0x04` alineación (0 izquierda, 1 centrada, 2 a la derecha),
+  `+0x08` desactivada (ancho y dibujo devuelven 2), `+0x0c` proporcional, `+0x10` separación (1), `+0x1e` presencia,
+  `+0xfe` sprites, `+0x47e` anchos. Ancho del texto (`0x616db`): celdas fijas `ancho_celda + separación` por glifo o
+  espacio; proporcional, `ancho_glifo + separación` y el espacio `trunc((ancho_celda << 8)·0,35/256)`; los caracteres
+  sin glifo no avanzan. Dibujo (`0x61959`): la alineación resta el ancho o su mitad; en celdas fijas el glifo se centra
+  con `(ancho_celda − ancho_glifo)/2`. Los glifos son sprites, así que pasan por la tabla PAN como el resto del HUD.
+  Las fuentes del HUD (`load_fonts` `0x240f4`) son de celdas fijas; las del menú y `MINI`/`SMALL`
+  (`load_system_gfx` `0x21985`) son proporcionales con separación 1.
+- **FNT** (`IGNITION.FNT`, `[0x1feff4]`, solo lo usa la superposición de depuración `0x49fdc` vía `sub_00053d60`):
+  `u16` glifos (56), `u16` alto (10), `i16` separación (−1), anchos `u8` desde `+6`, mapa carácter → glifo `u8[256]` en
+  `+0xc6` (255 = sin glifo), offsets `u32` en `+0x1c6`, bitmaps en `+0x546`. Un texel no nulo se escribe como
+  `texel + color`; la pluma avanza `ancho + separación`.
+- **Sprites** (`geputget.c`, `sub_000771e0` vía `[0x20a088]`): `{?, w, h, ?, píxeles, stride, hotspot x, y}`; el HUD crea
+  todos con hotspot 0, así que la posición es la esquina superior izquierda. `sub_00062184` dibuja en coordenadas 8.8;
+  con `{escala, ángulo}` pasa a una matriz 16.16 (`escala·65536.0f`) y a `0x82950`. El blit sin matriz (`0x791c9`)
+  recorta contra la ventana de `sub_00055958` y escribe `dst = lut[src·256 + dst]` con `lut = [0x257e48]`: en carrera,
+  la **PAN** del nivel. Filas 160–255 de PAN son constantes (= fila: colores opacos compartidos con la paleta de pista),
+  la fila 0 es casi identidad (≈205/256: transparente), 1–15 son vidrios/sombras y 16–159 valen 0. Los PIC del HUD
+  usan esos índices directamente; no hay conversión de paleta.
+- **Recortes** (`sub_00028000`, tablas `{x, y, w, h}` × 36 en `0xc3618` (320×200, `S_PANGFX.PIC`, stride `0x7b`),
+  `0xc3858` (640×480, `N_PANGFX.PIC`, `0xe3`) y `0xc3a98` (800×600, `H_PAN1.PIC`/`H_PAN2.PIC`, `0x100`)): 0 TOTAL TIME,
+  1 LAP TIME, 2 POS, 3 esfera, 4–12 palanca de cambios (de `[0x1fef64]`, `H_PAN2` en 800×600), 26 tapa de la aguja,
+  27 marco del turbo, 28–29 piloto del turbo, 33 semáforo (siempre de `N_PANGFX`, 4 estados apilados), 34 señal
+  (rejilla 4 × 4 de `*_SIGNS.PIC`, stride `0x38`/`0x70`/`0x100`). Fijos: marcadores de coche 12 × 17 en
+  `(9 + 12f, 139 + 17c)` de `N_PANGFX` (índice `4f + c` = modelo), explosión 24 × 23 en `(83 + 24c, 23f)` (10
+  fotogramas), barra de eliminación 7 × 120 en `(0, 139)` de `N_PANGFX` o 7 × 300 en `(225, 0)` de `H_PAN2`, corona
+  17 × 12 en `(11, 207)` y lugares 1–3 (89 × 84) de `N_SYSG_2.PIC` en `(153, 0)`, `(0, 88)`, `(89, 88)`.
+- **Colocación** (`[0x1fef20]`, 28 `int` en `0xc3d48`/`0xc3db8`/`0xc3e28`, relativos a las esquinas de la ventana
+  `[0x1fefd0]+0x2c..0x38` = 0, 0, ancho, alto con un jugador) y **texto** (`[0x1fef1c]`, 8 `int` en
+  `0xc3ce8`/`0xc3d08`/`0xc3d28`). En 640×480: paneles en `(x0+7, y0+7)` y `(x0+7, y0+33)`; tiempos en `x0+7`, filas
+  `y0+20/46/59/72`; POS en `(x0+8, y1−55)` y su número en `(x0+8, y1−40)`; esfera en `(x1−73, y1−88)`, pivote de la aguja
+  `(x1−56, y1−37)`, media anchura 3 y longitud 26; velocidad `"%.3d"` en `(x1−44, y1−29)`; palanca en `(x1−28, y1−73)`;
+  marco del turbo `(x1−23, y1−130)`, piloto `(x1−23, y1−150)`, barra de `x1−19` a `x1−7` desde `y1−79`; semáforo
+  centrado con ancho 96 en `y0+30`; señal centrada en `y0+1`.
+- **Estados** (`sub_0004a320`, por fotograma): si la cámara tiembla (`+0x38`), la ventana se desplaza `±0,04·temblor`
+  con signo aleatorio. Fuera de eliminación: reloj total `car+0x3a4` y vuelta 1 (`+0x3ac` en la vuelta 0, si no
+  `+0x3bc`) solo con `[0x1fb4e8] == −1` (si no, `--:--:--`); las filas 2 y 3 aparecen al llegar a esa vuelta con el
+  tiempo en curso y luego `+0x3c4`/`+0x3cc`. Con más de un coche, `"%d"` del puesto (`+0x3a0` al terminar);
+  eliminación: `"%d/%d"` puesto/coches restantes. Formato de tiempo (`0x4bdf4`): minutos `trunc(t/60)` hasta 99,
+  `trunc(t) − 60·min`, centésimas `trunc((t − trunc t)·100)`. Esfera (`0x4be7c`): `car+0x290 += (rpm·2,7 − car+0x290)·0,25`
+  limitado a 270; triángulo de color `0xc4` con puntos a `n+180°` y `n°` (media anchura) y punta a `n+90°`.
+  Palanca: `car+0x280` se acerca a `4·marcha` a 0,5 por fotograma y elige el recorte `4 + trunc`. Turbo: dos triángulos
+  de color `0xd7` de altura `carga/{4,2; 2,1; 1}`; piloto fijo con carga en `[20, 100)`, parpadeo de 15 fotogramas
+  (`car+0x540`, 7 encendido) lleno, y alterno cada fotograma con el turbo activo o por debajo de 20. Señal: tipo PLC
+  `>> 24` del objeto del tramo (`[0x1fef7c]+8`), tabla `0xc3e94[dificultad·20 + min(tipo, 16)]` (la dificultad 3
+  intercambia izquierda/derecha); parpadea `(n/4) % 2` los primeros 24 fotogramas (`car+0x5f8`). `WRONG WAY` (señal
+  15) si `car+0x580 > 25` y el tramo ha bajado (`car+0x364 < car+0x368`); `sub_0004a150` suma el `dt` del fotograma
+  a `car+0x580` (máx. 120) mientras el rumbo difiere del ángulo del tramo − π/2 entre 2π/3 y 4π/3, y lo resta si no.
+  Semáforo: recorte 0 con `[0x1fb4e8]` en `[50, 100)`, 1 en `[100, 150)`, 2 en `[150, 200)` y 3 (GO) en carrera
+  mientras `[0x1fb4d8] < 250`. Eliminación: barra con el marcador de cada coche a `|tramo|/n_tramos` (0 antes de 250),
+  la corona del líder y la explosión `car+0x60c` (0,3 por fotograma hasta 10, `cars_body_sway`) de los eliminados.
+  Tras la meta: lugar 1–3 (eliminación: solo 1) durante 120 fotogramas (`[0x1fed9c]`), escalado `car+0x5d4·0,04`
+  mientras crece (25 fotogramas) con la esquina en el centro de la ventana; el HUD desaparece cuando
+  `[0x1fb4d0] > 120` (`sub_000420cc` `0x4310c`).
+- **Mensajes** (`sub_0004c7c0`/`0x4c858`/`0x4c89c`): 5 ranuras de `0x78` B; cada fotograma `temporizador++` y la
+  ranura se libera al pasar la duración; se ven mientras `fmod(t, 2·periodo) < periodo`, centrados, con `MINI.LFT`
+  (320×200) o `SMALL.LFT` y `(ranura + 1)·8|16` píxeles por encima del borde inferior. «%s IS OUT» (eliminación,
+  `0x2e085`, duración 80, periodo 8, nombre de 3 letras `0xc3350` por modelo: COO, BAN, VAC, ENF, RED, BUS, MON, BUG,
+  SMO, VEG, IGN), «LAP RECORD» (vuelta humana por debajo de `[0x1fb390]`, `0x2f43a`), «TRACK RECORD» (`0x2f548`) y,
+  desde el propio HUD, «WARNING, YOU'RE LAST!» cada fotograma con duración 0 y periodo 1. Idioma `[0x1ff6eb]`: 0 inglés,
+  1 alemán, 2 italiano, 3 español, 4 sueco, 5 francés (en el port, `IGN_LANG`).
+- **Desviaciones del port**: una sola ventana (las ramas del segundo jugador no se portan); los contadores por
+  fotograma avanzan una vez por cada 1/36 s de `[0x1fb4d8]` en lugar de por fotograma dibujado; el primer fotograma
+  pone aguja y palanca en su objetivo; el temblor usa un generador propio en vez de `sub_00051714`; los eventos de
+  mensajes se detectan comparando el estado entre fotogramas (no hay «TRACK RECORD» porque no hay récords guardados) y
+  los pilotos usan el código de su modelo como nombre; los triángulos se rellenan con una regla de píxel propia; la
+  escala del lugar es al vecino más próximo sobre la esquina superior izquierda (¿?); los fuegos artificiales de
+  `0x4bca8` (solo consumen `rand`) y los sonidos del semáforo dentro del HUD no se portan (el reloj ya los emite).
+
 ## Pendiente / desviaciones
 
 - Suelo del coche (`car_update` 0x2eea4–0x30d98, portado): una consulta por esquina de la caja de la carrocería ×1,1
@@ -971,16 +1046,7 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   `vy = −1`, tamaño 50–100, vida 40. Como la fuerza se limita al agarre delantero, al arrancar casi no se nota.
 - **PIC de pista** (`USA.PIC` etc.): imagen 320×200 de la pista, no el fondo de la vista 3D.
 - **TRI**: significado de los `double`s y de los registros que no coinciden (¿objetos animados?). **SRF**: campos 2–4 de los triángulos (¿plano/altura?) y el tercer valor de cada celda.
-- **LFT** (port parcial verificado): cabecera `"LFT\0"`, `u16 100`, `u16` cantidad de glifos en `+6`,
-  `u16` ancho y alto en `+8/+0x0a`; 224 offsets `u32` desde `+0x0c`, 224 anchos `u16` desde `+0x68c` y
-  bitmaps desde `+0x84c`. Cada bitmap es una matriz de índices de 8 bits (ancho × alto); índice 0 no pinta.
-  `src/render/hud.c` valida los rangos y dibuja los glifos `YELLOW`, `SPEED` y `POS_S` sobre el panel original.
-  **FNT**: `u16 56`, `u16 10`, `0xffff`, anchos por glifo.
-- **HUD de carrera** (port parcial de `sub_0004a320`): la composición añade recortes de `H_PAN1.PIC` después de
-  pista, coches, efectos y clima. Presenta el reloj total (`IgnRace.total`, unidades de 1/36 s), el tiempo de vuelta
-  desde la salida, la posición y la velocidad. El panel usa píxel 0 como transparente y mapea su paleta a la de la
-  pista por color más cercano. Aún no reproduce las coordenadas/condiciones originales, la aguja ni el llenado dinámico
-  del turbo, los avisos de `H_PAN2.PIC` ni los estados multilingües.
+- **LFT/FNT y HUD de carrera**: véase la sección «HUD de carrera, fuentes y sprites».
 - **CDP**: vídeo, `"CDP\0"`, `u16 100`, `u16 frames`, …, `u16 320`, `u16 200`, paleta.
 - **PSQ**, **PFM** (`"li01"`), **BTZ** (config `i32`), **AIS** (texto de IA).
 - Audio: WAV PCM 8 bits mono 22050 Hz, PAT (GUS), XI (FastTracker II); música en pistas CD (`MUSIC/Track02-08.ogg`).

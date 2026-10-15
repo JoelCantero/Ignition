@@ -3,7 +3,7 @@
 000215d0  game_init            sets 640x480 then 320x200, prints banner, loads system gfx  roadmap=phase4.ui
 00021860  load_system_gfx      N_SYSGFX.PIC, N_SYSG_2.PIC, SYS.COL  roadmap=phase4.ui
 000224d0  load_level           LEVELS\%s%s.{TRI,SRF,COL,PIC,POS,MSH,TEX}  roadmap=phase2.world
-000243e0  load_panel_gfx       HUD panels, signs, POKAL.PIC  roadmap=phase4.ui
+000243e0  load_panel_gfx       S/N_PANGFX, H_PAN1/2, S/N/H_SIGNS, POKAL.PIC (raw files, pixels at +0x34e); HUD ones loaded by hud.c  status=ported roadmap=phase4.hud
 00011504  menu_load_gfx        baltazar\data\*.pic  roadmap=phase4.ui
 00060f9c  load_file            eax=filename -> eax=malloc'd contents or 0
 000558e4  set_video_mode       mode params in 0xc5cfc..0xc5d08 (w, h, bpp, ?)
@@ -33,7 +33,7 @@
 00041244  pos_make_relative    converts POS positions to consecutive cyclic frame deltas  roadmap=phase2.world
 000412e8  pos_apply_frame      applies current POS delta/rotation; port in src/game/pos.c, rotation order approximate  status=partial roadmap=phase2.world
 00060f40  read_file_into       eax=path, edx=buf, ebx=size
-000240f4  load_fonts           IGNITION.FNT + *.lft  roadmap=phase4.ui
+000240f4  load_fonts           IGNITION.FNT -> [0x1feff4]; yellow/pos/speed{_s,,_h}.lft -> [0x1fea0c..0x1fea38] (font.c/hud.c load the layout's three)  status=ported roadmap=phase4.hud
 001febf4  g_level_pos
 0001aaf8  menu_load_car        menucar.plc/msh/tex  roadmap=phase4.ui
 001fefd4  g_level_msh
@@ -52,7 +52,7 @@
 0005891c  camera_angles        camera orientation in tenths of a degree  roadmap=phase3.render
 00047f94  chase_camera_update  per-car camera [0x1fef9c]+car*0xc8: yaw smoothing, height, pitch, distance (ported)  status=ported roadmap=phase3.render
 000420cc  race_frame           section palette effects, camera selection, render_scene, HUD  roadmap=phase3.render
-0004a320  race_hud             original HUD routine; partial H_PAN1/LFT port in src/render/hud.c  status=partial roadmap=phase4.hud
+0004a320  race_hud             race overlay per viewport (hud.c): times, place, dial, gear lever, turbo, signs, elimination bar, start lights, medal; viewport 1 marker 0x4b648, sounds 0x49a8c and rand-only fireworks 0x4bca8 not ported  status=partial roadmap=phase4.hud
 00027df8  chase_camera_init    camera struct: height car+8+1400, 400/400, pitch 420+450 tenths  roadmap=phase3.render
 0002b850  race_clock           normal countdown/transition fragments verified by tests/race_time_original.py; forced start excluded  status=partial roadmap=phase4.loop
 0002b734  frame_time           sampled signed wrapping ms difference * 0.001 at 2b7d6..2b7f9 verified; pause/timer excluded  status=identified
@@ -151,3 +151,40 @@
 0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> wrap/fallback/invalid-record selection ported; route topology remains approximate  status=partial roadmap=phase1.ai-route
 000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty
+00028000  hud_build_sprites    sub-sprites of the panels from rect tables [0x1fef44] (0xc3618/0xc3858/0xc3a98), lights, signs, markers, medals  status=ported roadmap=phase4.hud
+00028a14  hud_select_layout    [0x1feeac] layout 0/1/2 from video table 0x1d5eb0, [0x1fef1c] text table, [0x1feeb0] = 6 + hires (MINI/SMALL)  status=partial roadmap=phase4.hud
+00028a84  hud_rebuild_sprites  same sprite tables as 0x28000, re-creating existing handles  status=identified roadmap=phase4.hud
+0004a150  wrong_way_counter    car+0x580 += frame dt while |section angle - pi/2 - heading| in (2pi/3, 4pi/3), max 120, else -= dt  status=ported roadmap=phase4.hud
+0004bdf4  format_race_time     '%.2d:%.2d:%.2d' minutes (max 99), trunc seconds, trunc hundredths into 0x207ae0  status=ported roadmap=phase4.hud
+0004be7c  hud_rev_dial         dial, needle triangle (prim 0x0f colour 0xc4, car+0x290 smoothed revs*2.7), cap, '%.3d' |v_fwd*3.6|  status=ported roadmap=phase4.hud
+0004c7c0  hud_message_add      5 slots of 0x78 B at [0x1fefb8]: text, duration +0x68, blink period +0x6c, timer +0x70, viewport +0x74  status=ported roadmap=phase4.hud
+0004c858  hud_message_tick     timer++ per frame, slot freed when timer > duration  status=ported roadmap=phase4.hud
+0004c89c  hud_message_draw     centred MINI/SMALL text while fmod(timer, 2 period) < period, (slot+1)*8|16 px above viewport 0 bottom  status=ported roadmap=phase4.hud
+00049fdc  debug_overlay        X/Y/Z and VIN values with IGNITION.FNT ([0xc0b4c])  status=identified roadmap=phase4.ui
+00053d60  fnt_draw_text        FNT: map +0xc6, widths +6, offsets +0x1c6, bitmaps +0x546; texel + colour; advance width + i16 spacing  status=ported roadmap=phase4.ui
+00061220  font_system_init     30 font slots of 0x63e B at 0x24c214: unused, left, enabled, fixed cells, spacing 1  status=ported roadmap=phase4.ui
+00061399  font_parse_lft       'LFT' v100: count +6, cell width +8, height +0xa, offsets +0xc, signed widths +0x68c, bitmaps +0x84c  status=ported roadmap=phase4.ui
+000615eb  font_load            load_file + font_parse_lft, returns slot or -1  status=ported roadmap=phase4.ui
+00061653  font_free            frees the glyph sprites of a slot  status=identified roadmap=phase4.ui
+000616db  font_text_width      fixed: (cell + spacing) per glyph/space; proportional: glyph + spacing, space trunc(cell*0.35)  status=ported roadmap=phase4.ui
+00061959  font_draw_text       align +0x04 (0 left, 1 centre, 2 right), fixed cells centre glyphs, sprites at (x<<8, y<<8)  status=ported roadmap=phase4.ui
+00061eb0  gfx_install          engine vtable 0x20a068..0x20a0b4 (clip 0x62040, draw sprite 0x62184, create sprite 0x771e0)  status=identified roadmap=phase3.render
+00055958  gfx_set_clip         thunk [0x20a07c] (x0, y0, x1, y1)  status=identified roadmap=phase3.render
+00055968  gfx_draw_sprite      thunk [0x20a084] (handle, 8.8 position, optional {scale, angle})  status=identified roadmap=phase3.render
+00055970  gfx_create_sprite    thunk [0x20a088] ({?, w, h, ?, pixels, stride, hotspot x, y})  status=identified roadmap=phase3.render
+00062184  sprite_draw          optional {scale, angle} -> 16.16 matrix (scale*65536.0f), then 0x62310/0x791c9 (sprite.c)  status=partial roadmap=phase3.render
+000771e0  sprite_create        geputget.c: sprite header pool + texture handle 0x68e4c  status=partial roadmap=phase3.render
+000791c9  sprite_blit          unscaled clipped copy dst = lut[src<<8 | dst], lut [0x257e48] (level PAN in race); matrix path 0x82950  status=partial roadmap=phase3.render
+000c3618  t_hud_rects_s        36 x {x, y, w, h} sprite windows for 320x200 (0xc3858 640x480, 0xc3a98 800x600)
+000c3ce8  t_hud_text_s         8 ints: y0+ times rows, pos x0+/y1+, speed x1+/y1+ (0xc3d08, 0xc3d28)
+000c3d48  t_hud_place_s        28 ints: offsets from viewport corners (0xc3db8, 0xc3e28)
+000c3e94  t_sign_map           [difficulty*20 + kind] sign sprite; difficulty 3 swaps left/right
+000c3350  t_car_codes          3-letter player names by car model (COO, BAN, ... IGN)
+001feeac  g_hud_layout         0 S_*, 1 N_*, 2 H_* panels
+001fef1c  g_hud_text_pos       pointer to the layout's text table
+001fef20  g_hud_place          pointer to the layout's placement table
+001fefb8  g_hud_messages       5 x 0x78 message slots
+001feff4  g_ignition_fnt       IGNITION.FNT contents
+001fe9c8  g_hud_sprites        sprite handles 0x1fe9c8..0x1febdc
+001fef7c  g_plc_attributes     12 B per PLC object: (type>>12)&15, (type>>16)&255, type>>24 (sign kind)
+0024c214  g_font_slots         30 x 0x63e font slots
