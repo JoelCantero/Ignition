@@ -146,6 +146,7 @@ class RenderOriginal:
         self.put(0x24C004, "I", self.blob(keyed, 0x10000))
         records = [struct.unpack_from("<iIiii", plc, 4 + i * 20) for i in range(count)]
         handles = self.alloc(count * 0x20)
+        self.handles = [handles + i * 0x20 for i in range(count)]
         # sub_0002489c: classes < 100 first, then the rest (all detail options on: [0x1fed64] = 1).
         order = [i for i, r in enumerate(records) if (r[1] & 0xFFF) < 100]
         order += [i for i, r in enumerate(records) if (r[1] & 0xFFF) >= 100]
@@ -160,6 +161,12 @@ class RenderOriginal:
             self.call(0x56C74, eax=handle)
         self.width, self.height = width, height
         self.call(0x60DC4, eax=width, ebx=height)  # rasterizer tables (reciprocals, row offsets)
+
+    def rotate_every(self, step):
+        """Angles of tests/render_shot.c IGN_ROT on every step-th PLC object (written into the engine object)."""
+        for i in range(0, len(self.handles), step):
+            obj = self.get(self.handles[i], "I")[0]
+            self.put(obj + 0x18, "hhh", (i * 37) % 3600 - 100, (i * 53) % 3600, (i * 71) % 3700)
 
     def render(self, x, y, z, pitch, yaw, roll=0.0, zone=0, reach=0, fx=200, fy=164, near=25, clear=0):
         """Engine coordinates (x/z + 25600, y up); angles in tenths of a degree, as config +0x18/+0x20/+0x28."""

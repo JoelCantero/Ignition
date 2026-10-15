@@ -113,7 +113,8 @@ typedef struct LisaFrame {
 } LisaFrame;
 
 void lisa_view_clip(LisaView *v, int x0, int y0, int x1, int y1);
-void lisa_build(const LisaScene *scene, const LisaView *view, LisaFrame *f);
+/* render_scene: angles of rotated objects may be renormalized in place, as the original does. */
+void lisa_build(LisaScene *scene, const LisaView *view, LisaFrame *f);
 void lisa_draw(const LisaFrame *f, IgnRaster *r);
 
 #endif

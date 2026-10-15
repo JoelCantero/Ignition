@@ -127,7 +127,7 @@ void lisa_view_clip(LisaView *v, int x0, int y0, int x1, int y1) {
 /* ---- render_scene ---- */
 
 typedef struct {
-    const LisaScene *scene;
+    LisaScene *scene;
     const LisaView *v;
     LisaFrame *f;
 } Ctx;
@@ -220,36 +220,73 @@ static void collect(Ctx *c) {
     c->f->nvis = n;
 }
 
-/* sub_0005a2c8 (focal <= 300): float rows rounded to float32 then truncated; x mirrored (-focal), y by -focal,
- * depth x 2^18 so that (row . d) >> 16 is 4 z. The camera's fraction (x 4096) is taken out per row. */
-static void projection(const LisaView *v, int32_t m[9]) {
+/* sub_0005a2c8 (focal <= 300) / sub_0005a8c8 (focal > 300): camera rows as float32, then truncated; x is
+ * mirrored (-focal) and y scaled by -focal; depth rows x 2^18 so that (row . d) >> 16 is 4 z. The high-focal
+ * variant scales x and y by 256 instead of 1024 (and multiplies the quotient by 4) and keeps the roll terms
+ * unrounded. */
+static void projection(const LisaView *v, int high, float M[9]) {
     const double k = 0.001745329251994333;
-    float sa = (float)sin(-v->pitch * k), ca = (float)cos(-v->pitch * k);
-    float sb = (float)sin(-v->yaw * k), cb = (float)cos(-v->yaw * k);
-    float sc = (float)sin(-v->roll * k), cc = (float)cos(-v->roll * k);
-    double sx = -v->fx * 16384.0 * 0.015625 * 4.0 * v->zoom;
-    float sy = (float)(-v->fy * 16384.0 * 0.015625 * 4.0);
-    double t = (double)sc * sa;
-    float u = (float)((double)cc * sa);
-    float M[9] = {
-        (float)(((double)cc * cb - t * sb) * sx),
-        (float)(-(double)sc * ca * sx),
-        (float)((t * cb + (double)cc * sb) * sx),
-        (float)(((double)cc * sa * sb + (double)sc * cb) * sy),
-        (float)((double)cc * ca * sy),
-        (float)(((double)sc * sb - (double)u * cb) * sy),
-        (float)(-(double)sb * ca * 16384.0 * 16.0),
-        (float)((double)sa * 16384.0 * 16.0),
-        (float)((double)ca * cb * 16384.0 * 16.0),
-    };
-    for (int i = 0; i < 9; i++) m[i] = chop(M[i]);
+    double a = -v->pitch * k, b = -v->yaw * k, c = -v->roll * k;
+    float sa = (float)sin(a), ca = (float)cos(a), sb = (float)sin(b), cb = (float)cos(b);
+    double sc = sin(c), cc = cos(c);
+    if (!high) sc = (float)sc, cc = (float)cc;
+    double scale = high ? 256.0 : 1024.0;
+    double sx = -v->fx * 16384.0 * 0.015625 * (high ? 1.0 : 4.0) * v->zoom;
+    double sy = -v->fy * scale;
+    double t = sc * sa, u = cc * sa;
+    double u2 = high ? u : (double)(float)u; /* the low variant keeps cc * sa as float for the last y term */
+    M[0] = (float)((cc * cb - t * sb) * sx);
+    M[1] = (float)(-sc * ca * sx);
+    M[2] = (float)((t * cb + cc * sb) * sx);
+    M[3] = (float)((u * sb + sc * cb) * sy);
+    M[4] = (float)(cc * ca * sy);
+    M[5] = (float)((sc * sb - u2 * cb) * sy);
+    M[6] = (float)(-(double)sb * ca * 16384.0 * 16.0);
+    M[7] = (float)((double)sa * 16384.0 * 16.0);
+    M[8] = (float)((double)ca * cb * 16384.0 * 16.0);
+}
+
+/* sub_000564d8: sin of every tenth of a degree from -180 to 630 degrees, as float. */
+static float sine_table[8100];
+
+static float table_sin(int i) { return sine_table[i + 1800]; }
+
+static void init_sine_table(void) {
+    if (sine_table[0] != 0) return;
+    for (int i = -1800; i < 6300; i++) sine_table[i + 1800] = (float)sin(i * 0.1 * 3.1415926535898 * 0.005555555555555555);
+}
+
+/* sub_0005ae60 / sub_0005b308: an object with angles (rx, ry, rz) = (+0x18, +0x1a, +0x1c), first brought into
+ * [0, 3600] (written back) when any is out of range; rows of R x camera truncated to integers. */
+static void rotated_rows(LisaObject *o, const float M[9], int32_t q[9]) {
+    if ((uint32_t)((int32_t)o->ang[0] | (int32_t)o->ang[1] | (int32_t)o->ang[2]) > 3600)
+        for (int k = 0; k < 3; k++) {
+            while (o->ang[k] < 0) o->ang[k] = (int16_t)(o->ang[k] + 3600);
+            while (o->ang[k] > 3600) o->ang[k] = (int16_t)(o->ang[k] - 3600);
+        }
+    double c0 = table_sin(4500 - o->ang[0]), c1 = table_sin(4500 - o->ang[1]), c2 = table_sin(900 + o->ang[2]);
+    double n0 = table_sin(3600 - o->ang[0]), n1 = table_sin(3600 - o->ang[1]), s2 = table_sin(o->ang[2]);
+    double p = s2 * n1, c21 = c2 * c1;
+    double r24 = (float)(p * n0 + c21), r28 = (float)(c2 * n1 * n0 + (-c1 * s2)), r2c = (float)(n1 * c0);
+    double r30 = (float)(-s2 * c0), r34 = (float)(-c2 * c0), r38 = n0;
+    double r3c = (float)(s2 * c1 * n0 + (-c2) * n1), r40 = (float)(c21 * n0 + p), r44 = (float)(c0 * c1);
+    for (int row = 0; row < 3; row++) {
+        double m0 = M[row * 3], m1 = M[row * 3 + 1], m2 = M[row * 3 + 2];
+        q[row * 3] = chop(m1 * r30 + m0 * r24 + m2 * r3c);
+        q[row * 3 + 1] = chop(m0 * r28 + m1 * r34 + m2 * r40);
+        q[row * 3 + 2] = chop(m1 * r38 + m0 * r2c + m2 * r44);
+    }
 }
 
 static void transform(Ctx *c) {
     const LisaView *v = c->v;
     LisaFrame *f = c->f;
+    int high = v->fx > 300;
+    float M[9];
     int32_t m[9];
-    projection(v, m);
+    projection(v, high, M);
+    for (int i = 0; i < 9; i++) m[i] = chop(M[i]);
+    int shift = high ? 2 : 0;
     int32_t near4 = v->near << 2, cx8 = v->cx << 8, cy8 = v->cy << 8;
     int32_t ix = chop(v->x), iy = chop(v->y), iz = chop(v->z);
     int32_t fx4 = chop((v->x - ix) * 4096.0), fy4 = chop((v->y - iy) * 4096.0), fz4 = chop((v->z - iz) * 4096.0);
@@ -258,12 +295,31 @@ static void transform(Ctx *c) {
     int32_t off2 = div_pow2(add3(mul(fx4, m[6]), mul(fy4, m[7]), mul(fz4, m[8])), 12);
     f->nvert = 0;
     for (int i = 0; i < f->nvis; i++) {
-        const LisaObject *o = &c->scene->objs[f->vis[i]];
+        LisaObject *o = &c->scene->objs[f->vis[i]];
         f->vbase[i] = f->nvert;
         int32_t dx = o->x - ix, dy = o->y - iy, dz = o->z - iz;
         const int32_t *p = o->mesh + 2;
         int nv = o->mesh[0];
         if (f->nvert + nv > LISA_MAX_VERTS) nv = 0;
+        if (o->ang[0] | o->ang[1] | o->ang[2]) {
+            int32_t t0 = (int32_t)((uint32_t)add3(mul(m[1], dy), mul(m[0], dx), mul(m[2], dz)) - (uint32_t)off0);
+            int32_t t1 = (int32_t)((uint32_t)add3(mul(m[3], dx), mul(m[4], dy), mul(m[5], dz)) - (uint32_t)off1);
+            int32_t t2 = (int32_t)((uint32_t)add3(mul(m[7], dy), mul(m[6], dx), mul(m[8], dz)) - (uint32_t)off2);
+            int32_t q[9];
+            rotated_rows(o, M, q);
+            for (int k = 0; k < nv; k++, p += 3) {
+                int32_t xn = (int32_t)((uint32_t)add3(mul(q[1], p[1]), mul(q[0], p[0]), mul(q[2], p[2])) + (uint32_t)t0);
+                int32_t yn = (int32_t)((uint32_t)add3(mul(q[3], p[0]), mul(q[4], p[1]), mul(q[5], p[2])) + (uint32_t)t1);
+                int32_t zn = (int32_t)((uint32_t)add3(mul(q[6], p[0]), mul(q[7], p[1]), mul(q[8], p[2])) + (uint32_t)t2);
+                int32_t z = near4 + (zn >> 16);
+                if (z < near4) z = near4;
+                LisaVert *out = &f->verts[f->nvert++];
+                out->x = (int32_t)((uint32_t)(xn / z) << shift) + cx8;
+                out->y = (int32_t)((uint32_t)(yn / z) << shift) + cy8;
+                out->z = z;
+            }
+            continue;
+        }
         for (int k = 0; k < nv; k++, p += 3) {
             int32_t X = dx + p[0], Y = dy - p[1], Z = dz + p[2];
             int32_t xn = (int32_t)((uint32_t)add3(mul(X, m[0]), mul(Y, m[1]), mul(Z, m[2])) - (uint32_t)off0);
@@ -272,8 +328,8 @@ static void transform(Ctx *c) {
             int32_t z = near4 + (zn >> 16);
             if (z < near4) z = near4;
             LisaVert *out = &f->verts[f->nvert++];
-            out->x = xn / z + cx8;
-            out->y = yn / z + cy8;
+            out->x = (int32_t)((uint32_t)(xn / z) << shift) + cx8;
+            out->y = (int32_t)((uint32_t)(yn / z) << shift) + cy8;
             out->z = z;
         }
     }
@@ -433,7 +489,8 @@ static void faces(Ctx *c) {
     }
 }
 
-void lisa_build(const LisaScene *scene, const LisaView *view, LisaFrame *f) {
+void lisa_build(LisaScene *scene, const LisaView *view, LisaFrame *f) {
+    init_sine_table();
     Ctx c = {scene, view, f};
     f->nprim = 0;
     for (int i = 0; i < LISA_BUCKETS; i++) f->head[i] = -1;

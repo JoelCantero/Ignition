@@ -1,6 +1,7 @@
 /* Track-only frame of the port renderer for comparisons with tests/render_original.py.
  * usage: render_shot DATA LEVEL WxH X Y Z YAW PITCH OUT.raw [PRIMS.txt]
- * Camera as ./ignition --cam; writes 8-bit indices and, if given, the sorted primitive list. */
+ * Camera as ./ignition --cam; writes 8-bit indices and, if given, the sorted primitive list.
+ * IGN_ROT=k rotates every k-th PLC object by angles derived from its index (see tests/render_original.py). */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +25,13 @@ int main(int argc, char **argv) {
     ign_frame_init(&frame, w, h);
     IgnCamera cam = {strtof(argv[4], NULL), strtof(argv[5], NULL), strtof(argv[6], NULL), strtof(argv[7], NULL),
                      strtof(argv[8], NULL)};
+    const char *rot = getenv("IGN_ROT");
+    if (rot && atoi(rot) > 0)
+        for (int i = 0; i < lv.track.nobj; i += atoi(rot)) {
+            lv.track.objs[i].rotation[0] = (i * 37) % 3600 - 100;
+            lv.track.objs[i].rotation[1] = (i * 53) % 3600;
+            lv.track.objs[i].rotation[2] = (i * 71) % 3700;
+        }
     ign_frame_clear(&frame);
     ign_render_track(&frame, &lv, &cam);
     FILE *f = fopen(argv[9], "wb");
