@@ -31,9 +31,11 @@ void ign_frame_init(IgnFrame *fb, int w, int h);
 void ign_frame_clear(IgnFrame *fb);
 /* Where the level's TEX is, to read it whole (the model keeps whole pages only). Call before rendering a level. */
 void ign_render_set_level_dir(const char *data_dir, const char *name);
-/* Visibility zone ([0x24bff0]): the zone (PLC type bits 12-15) of the viewed car's section object, or -1 for
- * none; objects of another non-zero zone are not drawn. */
-void ign_render_set_zone(const IgnLevel *lv, int plc_object);
+/* The viewed car for race_frame: its signed section picks the square cell reach of some tunnels (config +0xa4) and
+ * the zone (PLC type bits 12-15) of `zone_object` (its section object, or -1 for none) hides the objects of the
+ * other non-zero zones ([0x24bff0]). Track ids as GST: 0 CANADA, 1 USA, 2 CARIB, 3 BRAZIL, 4 AUSTRIA, 5 ICELAND,
+ * 6 JAPAN. */
+void ign_render_set_view(const IgnLevel *lv, int track_id, int section, int zone_object);
 /* Static and POS-animated level objects through the Lisa 2 engine (render_scene 0x56410) and rasterizer. */
 void ign_render_track(IgnFrame *fb, const IgnLevel *lv, const IgnCamera *cam);
 /* Primitive list of the last ign_render_track (struct LisaFrame of lisa.h), for verification tools. */

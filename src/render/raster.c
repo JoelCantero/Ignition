@@ -140,11 +140,25 @@ static void sync_scene(const IgnLevel *lv) {
     }
 }
 
-/* [0x24bff0]: zone of the viewed car's section object (race_frame 0x430b6), 0 after 120 post-race frames. */
-static int view_zone;
+/* [0x24bff0]: zone of the viewed car's section object (race_frame 0x430b6), 0 after 120 post-race frames.
+ * Config +0xa4 (race_frame 0x42130, sub_0002489c 0x25ff1): a square of cells instead of the view cone in some
+ * sections (CARIB always 25). */
+static int view_zone, view_reach;
 
-void ign_render_set_zone(const IgnLevel *lv, int plc_object) {
-    view_zone = plc_object >= 0 && plc_object < lv->track.nobj ? (int)((lv->track.objs[plc_object].type >> 12) & 0xf) : 0;
+void ign_render_set_view(const IgnLevel *lv, int track_id, int section, int zone_object) {
+    view_zone = zone_object >= 0 && zone_object < lv->track.nobj ? (int)((lv->track.objs[zone_object].type >> 12) & 0xf)
+                                                                  : 0;
+    int s = section, r = 0;
+    switch (track_id) {
+    case 0: r = s > 0x24 && s < 0x2e ? 30 : s > 0x7c && s < 0x8c ? 35 : 0; break; /* CANADA */
+    case 1: r = s > -0x7c && s < -0x71 ? 30 : 0; break;                           /* USA */
+    case 2: r = 25; break;                                                         /* CARIB */
+    case 3: r = s > 0 && s < 0x1e ? 25 : s > 0xbb && s < 0xc5 ? 30 : 0; break;    /* BRAZIL */
+    case 4: r = s > 6 && s < 0xe ? 35 : 0; break;                                  /* AUSTRIA */
+    case 5: r = s > 0x1b && s < 0x46 ? 30 : 0; break;                              /* ICELAND */
+    default: r = 0; break;                                                         /* JAPAN */
+    }
+    view_reach = r;
 }
 
 /* race_frame 0x42c92 / race_setup_video: config block of a full-screen view. */
@@ -160,6 +174,7 @@ static void engine_view(const IgnFrame *fb, const IgnCamera *cam, LisaView *v) {
     v->cx = fb->w / 2, v->cy = fb->h / 2;
     v->layers = LISA_LAYER_ALL;
     v->zone = view_zone;
+    v->reach = view_reach;
     v->persp = fb->perspective;
     lisa_view_clip(v, 0, 0, fb->w - 1, fb->h - 1);
 }
