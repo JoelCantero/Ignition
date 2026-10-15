@@ -15,35 +15,50 @@ static void fill(IgnPalette *p) {
         for (int k = 0; k < 3; k++) p->rgb[c][k] = (uint8_t)(c * 3 + k * 85);
 }
 
-/* Runner for tests/palette_original.py. Each line: frac as IEEE bits (hex), r, g, b, keep flag, 1536 hex digits of
- * palette and, with the flag, 256 keep entries. Prints the blended palette as 1536 hex digits. */
+static int read_palette(IgnPalette *p) {
+    for (int i = 0; i < 768; i++) {
+        unsigned v;
+        if (scanf("%2x", &v) != 1) return 1;
+        p->rgb[i / 3][i % 3] = (uint8_t)v;
+    }
+    return 0;
+}
+
+/* Runner for tests/palette_original.py; one case per line, the result printed as 1536 hex digits.
+ *   B frac-bits(hex) r g b keep-flag palette(1536 hex) [256 keep entries]   palette_blend
+ *   L t a(1536 hex) b(1536 hex)                                               palette_lerp */
 static int runner(void) {
-    unsigned long long bits;
-    int r, g, b, has_keep, count;
-    while ((count = scanf("%llx %d %d %d %d", &bits, &r, &g, &b, &has_keep)) != EOF) {
-        if (count != 5) {
-            fprintf(stderr, "Invalid palette case header\n");
+    char op[2];
+    while (scanf("%1s", op) == 1) {
+        IgnPalette in, other, out;
+        if (op[0] == 'B') {
+            unsigned long long bits;
+            int r, g, b, has_keep;
+            if (scanf("%llx %d %d %d %d", &bits, &r, &g, &b, &has_keep) != 5 || read_palette(&in)) {
+                fprintf(stderr, "Invalid blend case\n");
+                return 1;
+            }
+            double frac;
+            memcpy(&frac, &bits, sizeof frac);
+            int32_t keep[256];
+            for (int c = 0; has_keep && c < 256; c++) {
+                if (scanf("%d", &keep[c]) != 1) {
+                    fprintf(stderr, "Invalid keep entry\n");
+                    return 1;
+                }
+            }
+            ign_palette_blend(&in, r, g, b, frac, has_keep ? keep : NULL, &out);
+        } else if (op[0] == 'L') {
+            int t;
+            if (scanf("%d", &t) != 1 || read_palette(&in) || read_palette(&other)) {
+                fprintf(stderr, "Invalid lerp case\n");
+                return 1;
+            }
+            ign_palette_lerp(&in, &other, t, &out);
+        } else {
+            fprintf(stderr, "Unknown palette op %s\n", op);
             return 1;
         }
-        double frac;
-        memcpy(&frac, &bits, sizeof frac);
-        IgnPalette in, out;
-        for (int i = 0; i < 768; i++) {
-            unsigned v;
-            if (scanf("%2x", &v) != 1) {
-                fprintf(stderr, "Invalid palette bytes\n");
-                return 1;
-            }
-            in.rgb[i / 3][i % 3] = (uint8_t)v;
-        }
-        int32_t keep[256];
-        for (int c = 0; has_keep && c < 256; c++) {
-            if (scanf("%d", &keep[c]) != 1) {
-                fprintf(stderr, "Invalid keep entry\n");
-                return 1;
-            }
-        }
-        ign_palette_blend(&in, r, g, b, frac, has_keep ? keep : NULL, &out);
         for (int i = 0; i < 768; i++) printf("%02x", out.rgb[i / 3][i % 3]);
         printf("\n");
     }
@@ -95,6 +110,24 @@ int main(int argc, char **argv) {
     ign_palette_blend(&same, 0x10, 0x20, 0x30, 0.25, NULL, &same);
     ign_palette_blend(&in, 0x10, 0x20, 0x30, 0.25, NULL, &out);
     fails += check(memcmp(&same, &out, sizeof out) == 0, "in and out may alias");
+
+    IgnPalette a, b;
+    memset(&a, 0, sizeof a);
+    memset(&b, 0, sizeof b);
+    a.rgb[0][0] = 10, b.rgb[0][0] = 20;  /* +10 * 128 / 256 = 5 */
+    a.rgb[0][1] = 20, b.rgb[0][1] = 9;   /* -11 * 128 / 256 = -5.5 -> -5 */
+    a.rgb[0][2] = 0, b.rgb[0][2] = 255;
+    ign_palette_lerp(&a, &b, 128, &out);
+    fails += check(out.rgb[0][0] == 15 && out.rgb[0][1] == 15 && out.rgb[0][2] == 127,
+                   "lerp divides by 256 toward zero");
+    ign_palette_lerp(&a, &b, 0, &out);
+    fails += check(memcmp(&a, &out, sizeof out) == 0, "lerp t 0 gives a");
+    ign_palette_lerp(&a, &b, 255, &out);
+    fails += check(out.rgb[0][2] == 254, "lerp t 255 stops short of b");
+    ign_palette_lerp(&a, &b, 256, &out);
+    fails += check(memcmp(&b, &out, sizeof out) == 0, "lerp t >= 256 copies b");
+    ign_palette_lerp(&a, &b, -256, &out); /* 10 + (10 * -256) / 256 = 0 */
+    fails += check(out.rgb[0][0] == 0 && out.rgb[0][1] == 31, "negative t extrapolates away from b");
 
     if (!fails) printf("palette: all checks passed\n");
     return fails != 0;

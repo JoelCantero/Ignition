@@ -13,4 +13,9 @@
 void ign_palette_blend(const IgnPalette *in, int r, int g, int b, double frac, const int32_t *keep,
                        IgnPalette *out);
 
+/* palette_lerp (sub_00051a9c, eax=a, edx=b, ebx=out, ecx=t): t >= 256 copies `b`; otherwise each byte is
+ * a + (b - a) * t / 256, the product wrapping at 32 bits and the division truncating toward zero, low byte kept.
+ * sub_00012bb8 (menu) crossfades with it. `out` may alias `a` or `b`. */
+void ign_palette_lerp(const IgnPalette *a, const IgnPalette *b, int t, IgnPalette *out);
+
 #endif

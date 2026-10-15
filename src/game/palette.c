@@ -28,3 +28,18 @@ void ign_palette_blend(const IgnPalette *in, int r, int g, int b, double frac, c
         }
     }
 }
+
+void ign_palette_lerp(const IgnPalette *a, const IgnPalette *b, int t, IgnPalette *out) {
+    for (int c = 0; c < 256; c++) {
+        for (int k = 0; k < 3; k++) {
+            uint8_t va = a->rgb[c][k], vb = b->rgb[c][k];
+            if (t >= 0x100) { /* 0x51aaa: signed compare, so a negative t blends */
+                out->rgb[c][k] = vb;
+                continue;
+            }
+            /* 0x51ad1..0x51ae6: imul, then sar/shl/sbb/sar 8 rounds the quotient toward zero. */
+            int32_t p = (int32_t)((uint32_t)(vb - va) * (uint32_t)t);
+            out->rgb[c][k] = (uint8_t)((uint32_t)(p / 256) + va);
+        }
+    }
+}
