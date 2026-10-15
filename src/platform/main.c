@@ -77,6 +77,8 @@ static int tv_index = 3, spectated, spectate_wait;
 static IgnSkids skids;
 static IgnFx fx;
 static const IgnTrack *hud_track;
+/* The free camera (F1) shows the debug camera overlay of sub_00049fdc. */
+static bool hud_debug;
 static IgnWeather weather;
 
 /* Start grid of sub_00026458: PLC origin of the type-0 object facing the type-1 object; slot i is
@@ -266,6 +268,7 @@ static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     const IgnHudState hs = hud_state(lv, (const IgnCar *const *)all);
     ign_hud_update(&hud, &hs);
     ign_hud_draw(&hud, &frame, &hs);
+    if (hud_debug) ign_hud_draw_debug(&hud, &frame, cam->x, cam->y, cam->z, cam->yaw, cam->pitch);
 }
 
 static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
@@ -655,7 +658,7 @@ int main(int argc, char **argv) {
                 (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE))
                 running = false;
             if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) {
-                if (ev.key.key == SDLK_F1) free_cam = !free_cam;
+                if (ev.key.key == SDLK_F1) free_cam = !free_cam, hud_debug = free_cam;
                 else if (ev.key.key == SDLK_M) manual_gear = !manual_gear;
                 else if (!free_cam && ev.key.key == SDLK_Q) pending_gear_shift = -1;
                 else if (!free_cam && ev.key.key == SDLK_E) pending_gear_shift = 1;

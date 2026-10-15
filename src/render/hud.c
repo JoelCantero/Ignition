@@ -624,3 +624,18 @@ void ign_hud_draw(IgnHud *hud, IgnFrame *fb, const IgnHudState *st) {
     }
     draw_messages(hud, fb, &vp, st);
 }
+
+void ign_hud_draw_debug(const IgnHud *hud, IgnFrame *fb, double x, double y, double z, double x_angle, double y_angle) {
+    if (!hud->debug_font.data) return;
+    char text[64];
+    snprintf(text, sizeof text, "X %.0f", x);
+    ign_fnt_draw(fb, &hud->debug_font, text, 0, 0, 0x14);
+    snprintf(text, sizeof text, "Y %.0f", y);
+    ign_fnt_draw(fb, &hud->debug_font, text, 0, 10, 0x14);
+    snprintf(text, sizeof text, "Z %.0f", z);
+    ign_fnt_draw(fb, &hud->debug_font, text, 0, 20, 0x14);
+    snprintf(text, sizeof text, "X VIN %.2f", x_angle);
+    ign_fnt_draw(fb, &hud->debug_font, text, 0, 30, 0x14);
+    snprintf(text, sizeof text, "Y VIN %.2f", y_angle);
+    ign_fnt_draw(fb, &hud->debug_font, text, 0, 40, 0x14);
+}

@@ -392,6 +392,12 @@ static void test_game_data(const char *dir, const char *out) {
         CHECK(!out_left, "message gone after 80 frames");
         ign_hud_destroy(&elim);
 
+        /* Debug camera overlay with IGNITION.FNT: five lines of 10 pixels in the top-left corner. */
+        memset(frame.color, 0, sizeof frame.color);
+        ign_hud_draw_debug(&hud, &frame, 1234.0, -56.0, 789.0, 0.5, 1.25);
+        CHECK(differs_from(0, 0, 0, 90, 50) > 100 && differs_from(0, 0, 50, w, h) == 0 &&
+                  differs_from(0, 90, 0, w, 50) == 0,
+              "debug overlay");
         /* Two players: viewport 0 on the right half, viewport 1 on the left (sub_00049724). */
         IgnClip v0, v1;
         ign_hud_viewport(w, h, 0, 2, 0, &v0);

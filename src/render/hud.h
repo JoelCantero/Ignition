@@ -101,6 +101,10 @@ void ign_hud_draw(IgnHud *hud, IgnFrame *frame, const IgnHudState *state);
  * One player: centred, size factors 0xc0b80[size]; two: the width halves, player 0 on the right half and player 1 on
  * the left, one pixel apart from the middle. */
 void ign_hud_viewport(int w, int h, int size, int players, int index, IgnClip *out);
+/* sub_00049fdc: debug camera overlay ([0xc0b4c], off in the release game): "X %.0f", "Y %.0f", "Z %.0f",
+ * "X VIN %.2f", "Y VIN %.2f" with IGNITION.FNT in colour 0x14, at x 0 and y 0, 10, 20, 30, 40. */
+void ign_hud_draw_debug(const IgnHud *hud, IgnFrame *frame, double x, double y, double z, double x_angle,
+                        double y_angle);
 /* sub_0004c7c0: queues a message; returns its slot or -1 when the five are busy. */
 int ign_hud_message(IgnHud *hud, const char *text, int duration, int period, int viewport);
 /* sub_0004bdf4: "%.2d:%.2d:%.2d" minutes (at most 99), seconds and hundredths, truncated. */
