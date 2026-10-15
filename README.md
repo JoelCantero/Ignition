@@ -525,7 +525,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Callbacks de página y acciones | `0x160c4`, `0x170ac`, `0x155d0`, `0x16f18`–`0x17054` | `frontend/frontend.c` | literal; prueba `menu_flow` |
 | Fondo animado PSQ/PFM | `0x549b0`, `0x54df8`, `0x60e3d` (tipos 7, 11, 15, 17, 18, 19) | `frontend/pfm.c` | **al píxel**: 209 fotogramas iguales al original emulado; prueba `menu_background` |
 | Sprites con hot spot, cajas, CDP | `0x55968`, `0x541d4`–`0x54864`, `0x55384` | `frontend/gfx2d.c` (sobre `sprite.c`/`font.c`), `cdp.c` | literal |
-| Coches 3D del menú | `0x19508`, `0x1aaf8` | `frontend/frontend.c` | modelos y giro fieles; proyección con el rasterizador del port (cámara aproximada) |
+| Coches 3D del menú | `0x19508`, `0x1aaf8` | `frontend/frontend.c` | modelos y giro con el motor Lisa 2, dibujados directamente sobre el fondo del menú (cámara aproximada) |
 | Configuración y récords | `0x1a864`, `0x198bc`, `IGN_DOS.BTZ` | `frontend/settings.c` | literal |
 
 Geometría IA: `tests/ai_geometry_original.py` compara ambos fragmentos LE con `atan2`/`__CHP`

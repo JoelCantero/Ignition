@@ -9,6 +9,7 @@
 #include "../game/assets.h"
 #include "../game/palette.h"
 #include "../game/save.h"
+#include "../render/lisa.h"
 #include "../render/raster.h"
 #include "cdp.h"
 #include "gfx2d.h"
@@ -491,9 +492,9 @@ static void menu_free_car(void) {
 }
 
 /* sub_00019508: one MENUCAR model (PLC type = car id, else model 0) turned by rot_step tenths of a degree and
- * projected around (cx, cy). The original drives the Lisa 2 renderer; the port uses its own rasteriser. */
+ * projected around (cx, cy) through the Lisa 2 renderer. */
 static void menu_car_render(int car_id, int rot_step, double zoom, int cx, int cy) {
-    static IgnFrame frame;
+    static LisaFrame frame;
     if (!M.menucar_ok) return;
     int i;
     for (i = 0; i < 11 && i < M.menucar.nobj; i++)
@@ -505,24 +506,27 @@ static void menu_car_render(int car_id, int rot_step, double zoom, int cx, int c
     M.car_ay[i] += rot_step;
     if (M.car_ay[i] >= 3600) M.car_ay[i] -= 3600;
 
-    ign_frame_init(&frame, W, H);
-    ign_frame_clear(&frame);
-    /* Camera at (1000, cam_y, cam_z) looking at the car at (1000, 1000, 1000); engine y points down. */
-    IgnCamera cam = {.x = (float)(M.cam_x - 1000.0), .y = (float)(1000.0 - M.cam_y), .z = (float)(M.cam_z - 1000.0)};
-    cam.yaw = 0.0f;
-    cam.pitch = (float)atan2(M.cam_y - 1000.0, 1000.0 - M.cam_z);
-    double a = M.car_ay[i] * (3.14159265358979 / 1800.0);
-    float rot[9] = {(float)cos(a), 0, (float)sin(a), 0, 1, 0, (float)-sin(a), 0, (float)cos(a)};
-    ign_render_object(&frame, &M.menucar, i, rot, &cam);
-    for (int y = 0; y < H; y++) {
-        int ty = y + cy - H / 2;
-        if (ty < 0 || ty >= H) continue;
-        for (int x = 0; x < W; x++) {
-            int tx = x + cx - W / 2;
-            if (tx < 0 || tx >= W || frame.inv_z[y * W + x] <= 0) continue;
-            M.backbuf[ty * W + tx] = frame.color[y * W + x];
-        }
+    LisaScene scene;
+    if (lisa_scene_init(&scene, 0xc800, 0xc800, 1)) {
+        fprintf(stderr, "frontend: out of memory for menu car\n");
+        lisa_scene_free(&scene);
+        exit(1);
     }
+    scene.tab = M.menu_tab;
+    scene.shade = M.shades[0];
+    int id = lisa_create(&scene, M.menucar.objs[i].verts - 2, M.menucar.tex, M.menucar.tex_h / 256, 0, 0);
+    const int16_t ang[3] = {0, (int16_t)M.car_ay[i], 0};
+    lisa_place(&scene, id, 1000, 1000, 1000, ang);
+    LisaView view = {.x = M.cam_x, .y = M.cam_y, .z = M.cam_z,
+                     .pitch = atan2(M.cam_y - 1000.0, 1000.0 - M.cam_z) * (1800.0 / 3.14159265358979),
+                     .zoom = 1, .fx = 200, .fy = 164, .near = 25, .cx = cx, .cy = cy,
+                     .layers = LISA_LAYER_ALL};
+    lisa_view_clip(&view, 0, 0, W - 1, H - 1);
+    lisa_build(&scene, &view, &frame);
+    IgnRaster raster = {.fb = M.backbuf, .stride = W};
+    ign_raster_clip(&raster, 0, 0, W - 1, H - 1);
+    lisa_draw(&frame, &raster);
+    lisa_scene_free(&scene);
 }
 
 /* sub_0001969c, inlined in 0x170ac: one step of the DEFAULT2.PSQ sequence into the background buffer. */

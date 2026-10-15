@@ -85,9 +85,6 @@ static int session_on, session_saved;
 static int tv_index = 3, spectated, spectate_wait;
 static IgnSkids skids;
 static IgnFx fx;
-static const IgnTrack *hud_track;
-/* The free camera (F1) shows the debug camera overlay of sub_00049fdc. */
-static bool hud_debug;
 static IgnCar *player_car;
 static IgnCollObjs colls;
 static IgnTexAnims texanims;
@@ -219,55 +216,6 @@ static IgnInput human_steer(const IgnCar *c, IgnInput in) {
         in.a_steer = -in.a_steer;
     }
     return in;
-}
-
-/* Persistence hooks once per physics tick: ghost sample, "LAP RECORD" (0x2f43a) and the end of the race
- * (records of render_main 0x45938, ghost and BTZ of sub_0002ccc8). */
-static void session_hooks(IgnCar *const *all, int n, const IgnTrack *t, double best_lap, int was_out) {
-    const IgnCar *player = all[0];
-    int language = ign_btz_i32(&session.btz, IGN_BTZ_LANGUAGE);
-    if (ign_race_started(&race)) ign_session_tick(&session, player, t->count);
-    if (race.best_lap < best_lap && player->last_lap == race.best_lap)
-        printf("%s %.2f\n", ign_lap_record_text(language), player->last_lap);
-    if (player->out && !was_out) {
-        session_saved = ign_session_finish(&session, player);
-        if (session_saved < 0)
-            fprintf(stderr, "cannot save records or ghost in %s\n", session.dir);
-        else if (session_saved & IGN_SAVED_TRACK_RECORD)
-            printf("%s %.2f\n", ign_track_record_text(language), player->race_elapsed);
-        if (session_saved >= 0 && session.time_trial)
-            printf("time trial: %.2f s against %.2f s, ghost %s\n", player->race_elapsed, session.record_cs / 100.0,
-                   session_saved & IGN_SAVED_GHOST ? session.ghost_path : "not saved");
-    }
-    /* sub_0002ccc8 once every car is out: championship round and grid, grid shuffle, IGN_DOS.BTZ. */
-    if (race.finished >= n && !session.ended) {
-        int place[MAX_RIVALS + 1];
-        for (int i = 0; i < n; i++) place[i] = all[i]->place - 1;
-        if (ign_session_race_end(&session, race.mode, place, n) < 0)
-            fprintf(stderr, "cannot save %s in %s\n", IGN_BTZ_NAME, session.dir);
-    }
-}
-
-/* SDL_GetPrefPath, or IGN_SAVE_DIR (tests); never the game folder. */
-static int session_setup(const char *data_dir, const char *level, int car_model, int time_trial) {
-    const char *dir = getenv("IGN_SAVE_DIR");
-    char *pref = dir ? NULL : SDL_GetPrefPath("UDS", "Ignition");
-    int rc = dir || pref ? ign_session_begin(&session, dir ? dir : pref, data_dir, level, car_model, time_trial,
-                                             &ghost)
-                         : -1;
-    SDL_free(pref);
-    if (rc) {
-        fprintf(stderr, "no user folder for records: %s\n", SDL_GetError());
-        return -1;
-    }
-    session_on = 1;
-    race.best_lap = ign_session_best_lap(&session);
-    if (session.time_trial) {
-        static const char *const STATE[] = {"no ghost", "ghost", "ghost of another track (not saved)"};
-        printf("time trial: %s, record %.2f s, saving in %s\n", STATE[session.ghost_state], session.record_cs / 100.0,
-               session.dir);
-    }
-    return 0;
 }
 
 static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, IgnAi *player_ai, int autopilot) {
@@ -439,7 +387,11 @@ static void draw(const IgnLevel *lv, const IgnCar *car, const IgnCamera *cam) {
     ign_render_fx(&frame, lv, &fx, all, nrivals + 1, cam);
     ign_render_weather(&frame, lv, &weather, cam);
     ign_render_flush(&frame);
-    ign_hud_draw(&hud, &frame, car, nrivals + 1);
+    const IgnCar *cars[MAX_RIVALS + 1] = {car};
+    for (int i = 0; i < nrivals; i++) cars[i + 1] = &rivals[i];
+    IgnHudState hs = hud_state(lv, cars);
+    ign_hud_draw(&hud, &frame, &hs);
+    if (hud_debug) ign_hud_draw_debug(&hud, &frame, cam->x, cam->y, cam->z, cam->yaw, cam->pitch);
 }
 
 static void trace_car(int tick, const IgnCar *car, const IgnInput *in) {
