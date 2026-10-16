@@ -109,6 +109,10 @@ p { margin: 8px 0; }
 .confidence-unresolved { color: var(--cp-danger); }
 select { max-width: 280px; }
 .roadmap { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.checklist { margin: 8px 0; padding-left: 0; list-style: none; }
+.checklist li { margin: 4px 0; }
+.status-closed { background: var(--cp-success); color: #fff; }
+.status-in-progress { background: var(--cp-warning); }
 .phase { padding: 16px; background: var(--cp-bg-elevated); border: 1px solid var(--cp-border); border-radius: 0.625rem; }
 button, input, select { color: var(--cp-text); font: inherit; }
 button, select, input { border: 1px solid var(--cp-border); background: var(--cp-surface); border-radius: 0.625rem; padding: 8px 12px; }
@@ -185,17 +189,11 @@ main > section + section { margin-top: 16px; }
     </section>
   </div>
   <section id="milestones-section">
-    <h2>Plan por hitos</h2>
-    <p class="muted">Cada funci&oacute;n se asigna al primer hito que la necesita seg&uacute;n el grafo de llamadas medido y los aplazamientos revisados del cat&aacute;logo. Hecha = su estado satisface su tratamiento (port, equivalente, nativo o no necesaria). El orden va de las hojas a las llamadoras.</p>
+    <h2>Roadmap por hitos</h2>
+    <p class="muted">Un hito se cierra cuando todos sus criterios est&aacute;n hechos con evidencia, no le quedan funciones pendientes y sus dependencias est&aacute;n cerradas; el estado se calcula, no se declara. Las tareas por &aacute;rea (fases 0&ndash;9) siguen en el README. Cada funci&oacute;n se asigna al primer hito que la necesita seg&uacute;n el grafo de llamadas medido y los aplazamientos revisados del cat&aacute;logo. Hecha = su estado satisface su tratamiento (port, equivalente, nativo o no necesaria). El orden va de las hojas a las llamadoras.</p>
     <div class="legend"><span><i class="dot verified"></i>Hechas</span><span><i class="dot partial"></i>Pendientes: port</span><span><i class="dot native"></i>Pendientes: equivalente</span><span><i class="dot pending"></i>Pendientes: nativo</span></div>
     <div id="milestones" class="roadmap"></div>
     <p class="muted" id="plan-summary"></p>
-  </section>
-  <section>
-    <h2>Roadmap del proyecto</h2>
-    <p class="muted">Casillas del README: hechas / parciales / pendientes. Las tareas tienen tama&ntilde;os distintos y no se convierten en un porcentaje funcional.</p>
-    <div class="legend"><span><i class="dot verified"></i>Hechas</span><span><i class="dot partial"></i>Parciales</span><span><i class="dot pending"></i>Pendientes</span></div>
-    <div id="roadmap" class="roadmap"></div>
   </section>
   <section id="explorer">
     <div class="section-heading"><h2>Explorador de funciones</h2><span class="tag" id="inventory-count"></span></div>
@@ -229,7 +227,7 @@ main > section + section { margin-top: 16px; }
       <li>Es una instant&aacute;nea sin conexi&oacute;n, no datos en vivo. Para actualizar: <code>python3 tools/port_dashboard.py</code> tras actualizar el cat&aacute;logo.</li>
     </ul></details>
   </section>
-  <footer><div id="snapshot"></div><div>Fuentes: <a href="functions.json">cat&aacute;logo &uacute;nico de funciones y cobertura</a> &middot; <a href="../README.md#roadmap">roadmap</a>. Sin assets del juego ni recursos externos.</div></footer>
+  <footer><div id="snapshot"></div><div>Fuentes: <a href="functions.json">cat&aacute;logo &uacute;nico de funciones y cobertura</a> &middot; <a href="../README.md#roadmap">roadmap y tareas por &aacute;rea</a>. Sin assets del juego ni recursos externos.</div></footer>
   <noscript><p>Este dashboard necesita JavaScript local para mostrar el inventario y sus m&eacute;tricas.</p></noscript>
 </main>
 <script id="port-data" type="application/json">__PORT_DATA__</script>
@@ -347,21 +345,23 @@ function renderSystems() {
   text("system-scope", `${visible} subsistemas visibles \u00b7 alcance: ${number(scope.length)} funciones${$("library").checked ? " (library incluida)" : " (library excluida)"}.`);
   if (!visible) $("systems").append(element("p", "Sin subsistemas con ese filtro.", "muted"));
 }
-for (const phase of data.phases) {
-  const card = element("article", undefined, "phase");
-  card.append(element("h3", `${String(phase.number).padStart(2, "0")} / ${phase.title}`));
-  const track = element("div", undefined, "bar");
-  bar(track, [[phase.done, "verified"], [phase.partial, "partial"], [phase.pending, "pending"]], phase.done + phase.partial + phase.pending);
-  card.append(track, element("small", `${phase.done} hechas \u00b7 ${phase.partial} parciales \u00b7 ${phase.pending} pendientes`));
-  $("roadmap").append(card);
-}
+const statusLabels = {open: "Abierto", "in-progress": "En curso", closed: "Cerrado"};
 const treatmentLabels = {port: "Port", equivalent: "Equivalente", native: "Nativo", "not-needed": "No necesaria"};
 for (const milestone of data.milestones) {
   const option = element("option", `${milestone.id} \u2014 ${milestone.title}`);
   option.value = milestone.id;
   $("milestone").insertBefore(option, $("milestone").querySelector('option[value="none"]'));
   const card = element("article", undefined, "phase");
-  card.append(element("h3", `${milestone.id} / ${milestone.title}`), element("p", milestone.goal));
+  const heading = element("h3", `${milestone.id} / ${milestone.title} `);
+  heading.append(element("span", statusLabels[milestone.status], "badge status-" + milestone.status));
+  card.append(heading, element("p", milestone.goal));
+  const checklist = element("ul", undefined, "checklist");
+  for (const item of milestone.checklist) {
+    const entry = element("li", `${item.done ? "\u2611" : "\u2610"} ${item.item}`);
+    if (item.evidence.length) entry.append(element("small", ` \u2014 evidencia: ${item.evidence.join(" \u00b7 ")}`, "muted"));
+    checklist.append(entry);
+  }
+  card.append(element("small", `Criterios de cierre: ${milestone.checklist_done}/${milestone.checklist_total}`), checklist);
   const t = milestone.pending_by_treatment;
   const track = element("div", undefined, "bar");
   bar(track, [[milestone.done, "verified"], [t.port || 0, "partial"], [t.equivalent || 0, "native"], [t.native || 0, "pending"]], milestone.new);

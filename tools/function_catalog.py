@@ -56,9 +56,18 @@ def validate_catalog(catalog, verify_snapshot=True):
         raise ValueError("Catalog must define milestones")
     for index, (key, milestone) in enumerate(milestones.items()):
         if (key != f"H{index}" or not isinstance(milestone, dict) or
-                set(milestone) != {"title", "goal", "criteria", "depends_on", "entry_points", "deferred"} or
+                set(milestone) != {"title", "goal", "criteria", "checklist", "depends_on", "entry_points",
+                                   "deferred"} or
                 any(not _nonempty(milestone[field]) for field in ("title", "goal", "criteria"))):
             raise ValueError(f"Invalid milestone definition: {key}")
+        checklist = milestone["checklist"]
+        if (not isinstance(checklist, list) or not checklist or any(
+                not isinstance(item, dict) or set(item) != {"item", "done", "evidence"} or
+                not _nonempty(item["item"]) or type(item["done"]) is not bool or
+                not isinstance(item["evidence"], list) or
+                any(not _nonempty(e) for e in item["evidence"]) or item["done"] and not item["evidence"]
+                for item in checklist)):
+            raise ValueError(f"Invalid milestone checklist (done items need evidence): {key}")
         earlier = list(milestones)[:index]
         if (not isinstance(milestone["depends_on"], list) or
                 any(d not in earlier for d in milestone["depends_on"]) or
@@ -299,15 +308,29 @@ def plan_milestones(catalog):
 
 
 def milestone_rows(catalog, report=None):
-    """Per-milestone counts of the functions it is the first to require."""
+    """Per-milestone counts of the functions it is the first to require, and the derived status.
+
+    closed: every checklist item done (with evidence), no pending function and every dependency closed;
+    in-progress: some checklist item or some first-required function already satisfied; open otherwise."""
     report = report or plan_milestones(catalog)
     functions = {s["address"]: s for s in catalog["symbols"] if s["kind"] == "function"}
-    rows = []
+    rows, status = [], {}
     for key, milestone in catalog["milestones"].items():
         planned = report["milestones"][key]
         pending = planned["pending"]
+        checklist = milestone["checklist"]
+        items_done = sum(item["done"] for item in checklist)
+        if (items_done == len(checklist) and not pending and
+                all(status[d] == "closed" for d in milestone["depends_on"])):
+            status[key] = "closed"
+        elif items_done or len(planned["new"]) > len(pending):
+            status[key] = "in-progress"
+        else:
+            status[key] = "open"
         rows.append({
-            "id": key, "title": milestone["title"], "required": planned["required"], "new": len(planned["new"]),
+            "id": key, "title": milestone["title"], "status": status[key],
+            "checklist_done": items_done, "checklist_total": len(checklist),
+            "required": planned["required"], "new": len(planned["new"]),
             "done": len(planned["new"]) - len(pending), "pending": len(pending),
             "pending_by_treatment": dict(Counter(report["functions"][a]["treatment"] for a in pending)),
             "pending_instructions": sum(functions[a]["instructions"] for a in pending),
@@ -323,14 +346,19 @@ def check_plan(catalog):
     return report
 
 
+STATUS_LABELS = {"open": "abierto", "in-progress": "en curso", "closed": "**cerrado**"}
+
+
 def readme_milestone_table(catalog, report=None):
-    lines = ["| Hito | Requeridas (primera vez) | Hechas | Pendientes: port / equiv. / nativo | "
-             "Instr. pendientes (suma por función) | Siguientes en orden de dependencias |",
-             "|---|---|---|---|---|---|"]
+    lines = ["| Hito | Estado | Criterios hechos | Funciones requeridas (primera vez) | Hechas | "
+             "Pendientes: port / equiv. / nativo | Instr. pendientes (suma por función) | "
+             "Siguientes en orden de dependencias |",
+             "|---|---|---|---|---|---|---|---|"]
     for row in milestone_rows(catalog, report):
         t = row["pending_by_treatment"]
         lines.append(
-            f'| **{row["id"]}** {row["title"]} | {row["required"]} ({row["new"]}) | {row["done"]} | '
+            f'| **{row["id"]}** {row["title"]} | {STATUS_LABELS[row["status"]]} | '
+            f'{row["checklist_done"]}/{row["checklist_total"]} | {row["required"]} ({row["new"]}) | {row["done"]} | '
             f'{row["pending"]}: {t.get("port", 0)} / {t.get("equivalent", 0)} / {t.get("native", 0)} | '
             f'{row["pending_instructions"]:,}'.replace(",", " ") + " | " +
             (", ".join(f"`{name}`" for name in row["next"]) or "—") + " |")

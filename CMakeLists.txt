@@ -110,6 +110,7 @@ add_test(NAME regress COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/regress.py
 add_test(NAME verification_tools COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/test_verification.py)
 add_test(NAME function_catalog COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/function_catalog.py)
 add_test(NAME port_dashboard COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/port_dashboard.py)
+add_test(NAME test_baseline COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/test_baseline.py)
 add_test(NAME headless_trace_contract COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/test_verification.py
   --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}" HeadlessTests)
 add_test(NAME solo_replay COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/solo_replay.py

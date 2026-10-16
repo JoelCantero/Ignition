@@ -22,7 +22,7 @@
     "coverage": "Unique coverage snapshot computed from original instruction addresses and authoritative function states. Refresh after state/count changes.",
     "classification": "Per-function area assignment, not a port-state promotion. confidence=documented (existing symbol/notes/task), inferred (static calls/data/instructions), unresolved (work queue, not a resolved semantic identification). Evidence references linear LE addresses; previous_roadmap preserves the superseded coarse task.",
     "subsystems": "Leaf subsystem titles and scope used by catalog queries and dashboard; no inferred percentages of whole-system fidelity.",
-    "milestones": "Ordered execution milestones H0..Hn; entry points and deferrals drive the static dependency closure computed by tools/function_catalog.py plan.",
+    "milestones": "Ordered execution milestones H0..Hn; entry points and deferrals drive the static dependency closure computed by tools/function_catalog.py plan. Each milestone has a checklist of closure criteria; done items need evidence. Status is derived: closed (all items done, no pending function, dependencies closed), in-progress or open.",
     "treatment": "Subsystem default of how a function is satisfied: port (faithful C port), equivalent (observable behavior/output reproduced without a line-by-line port), native (replaced by host/platform code), not-needed (no counterpart in the port). A published native status implies native unless a plan overrides it.",
     "calls": "Measured direct `call imm` targets that are catalog functions; refreshed by disasm.py catalog --refresh.",
     "pointer_refs": "Measured function starts used as instruction operands (callbacks/pointer registration); indirect calls are not resolved.",
@@ -49,17 +49,66 @@
   "coverage": {
     "unique_instructions": 128832,
     "library_instructions": 19033,
-    "ported_instructions": 50134,
-    "partial_instructions": 14089,
+    "ported_instructions": 50469,
+    "partial_instructions": 15392,
     "covered_code_bytes": 474981,
     "code_bytes": 482383,
-    "inventory_sha256": "3f8c473578a7a55ac4363dee05c196e9e7b6e6ff2bcfbc415271a7597eb0c9a6"
+    "inventory_sha256": "98d63eac09772cb074b8a1c3f1ac19401fd5524003c7f2eb53fe05cbea8bdabf"
   },
   "milestones": {
     "H0": {
       "title": "Estado y referencias reproducibles",
       "goal": "Reconciliar código, catálogo y tareas; registrar las pruebas relevantes con revisión, datos, binario y argumentos.",
       "criteria": "Fallos de ejecución, diferencias históricas y regresiones nuevas separados; referencia histórica sin sobrescribir.",
+      "checklist": [
+        {
+          "item": "Roadmap, catálogo y código reconciliados; cada función asignada a un hito con tratamiento y orden de dependencias",
+          "done": true,
+          "evidence": [
+            "README.md#hitos-de-ejecución-y-criterios-de-cierre",
+            "README.md#funciones-por-hito",
+            "commit 6f5bee0",
+            "python3 tools/function_catalog.py check"
+          ]
+        },
+        {
+          "item": "Suites ejecutadas y registradas con revisión, datos, binario, compilador y argumentos identificados",
+          "done": true,
+          "evidence": [
+            "tests/baselines/h0-6f5bee0.json",
+            "tools/test_baseline.py record",
+            "ctest -j4 completo (66 pruebas, IGN_VERIFY_ORIGINAL=ON) sobre un worktree limpio en 6f5bee0; AppleClang 21, Release",
+            "README.md#referencia-h0-y-detección-de-regresiones"
+          ]
+        },
+        {
+          "item": "Fallos de ejecución, diferencias históricas y regresiones separados en el registro",
+          "done": true,
+          "evidence": [
+            "tests/baselines/h0-6f5bee0.json#summary: 63/66; ejecución 0, histórico 1 (regress), regresión 2",
+            "regresión: function_catalog y port_dashboard; 6f5bee0 publicó estados sin refrescar la cobertura (corregido con disasm.py catalog --refresh, pendiente de commit)",
+            "ejecución detectada y corregida: 8 suites fallaban con rutas enlazadas (/tmp -> /private/tmp); ahora resuelven la ruta"
+          ]
+        },
+        {
+          "item": "Referencia histórica tests/expected.json sin sobrescribir y con su procedencia verificada",
+          "done": true,
+          "evidence": [
+            "tests/expected.json sin cambios desde 3213fd5 (sha256 28a4ac87…)",
+            "76bfca1 pasa 23/23 contra su propia versión; contra la actual 76bfca1 da 0/23 y 3213fd5 da 1/23 (16/23 sin imágenes): la generó una compilación no publicada",
+            "README.md#diagnóstico-de-regresiones-y-conducción-reproducible"
+          ]
+        },
+        {
+          "item": "Referencia actual versionada para detectar regresiones nuevas en ejecuciones posteriores",
+          "done": true,
+          "evidence": [
+            "tests/baselines/h0-6f5bee0.json#regress.current",
+            "tools/test_baseline.py compare",
+            "tests/test_baseline.py"
+          ]
+        }
+      ],
       "depends_on": [],
       "entry_points": [],
       "deferred": []
@@ -68,6 +117,28 @@
       "title": "Referencia integrada DOS",
       "goal": "Captura corta y reproducible del original en carrera con mapeo LE, estado inicial, entradas y cadencia de tick confirmados.",
       "criteria": "Informe que localiza la primera divergencia entre port y original en los campos comunes.",
+      "checklist": [
+        {
+          "item": "MAINDOS.EXE llega a una carrera bajo DOSBox-X con depurador",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Mapeo de direcciones LE, índice del coche y frontera/cadencia de tick confirmados en el proceso real",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Captura corta conservada con estado inicial, entradas y script de conversión",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Informe de primera divergencia frente al port en los campos comunes",
+          "done": false,
+          "evidence": []
+        }
+      ],
       "depends_on": [
         "H0"
       ],
@@ -78,6 +149,28 @@
       "title": "Cadena de simulación fiel",
       "goal": "Controles, dispatcher de coches, física, IA y consultas de pista portados por bloques y comparables con el original.",
       "criteria": "Escenarios integrados con campos y tolerancias declarados sin divergencias inexplicadas; desviaciones documentadas.",
+      "checklist": [
+        {
+          "item": "Secuencia de rand compartida reproducida o registrada por tick (IA, efectos, HUD, render)",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Campos y tolerancias de cada escenario integrado declarados antes de comparar",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Escenarios integrados sin divergencias inexplicadas frente a la referencia de H1",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Desviaciones deliberadas de la simulación documentadas y excluidas de la afirmación de equivalencia",
+          "done": false,
+          "evidence": []
+        }
+      ],
       "depends_on": [
         "H0"
       ],
@@ -126,6 +219,23 @@
       "title": "Carreras completas en siete pistas",
       "goal": "Creación del mundo, objetos móviles, destrucción/reaparición, eliminación y clasificación para terminar carreras de tres vueltas.",
       "criteria": "Llegada o eliminación de cada participante en un límite de ticks por escenario, sin NaN ni atascos sin diagnosticar, en las siete pistas.",
+      "checklist": [
+        {
+          "item": "Escenarios deterministas de tres vueltas en las siete pistas, sin rivales y con siete, con límite de ticks",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Casos específicos: bifurcaciones, barranco de USA, muros, peligros y destrucción/reaparición",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Sin NaN/Inf ni atascos sin diagnosticar; llegada o eliminación de cada participante",
+          "done": false,
+          "evidence": []
+        }
+      ],
       "depends_on": [
         "H2"
       ],
@@ -209,6 +319,28 @@
       "title": "Ciclo completo de un jugador",
       "goal": "Menú, carrera, pausa, resultados, campeonato, persistencia, HUD, audio y opciones aplicadas.",
       "criteria": "Recorrido menú → carrera → resultados → siguiente pista → fin del campeonato validado, con persistencia tras relanzar.",
+      "checklist": [
+        {
+          "item": "Recorrido menú → carrera → pausa/continuar/reinicio/salida → resultados → siguiente pista → fin de campeonato → menú",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Puntos, empates, reintentos, desbloqueos, récords y fantasma cubiertos por pruebas",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Persistencia comprobada tras relanzar con carpeta de usuario aislada",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Opciones del menú aplicadas verificadas o limitación declarada",
+          "done": false,
+          "evidence": []
+        }
+      ],
       "depends_on": [
         "H3"
       ],
@@ -274,6 +406,18 @@
       "title": "Fidelidad visual",
       "goal": "Motor Lisa 2, rasterizado, sombreado TAB/PAN/SHD, efectos y animaciones visuales equivalentes al original.",
       "criteria": "Escenas con cámara, tick, resolución y configuración fijos comparadas; igualdad de píxel donde se afirme equivalencia.",
+      "checklist": [
+        {
+          "item": "Escenas de referencia con cámara, tick, resolución y configuración fijos",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Igualdad de píxel donde se afirme equivalencia y desviaciones visuales explícitas en el resto",
+          "done": false,
+          "evidence": []
+        }
+      ],
       "depends_on": [
         "H3"
       ],
@@ -286,6 +430,23 @@
       "title": "Entrega y ampliaciones",
       "goal": "Bundle macOS, Windows, pantalla partida, mandos, iOS, red y herramientas de diagnóstico.",
       "criteria": "Cada ampliación con su propia prueba; el bundle funciona fuera de la ruta de desarrollo sin modificar la copia del juego.",
+      "checklist": [
+        {
+          "item": "Bundle macOS con selección de datos, probado fuera de la ruta de desarrollo",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Build y pruebas de Windows en CI",
+          "done": false,
+          "evidence": []
+        },
+        {
+          "item": "Pantalla partida, mandos, iOS y red, cada uno con su propia prueba",
+          "done": false,
+          "evidence": []
+        }
+      ],
       "depends_on": [
         "H4"
       ],
@@ -4860,9 +5021,18 @@
       "notes": [
         "ign_race_config_decode/load: original BTZ projection and validation; frontend BTZ feeds run_game/configure and saved grid drives spawning. Included in 2056 race-management original cases. Partial: native I/O, participant/input adaptation, two humans and presentation remain outside proof; headless CLI keeps explicit defaults/overrides."
       ],
-      "implementation": ["src/game/race.c", "src/game/race.h", "src/platform/main.c"],
-      "tests": ["tests/race_management.c", "tests/race_management_original.py"],
-      "references": ["docs/formats.md#conduccion-y-carrera-kernels-auxiliares"],
+      "implementation": [
+        "src/game/race.c",
+        "src/game/race.h",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/race_management.c",
+        "tests/race_management_original.py"
+      ],
+      "references": [
+        "docs/formats.md#conduccion-y-carrera-kernels-auxiliares"
+      ],
       "review": [],
       "classification": {
         "confidence": "documented",
@@ -5853,8 +6023,15 @@
         "full function executed by timing oracle; clears car+3a4, retains +3ac/+3d4; other statistics excluded",
         "ign_race_reset_times now implements full saved-record/statistics reset as well as per-car clock reset, wired at session initialization and countdown completion. Race-management oracle executes the full entry; historical timing note above describes the earlier bounded proof."
       ],
-      "implementation": ["src/game/race.c", "src/platform/main.c"],
-      "tests": ["tests/race_management.c", "tests/race_management_original.py", "tests/race_time_original.py"],
+      "implementation": [
+        "src/game/race.c",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/race_management.c",
+        "tests/race_management_original.py",
+        "tests/race_time_original.py"
+      ],
       "references": [],
       "review": [],
       "classification": {
@@ -5958,8 +6135,15 @@
       "notes": [
         "ign_race_reset/configure: management fields and selective resets, configured grid and original ranking mode. Wired through ign_race_init and frontend run_game configuration. Race-management original oracle verifies management writes; original allocation, audio, weather, renderer and input scratch are excluded."
       ],
-      "implementation": ["src/game/race.c", "src/game/race.h", "src/platform/main.c"],
-      "tests": ["tests/race_management.c", "tests/race_management_original.py"],
+      "implementation": [
+        "src/game/race.c",
+        "src/game/race.h",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/race_management.c",
+        "tests/race_management_original.py"
+      ],
       "references": [],
       "review": [],
       "classification": {
@@ -6397,9 +6581,18 @@
       "notes": [
         "Native distributed human/AI dispatch: ign_input_sample in run_game, tick_rivals and ai_control_tick; original disabled-input branch is not independently verified instruction-equivalent."
       ],
-      "implementation": ["src/platform/input.c", "src/platform/main.c", "src/game/ai.c"],
-      "tests": ["tests/input_backend.c", "tests/ai_schedule.c"],
-      "references": ["src/platform/input.md"],
+      "implementation": [
+        "src/platform/input.c",
+        "src/platform/main.c",
+        "src/game/ai.c"
+      ],
+      "tests": [
+        "tests/input_backend.c",
+        "tests/ai_schedule.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -6711,8 +6904,14 @@
         "mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), \"%s IS OUT\"; [0x1fed78]-- ; at 1 left, all finish",
         "ign_race_step management, end and camera transitions now checked in race-management original oracle and wired after progress in main. FX/audio/HUD deliveries remain excluded from full-routine equivalence; wrecks alone do not imply elimination."
       ],
-      "implementation": ["src/game/race.c", "src/platform/main.c"],
-      "tests": ["tests/race_management.c", "tests/race_management_original.py"],
+      "implementation": [
+        "src/game/race.c",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/race_management.c",
+        "tests/race_management_original.py"
+      ],
       "references": [],
       "review": [],
       "classification": {
@@ -9953,8 +10152,15 @@
       "notes": [
         "ign_race_rank/rank_score/position: original signed stable ranking, finish ties, starting grid and ghost overrides. Main ranks once per tick with configured section count; wreck/blow variation across all modes verified in 2056-case management oracle. Supplied rank bias is compared exactly; its upstream producer remains unresolved."
       ],
-      "implementation": ["src/game/race.c", "src/game/race.h", "src/platform/main.c"],
-      "tests": ["tests/race_management.c", "tests/race_management_original.py"],
+      "implementation": [
+        "src/game/race.c",
+        "src/game/race.h",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/race_management.c",
+        "tests/race_management_original.py"
+      ],
       "references": [],
       "review": [],
       "classification": {
@@ -10188,9 +10394,17 @@
       "notes": [
         "ign_input_sample + run_game: saved bindings, analog steering/pedals, buttons, turbo/rear/manual gears, hotplug and focus reset. SDL native adapter, not a proof of the complete 736-instruction dispatcher; original calibration dialogs, arbitrary remapping UI and two-player execution remain unsupported."
       ],
-      "implementation": ["src/platform/input.c", "src/platform/input.h", "src/platform/main.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "implementation": [
+        "src/platform/input.c",
+        "src/platform/input.h",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13405,10 +13619,19 @@
       "status": "partial",
       "instructions": 6,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["SDL direct event dispatch replaces callback use; original callback registration/reset API is not implemented."],
-      "implementation": ["src/platform/input.c", "src/platform/main.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "SDL direct event dispatch replaces callback use; original callback registration/reset API is not implemented."
+      ],
+      "implementation": [
+        "src/platform/input.c",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13431,10 +13654,19 @@
       "status": "native",
       "instructions": 47,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["ign_input_init/reset: lifecycle and input tables; SDL/OS repeat timing replaces DOS delay arguments."],
-      "implementation": ["src/platform/input.c", "src/platform/main.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "ign_input_init/reset: lifecycle and input tables; SDL/OS repeat timing replaces DOS delay arguments."
+      ],
+      "implementation": [
+        "src/platform/input.c",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13464,10 +13696,18 @@
       "status": "partial",
       "instructions": 92,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["ign_input_event/key_pressed/key_repeat: held, edge, repeat and text delivery; original timer arithmetic and callbacks excluded."],
-      "implementation": ["src/platform/input.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "ign_input_event/key_pressed/key_repeat: held, edge, repeat and text delivery; original timer arithmetic and callbacks excluded."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13495,10 +13735,18 @@
       "status": "native",
       "instructions": 4,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["ign_input_key_down: held-state lookup populated by SDL make/break events."],
-      "implementation": ["src/platform/input.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "ign_input_key_down: held-state lookup populated by SDL make/break events."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13525,10 +13773,18 @@
       "status": "native",
       "instructions": 12,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["ign_input_key_pressed: consumable initial-press latch."],
-      "implementation": ["src/platform/input.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "ign_input_key_pressed: consumable initial-press latch."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "unresolved",
@@ -13551,10 +13807,18 @@
       "status": "native",
       "instructions": 12,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["ign_input_key_repeat: consumable repeat latch; timing comes from SDL/OS, not the DOS timer."],
-      "implementation": ["src/platform/input.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "ign_input_key_repeat: consumable repeat latch; timing comes from SDL/OS, not the DOS timer."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "unresolved",
@@ -13577,10 +13841,19 @@
       "status": "partial",
       "instructions": 10,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["Direct frontend/host event delivery; original callback pointer invocation and ABI intentionally absent."],
-      "implementation": ["src/platform/input.c", "src/platform/main.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "Direct frontend/host event delivery; original callback pointer invocation and ABI intentionally absent."
+      ],
+      "implementation": [
+        "src/platform/input.c",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "unresolved",
@@ -13603,10 +13876,18 @@
       "status": "partial",
       "instructions": 14,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["ign_input_event text branch: bounded uppercase ASCII history from SDL text; DOS character translation is not reproduced."],
-      "implementation": ["src/platform/input.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "ign_input_event text branch: bounded uppercase ASCII history from SDL text; DOS character translation is not reproduced."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "unresolved",
@@ -13664,10 +13945,18 @@
       "status": "native",
       "instructions": 43,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["ign_input_init: SDL event initialization replaces keyboard IRQ installation."],
-      "implementation": ["src/platform/input.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "ign_input_init: SDL event initialization replaces keyboard IRQ installation."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13697,10 +13986,18 @@
       "status": "native",
       "instructions": 19,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["ign_input_any_key: any-held query; anomalous original uninitialized recursive branch is not reproduced."],
-      "implementation": ["src/platform/input.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "ign_input_any_key: any-held query; anomalous original uninitialized recursive branch is not reproduced."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13724,10 +14021,19 @@
       "status": "native",
       "instructions": 70,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["ign_input_event/dos_scancode/read_key: make/break state, extended key identities and FIFO from SDL; not interrupt-byte emulation."],
-      "implementation": ["src/platform/input.c", "src/platform/main.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "ign_input_event/dos_scancode/read_key: make/break state, extended key identities and FIFO from SDL; not interrupt-byte emulation."
+      ],
+      "implementation": [
+        "src/platform/input.c",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13752,10 +14058,18 @@
       "status": "native",
       "instructions": 15,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": ["ign_input_shutdown: native input cleanup; no interrupt vector to restore."],
-      "implementation": ["src/platform/input.c"],
-      "tests": ["tests/input_backend.c"],
-      "references": ["src/platform/input.md"],
+      "notes": [
+        "ign_input_shutdown: native input cleanup; no interrupt vector to restore."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -19109,10 +19423,18 @@
       "status": "library",
       "instructions": 56,
       "roadmap": "phase1.controls.joystick-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Native replacement: ign_input_init/open_device initializes two SDL device slots. Historical library state retained; not a Watcom backend port."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -19135,10 +19457,18 @@
       "status": "library",
       "instructions": 43,
       "roadmap": "phase1.controls.joystick-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Native replacement: ign_input_event/sample collects axes and buttons from SDL events. Hardware timing arithmetic and interactive DOS calibration are not emulated."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -34652,10 +34982,18 @@
       "status": "library",
       "instructions": 96,
       "roadmap": "phase1.controls.joystick-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "SDL ign_input_event/axis/sample replaces port polling. Partial semantic adapter: RC timeout, factor-215 scaling and extra lookup semantics not reproduced. Complete family mapping and embedded-data candidates documented in input.md; historical library state preserved."
+      ],
+      "implementation": [
+        "src/platform/input.c"
+      ],
+      "tests": [
+        "tests/input_backend.c"
+      ],
+      "references": [
+        "src/platform/input.md"
+      ],
       "review": [],
       "classification": {
         "confidence": "inferred",

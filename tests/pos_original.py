@@ -118,7 +118,7 @@ def main():
         report.update(status="pass", fixture_sha256=hashlib.sha256(payload.encode()).hexdigest(),
                       runner_sha256=hashlib.sha256(args.runner.read_bytes()).hexdigest(),
                       visited_instructions=len(oracle.visited),
-                      sources={str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+                      sources={str(path.resolve().relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                                for path in (ROOT / "src/game/pos.c", ROOT / "src/game/pos.h",
                                             ROOT / "tests/pos.c", Path(__file__))})
         print(f"pos_original: {report['cases']} cases / {report['bytes_compared']} bytes, exact complete buffers")

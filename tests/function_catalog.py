@@ -258,7 +258,7 @@ class MilestonePlanTests(unittest.TestCase):
 
     def test_pins_must_match_the_first_requiring_milestone(self):
         function(self.catalog, "0004c2d8")["plan"]["milestone"] = "H4"
-        with self.assertRaisesRegex(ValueError, "0004c2d8 sub_0004c2d8: homed in H4 but required by H2"):
+        with self.assertRaisesRegex(ValueError, "0004c2d8: pinned to H4 but first required by H2"):
             catalog_tools.check_plan(self.catalog)
         catalog = catalog_tools.load_catalog()
         self.assertTrue(self.info["00058c1c"]["done"])
@@ -288,6 +288,27 @@ class MilestonePlanTests(unittest.TestCase):
                 mutate(data)
                 with self.assertRaises(ValueError):
                     catalog_tools.validate_catalog(data)
+
+    def test_milestone_status_is_derived_from_checklist_functions_and_dependencies(self):
+        rows = {r["id"]: r for r in catalog_tools.milestone_rows(self.catalog, self.report)}
+        self.assertEqual(rows["H0"]["status"], "closed")
+        self.assertEqual(rows["H1"]["status"], "open")
+        self.assertEqual(rows["H2"]["status"], "in-progress")  # functions done, closure criteria not met
+        h1 = self.catalog["milestones"]["H1"]
+        for item in h1["checklist"]:
+            item.update(done=True, evidence=["test"])
+        self.assertEqual({r["id"]: r for r in catalog_tools.milestone_rows(self.catalog)}["H1"]["status"], "closed")
+        self.catalog["milestones"]["H0"]["checklist"][0]["done"] = False
+        rows = {r["id"]: r for r in catalog_tools.milestone_rows(self.catalog)}
+        self.assertEqual((rows["H0"]["status"], rows["H1"]["status"]), ("in-progress", "in-progress"))
+
+    def test_done_checklist_items_require_evidence(self):
+        for mutate in (lambda item: item.update(evidence=[]), lambda item: item.update(done="yes"),
+                       lambda item: item.pop("evidence")):
+            data = copy.deepcopy(self.catalog)
+            mutate(data["milestones"]["H0"]["checklist"][0])
+            with self.assertRaisesRegex(ValueError, "checklist"):
+                catalog_tools.validate_catalog(data)
 
     def test_readme_milestone_table_matches_the_catalog(self):
         text = (ROOT / "README.md").read_text(encoding="utf-8")

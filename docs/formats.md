@@ -9,6 +9,29 @@ equivalencia integral de la sección del dashboard. `tests/driving_original.py` 
 con CW `0x127f`: **1 014 casos**, sin sustituir callees de los kernels; `tests/driving_kernels.c`
 es el runner de producción y comprueba también los límites nativos.
 
+### Configuracion, clasificacion y entrada nativa
+
+`tests/race_management_original.py` añade **2 056 casos** sin diferencias para la proyección BTZ
+(`0x2293c`), los resets (`0x2a410`, `0x2a97c`), la clasificación (`0x4c2d8`) y la gestión de
+eliminación (`0x2de30`). `ign_race_config_decode` alimenta `run_game` desde el frontend;
+`ign_race_configure` aplica configuración y parrilla guardadas. El reset completo de tiempos
+se ejecuta al inicializar la sesión y al terminar el countdown. El CLI headless pasa configuración
+nula para conservar sus valores explícitos. `ign_race_rank` ordena una vez por tick con el número
+real de secciones, empates estables y excepciones de parrilla/fantasma; un wreck por sí solo no
+equivale a eliminación. Permanece pendiente el productor del rank bias. Configuración/reset
+general y eliminación se mantienen parciales donde excluyen asignación, scratch de entrada,
+audio/FX, segundo humano y presentación; no se promueve el wrapper entero por verificar sus kernels.
+
+`src/platform/input.c` sustituye teclado/gamepad/joystick por SDL3; `main.c` lo conecta tanto al
+frontend como a la conducción. Incluye bindings guardados, estados held/pressed/repeat, FIFO,
+historial de texto ASCII acotado, foco, conexión/desconexión, ejes, pedales y cambio manual.
+`tests/input_backend.c` usa eventos sintéticos y dispositivos virtuales SDL, sin hardware físico.
+El [mapa por dirección](../src/platform/input.md) documenta también las 24 candidatas de biblioteca
+del joystick: no son ports literales del driver DOS. Se conservan esos estados `library` para
+no alterar el denominador histórico; no se afirman equivalentes los diálogos de calibración,
+la ABI de callbacks, los timeouts RC ni el factor de escala 215. Las entradas `0x7cec7`,
+`0x7cf31` y `0x7cf9b` son DWORDs embebidos, no funciones ejecutables.
+
 | Original | Implementación y alcance |
 |---|---|
 | `0x1dcfc` | `ign_track_road_boundary`: primeras 50 caras con tipo <40 excepto terminación 5/6/7; primeros 50 vértices usados una o dos veces. Sumas X/Z módulo 2^32, posición PLC +25600 antes de promediar, división signed truncada. Devuelve las listas ordenadas y el centro; 120 replays completos con mallas vacías, topes y overflow. No se inventa un consumidor para los centroides globales que el original copia sin volver a leer. |

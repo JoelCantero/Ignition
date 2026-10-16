@@ -5,14 +5,13 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from function_catalog import check_plan, milestone_rows, parse_catalog, summarize
 
-SOURCES = ("docs/functions.json", "README.md")
+SOURCES = ("docs/functions.json",)
 
 
 def build_data(root=ROOT):
@@ -33,20 +32,10 @@ def build_data(root=ROOT):
          **{key: s[key] for key in ("classification", "notes", "implementation", "tests", "references", "review", "aliases")}}
         for s in catalog["symbols"] if s["kind"] == "function"
     ]
-    milestones = [{**row, **{k: catalog["milestones"][row["id"]][k] for k in ("goal", "criteria", "depends_on", "deferred")}}
+    milestones = [{**row, **{k: catalog["milestones"][row["id"]][k]
+                             for k in ("goal", "criteria", "checklist", "depends_on", "deferred")}}
                   for row in milestone_rows(catalog, plan)]
 
-    phases = []
-    roadmap = sources["README.md"].partition("## Roadmap\n")[2].partition("\n## ")[0]
-    for line in roadmap.splitlines():
-        heading = re.match(r"### Fase (\d+) — (.+)", line)
-        task = re.match(r"- \[([ x~])\] (.+)", line)
-        if heading:
-            phases.append({"number": int(heading[1]), "title": heading[2], "done": 0, "partial": 0, "pending": 0})
-        elif task and phases:
-            phases[-1][{"x": "done", "~": "partial", " ": "pending"}[task[1]]] += 1
-    if not phases:
-        raise ValueError("No roadmap phases found in README.md")
     digest = hashlib.sha256()
     for name, text in sources.items():
         digest.update(name.encode("utf-8") + b"\0" + text.encode("utf-8") + b"\0")
@@ -66,7 +55,6 @@ def build_data(root=ROOT):
         },
         "subsystems": catalog["subsystems"],
         "functions": rows,
-        "phases": phases,
         "milestones": milestones,
         "planSummary": {"unreferenced": len(plan["unreferenced"]), "unplanned": len(plan["unplanned"])},
     }

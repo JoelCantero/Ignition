@@ -22,7 +22,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(data["metrics"]["instructions"], 109799)
         self.assertEqual(data["metrics"]["mapped"], len(game))
         self.assertEqual(data["metrics"]["mappedAll"], len(data["functions"]))
-        self.assertEqual({phase["number"] for phase in data["phases"]}, set(range(10)))
+        self.assertNotIn("phases", data)  # area tasks stay in the README; the dashboard shows milestones only
         # Per-function instruction totals overlap and must not supply unique coverage.
         self.assertGreater(sum(row["instructions"] for row in game), data["metrics"]["instructions"])
 
@@ -49,6 +49,8 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(row["plan"]["order"] is None, row["plan"]["milestone"] is None)
         for milestone in data["milestones"]:
             self.assertEqual(milestone["done"] + milestone["pending"], milestone["new"])
+            self.assertIn(milestone["status"], ("open", "in-progress", "closed"))
+            self.assertEqual(milestone["checklist_done"], sum(i["done"] for i in milestone["checklist"]))
         html = dashboard.render(data)
         for marker in ('id="milestones"', 'id="milestone"', 'id="treatment"', 'id="pending-only"'):
             self.assertIn(marker, html)

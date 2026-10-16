@@ -246,7 +246,7 @@ def verify(executable, runner):
         "runner_sha256": hashlib.sha256(runner.read_bytes()).hexdigest(),
         "fixture_input_sha256": hashlib.sha256(("\n".join(inputs) + "\n").encode()).hexdigest(),
         "source_sha256": {
-            str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+            str(path.resolve().relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in [ROOT / "src/game/physics.c", ROOT / "src/game/physics.h",
                          ROOT / "tests/body_step.c", Path(__file__),
                          ROOT / "tools/le2elf.py", ROOT / "tests/requirements-original.txt"]

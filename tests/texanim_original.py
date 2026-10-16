@@ -248,7 +248,7 @@ def main():
         if not all(oracle.calls.values()):
             raise ValueError(f"Missing original helper executions: {oracle.calls}")
         report.update(status="pass", calls=oracle.calls, fixture_sha256=hashlib.sha256(payload.encode()).hexdigest(),
-                      sources={str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+                      sources={str(path.resolve().relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                                for path in (ROOT / "src/game/pos.c", ROOT / "src/game/pos.h",
                                             ROOT / "tests/texanim.c", Path(__file__))})
         print(f"texanim_original: {len(cases)} cases, nine original entries exercised, exact descriptors and face bytes")

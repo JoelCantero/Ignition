@@ -17,7 +17,7 @@ import sys
 
 import regress
 
-ROOT = Path(regress.ROOT)
+ROOT = Path(regress.ROOT).resolve()
 sys.path.insert(0, str(ROOT / "tools"))
 from trace_compare import compare_rows, load_text
 
@@ -77,7 +77,7 @@ def main():
     try:
         binaries = [args.binary.resolve(), (args.reference_binary or args.binary).resolve()]
         report["binaries"] = [{"path": str(b), "sha256": regress.sha256(b)} for b in binaries]
-        report["sources"] = {p.relative_to(ROOT).as_posix(): regress.sha256(p) for p in sorted(
+        report["sources"] = {p.resolve().relative_to(ROOT).as_posix(): regress.sha256(p) for p in sorted(
             list((ROOT / "src").rglob("*.c")) + list((ROOT / "src").rglob("*.h")) +
             [ROOT / "CMakeLists.txt", Path(__file__), ROOT / "tests/regress.py", ROOT / "tools/trace_compare.py"])}
         report["data"] = data_manifest(args.data)

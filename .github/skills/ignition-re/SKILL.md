@@ -108,6 +108,9 @@ IGN_TRACE=1 ./build/ignition BRAZIL --sim 6 turbo --shot /tmp/x.ppm 2>&1 | grep 
 - `IGN_TRACE=1` prints per-tick state (position, height, drive/grip limit, turbo, km/h) and track statistics.
 - `build/ppm2png.py` assumes 320×200; view the PNG to check rendering changes.
 - Regression signal: no `nan`, laps similar to before, cars on asphalt at the grid.
+- Full regression check: `(cd build && ctest -j4 --output-junit ctest-junit.xml)` then
+  `python3 tools/test_baseline.py compare --build build --baseline tests/baselines/h0-6f5bee0.json` (H0 reference;
+  `regress` against `tests/expected.json` is a historical snapshot that is expected to fail and must not be rewritten).
 
 ## Pitfalls
 

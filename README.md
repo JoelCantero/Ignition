@@ -50,8 +50,8 @@ integral de una carrera DOS, el sombreado original y el multijugador.
 |---|---|
 | Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 446 clasificadas como runtime) |
 | Instrucciones únicas desensambladas | **128 832** (19 033 de runtime/libc/DOS/4G) |
-| Código del juego marcado como portado/verificado | **50 134 de 109 799 instrucciones (45,7 %)**; **212 de 666 funciones (31,8 %)** |
-| Código del juego marcado como parcial | **14 089 instrucciones en 29 funciones**; excluido del numerador portado |
+| Código del juego marcado como portado/verificado | **50 469 de 109 799 instrucciones (46,0 %)**; **214 de 666 funciones (32,1 %)** |
+| Código del juego marcado como parcial | **15 392 instrucciones en 37 funciones**; excluido del numerador portado |
 | Funciones de juego vinculadas explícitamente a una tarea del roadmap | **666 de 666 (100,0 %)**; 343 documentadas, 293 inferidas y 30 por resolver; no es cobertura de portado |
 | Formatos de datos propios descifrados | 15 de 21 (TRI, POS y TAB solo en parte) |
 | Código del port | ≈ 13 900 líneas de C (`src/`, sin contar las tablas generadas `menu_data.c`) |
@@ -68,13 +68,18 @@ es cobertura del desensamblado, no del port; la clasificación runtime también 
 La sección **Conducción y carrera** incluye ahora helpers de signo/normalización, apoyo y avance
 antiguos, centro de bordes de carretera y correcciones de balanceo y grabación del fantasma,
 con **1 014 casos contra instrucciones LE originales**.
+La gestión de configuración, reinicios, clasificación y eliminación añade **2 056 casos**.
+El frontend usa la configuración y parrilla guardadas; el modo headless conserva sus overrides.
+La entrada de teclado/gamepad/joystick tiene backend SDL3 con hotplug, pérdida de foco, pedales
+analógicos y marchas manuales ([mapa de sustituciones](src/platform/input.md)).
 Los helpers sin llamador DOS no se insertan artificialmente en la física activa. El balanceo del
 modelo 7, varios wrappers de entrada/efectos y la equivalencia de una carrera completa siguen
 parciales; el catálogo no los presenta como terminados.
 Detalle: [kernels auxiliares](docs/formats.md#conduccion-y-carrera-kernels-auxiliares).
 
 Abrir [`docs/port-dashboard.html`](docs/port-dashboard.html) en el navegador: funciona sin servidor ni dependencias
-externas. Muestra cobertura de instrucciones únicas, estados por función, sistemas, roadmap y un inventario con
+externas. Muestra cobertura de instrucciones únicas, estados por función, sistemas, el roadmap por hitos (estado
+calculado, criterios de cierre con evidencia y funciones pendientes en orden) y un inventario con
 búsqueda y filtros. Las fichas desplegables muestran evidencia individual, certeza de la clasificación,
 notas, implementación y pruebas documentadas. Es una instantánea del catálogo, no un porcentaje de fidelidad
 o de juego terminado.
@@ -350,10 +355,14 @@ efectos de sonido y sprites (portados sin oracle). Véase
 
 ### Diagnóstico de regresiones y conducción reproducible
 
-Se reconstruyó aisladamente la revisión `76bfca1`, que pasa **23/23** contra la instantánea histórica de
-`tests/expected.json`. La revisión `3213fd5e` y su compilación limpia Release con AppleClang 21 dan
-**1/23** con imágenes y **16/23** sin imágenes: **7 casos difieren en estado de carrera, 22 en imagen y
-ninguno falla al ejecutar**. Por tanto, no era un problema de objetos de compilación antiguos.
+Se reconstruyó aisladamente la revisión `76bfca1`, que pasa **23/23** contra **su propia versión** de
+`tests/expected.json` (`git show 76bfca1:tests/expected.json`). El fichero actual se regeneró en `3213fd5`:
+cambiaron los 23 casos y la cámara de parrilla pasó de Y=20 a Y=−165. Ninguna revisión publicada lo reproduce:
+`76bfca1` da **0/23** contra él, y la propia `3213fd5`, con una compilación limpia Release y AppleClang 21, da
+**1/23** con imágenes y **16/23** sin imágenes (**7 casos difieren en estado de carrera, 22 en imagen y
+ninguno falla al ejecutar**). Lo generó una compilación intermedia que no se publicó; se conserva sin cambios
+como referencia histórica, pero la única instantánea histórica reproducible es la de `76bfca1`.
+Por tanto, no era un problema de objetos de compilación antiguos.
 Los casos con diferencias de estado son USA/CANADA/AUSTRIA con rivales y CARIB/JAPAN tanto solo como con rivales.
 
 Las siete trazas de 40 s con piloto automático y sin rivales ya difieren en altura/suelo tras el primer tick
@@ -388,6 +397,33 @@ Los tests sintéticos `verification_tools` comprueban también controles negativ
 las trazas no modifica el estado final ni la imagen. Con los oracles originales habilitados,
 pasan los 10 objetivos no históricos; solo falla la regresión histórica.
 Los informes y capturas se guardan en el directorio de compilación; no contienen una carrera DOS de referencia.
+
+### Referencia H0 y detección de regresiones
+
+[`tests/baselines/h0-6f5bee0.json`](tests/baselines/h0-6f5bee0.json) registra la suite completa (66 pruebas,
+`IGN_VERIFY_ORIGINAL=ON`, `ctest -j4`) ejecutada sobre un worktree limpio del commit `6f5bee0`.
+Incluye la procedencia (Release, AppleClang 21, plataforma e intérprete), los hashes del binario,
+de `MAINDOS.EXE` y de los 314 ficheros de datos, el resultado de cada prueba y las salidas actuales de los 23
+casos de `regress`. Resultado: **63/66**. Los fallos se clasifican así:
+
+| Clase | Pruebas | Explicación |
+|---|---|---|
+| Ejecución | ninguna | Antes, 8 suites fallaban sin veredicto si el checkout estaba bajo un enlace (`/tmp` → `/private/tmp`), porque comparaban rutas sin resolver; ya está corregido. |
+| Histórica | `regress` | 0/23 contra `tests/expected.json`: 22 casos difieren en estado y 23 en imagen, sin fallos de ejecución. |
+| Regresión | `function_catalog`, `port_dashboard` | `6f5bee0` publicó estados del catálogo sin refrescar la cobertura; corregido con `disasm.py catalog --refresh`, pendiente de commit. |
+
+Las regresiones nuevas se miden contra este registro, no contra la instantánea histórica:
+
+```sh
+cmake -S . -B build -DIGN_VERIFY_ORIGINAL=ON && cmake --build build
+(cd build && ctest -j4 --timeout 3600 --output-junit ctest-junit.xml)
+python3 tools/test_baseline.py compare --build build --baseline tests/baselines/h0-6f5bee0.json
+python3 tools/test_baseline.py record --build build -o tests/baselines/NOMBRE.json   # nueva referencia (árbol limpio)
+```
+
+`compare` informa de las pruebas que pasaban y ahora fallan, y de cualquier cambio de estado o de imagen en los
+casos de `regress`. Un cambio deliberado de comportamiento se acepta registrando una referencia nueva desde un
+commit limpio, nunca reescribiendo `tests/expected.json`.
 
 **Esto establece determinismo del port en esos escenarios, no equivalencia con el juego DOS ni ausencia de
 atascos o errores de conducción.** La regresión histórica sigue fallando de forma visible.
@@ -647,14 +683,14 @@ Las tablas de este README y el dashboard son vistas derivadas; se edita una sola
 
 | Estado | Funciones | Interpretación |
 |---|---:|---|
-| `unknown` | 333 | Sin identificación fiable; requiere análisis |
-| `identified` | 44 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
+| `unknown` | 317 | Sin identificación fiable; requiere análisis |
+| `identified` | 42 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
 | `understood` | 2 | Comportamiento entendido, todavía no implementado |
 | `port-pending` | 0 | Pendiente explícita y priorizada (ninguna: `car_ground_contact` y `collisions_pass` ya están portadas) |
-| `partial` | 29 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
+| `partial` | 37 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
 | `ported` | 150 | Implementada en el port, sin afirmar verificación completa |
-| `verified` | 62 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
-| `native` | 46 | Bucle/temporizador (`0x10010`–`0x1034c`) → SDL; busy, play y stop de CD → reproducción OGG |
+| `verified` | 64 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
+| `native` | 54 | Bucle/temporizador (`0x10010`–`0x1034c`) → SDL; busy, play y stop de CD → reproducción OGG |
 | `library` | 446 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
 
 ### Catálogo único de funciones
@@ -952,7 +988,9 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    recalcula con la posición actual del coche (el port dibuja más deprisa que las actualizaciones de la cámara). La
    media de ángulos de tramo con `car+0x36c == 3` no está portada. Sin ventana la carrera empieza directamente salvo
    con `--countdown` (entonces se dibuja el semáforo del HUD).
-6. **Posiciones**: la clasificación (`ign_race_position`) es propia; el HUD (`0x4a320`, portado) solo la muestra.
+6. **Posiciones**: `ign_race_rank`/`ign_race_position` usan el kernel original `0x4c2d8`,
+   con orden estable, empates de llegada, parrilla y excepciones del fantasma contrastadas con bytes LE.
+   Sigue sin reconstruirse el productor del sesgo de clasificación suministrado al kernel.
 7. **Dificultad**: `[0x1fedd8]` se fija con `--difficulty` (agarre trasero, índice de velocidad, modelos y bono de par
    de la IA).
 8. **Efectos**: los sprites se ordenan de lejos a cerca como en el original, pero además se prueban contra el z-buffer
@@ -1040,15 +1078,15 @@ y cargadores de formatos), `native` (sustituida por SDL3/libc: DOS/4G, VESA, dri
 estados. Tabla generada por `python3 tools/function_catalog.py sync-readme`:
 
 <!-- milestones:begin -->
-| Hito | Requeridas (primera vez) | Hechas | Pendientes: port / equiv. / nativo | Instr. pendientes (suma por función) | Siguientes en orden de dependencias |
-|---|---|---|---|---|---|
-| **H0** Estado y referencias reproducibles | 0 (0) | 0 | 0: 0 / 0 / 0 | 0 | — |
-| **H1** Referencia integrada DOS | 0 (0) | 0 | 0: 0 / 0 / 0 | 0 | — |
-| **H2** Cadena de simulación fiel | 90 (90) | 56 | 34: 14 / 5 / 15 | 8 175 | `sub_00055f9c`, `car_throttle`, `car_turbo` |
-| **H3** Carreras completas en siete pistas | 104 (56) | 37 | 19: 11 / 7 / 1 | 3 482 | `load_msh`, `load_level`, `sub_00064db8` |
-| **H4** Ciclo completo de un jugador | 346 (205) | 98 | 107: 49 / 0 / 58 | 12 436 | `gfx_create_sprite`, `sub_00060dbc`, `sub_000558a0` |
-| **H5** Fidelidad visual | 259 (162) | 13 | 149: 6 / 141 / 2 | 151 473 | `alloc_ea3c4`, `sub_000825b8`, `sub_000739d3` |
-| **H6** Entrega y ampliaciones | 8 (1) | 0 | 1: 1 / 0 / 0 | 86 | `sub_000515f8` |
+| Hito | Estado | Criterios hechos | Funciones requeridas (primera vez) | Hechas | Pendientes: port / equiv. / nativo | Instr. pendientes (suma por función) | Siguientes en orden de dependencias |
+|---|---|---|---|---|---|---|---|
+| **H0** Estado y referencias reproducibles | **cerrado** | 5/5 | 0 (0) | 0 | 0: 0 / 0 / 0 | 0 | — |
+| **H1** Referencia integrada DOS | abierto | 0/4 | 0 (0) | 0 | 0: 0 / 0 / 0 | 0 | — |
+| **H2** Cadena de simulación fiel | en curso | 0/4 | 90 (90) | 59 | 31: 12 / 5 / 14 | 7 836 | `sub_00055f9c`, `car_throttle`, `car_turbo` |
+| **H3** Carreras completas en siete pistas | en curso | 0/3 | 104 (56) | 37 | 19: 11 / 7 / 1 | 3 482 | `load_msh`, `load_level`, `sub_00064db8` |
+| **H4** Ciclo completo de un jugador | en curso | 0/4 | 346 (205) | 98 | 107: 49 / 0 / 58 | 12 436 | `gfx_create_sprite`, `sub_00060dbc`, `sub_000558a0` |
+| **H5** Fidelidad visual | en curso | 0/2 | 259 (162) | 13 | 149: 6 / 141 / 2 | 151 473 | `alloc_ea3c4`, `sub_000825b8`, `sub_000739d3` |
+| **H6** Entrega y ampliaciones | abierto | 0/3 | 8 (1) | 0 | 1: 1 / 0 / 0 | 86 | `sub_000515f8` |
 <!-- milestones:end -->
 
 ```sh
@@ -1056,11 +1094,18 @@ python3 tools/function_catalog.py plan H2        # pendientes de H2, de las hoja
 python3 tools/function_catalog.py plan H2 --all  # incluye las ya satisfechas
 ```
 
-H0 y H1 son trabajo de verificación, no de porte. Hallazgos de la revisión manual, registrados como `plan` o
+El **estado** se calcula a partir de los criterios de cierre de `docs/functions.json`. Cada criterio está
+hecho o no, y los hechos requieren evidencia. Un hito está **cerrado** si se cumplen todos sus criterios, no le
+quedan funciones pendientes y sus dependencias están cerradas; **en curso** si ya tiene algún criterio o alguna
+función hechos; si no, **abierto**. H0 y H1 son trabajo de verificación, no de porte: no tener funciones
+pendientes no basta para cerrarlos.
+
+Hallazgos de la revisión manual, registrados como `plan` o
 aplazamiento con su justificación en el catálogo:
 
 - **La clasificación es parte de la simulación:** `0x4c2d8` escribe `car+0x39c` (posición), que leen `car_throttle`
-  y `car_update`. Pertenece a H2; el port usa hoy una clasificación propia (desviación 6).
+  y `car_update`. Pertenece a H2; el kernel original ya está contrastado e integrado; queda su productor
+  de sesgo de clasificación (desviación 6).
 - **`rand` es compartido:** IA, efectos de turbo, `0x4f874` en `car_input`, derrapes, clima, HUD y el calentamiento
   de mipmaps de `render_scene` (`0x58864`) consumen la misma secuencia. Comparar la IA de H2 contra DOS exige
   reproducir o registrar el estado de `rand` por tick, aunque esos consumidores pertenezcan a otros hitos.
@@ -1079,8 +1124,10 @@ aplazamiento con su justificación en el catálogo:
 El grafo no resuelve llamadas por registro: una función alcanzable solo por esa vía figuraría sin hito. Las tablas
 de punteros sí se tratan como raíces (`indirect_root`), de forma conservadora.
 
-**Siguiente objetivo operativo:** cerrar H0 y obtener la captura corta de H1; usar su primera divergencia para elegir
-el siguiente bloque de H2, no empezar un porte monolítico del rasterizador ni de `car_update`.
+**Siguiente objetivo operativo:** H0 está cerrado (véase [Referencia H0](#referencia-h0-y-detección-de-regresiones)).
+Toca obtener la captura corta de H1 y usar su primera divergencia para elegir el siguiente bloque de H2; no conviene
+empezar un porte monolítico del rasterizador ni de `car_update`. Los cambios posteriores se validan con
+`tools/test_baseline.py compare` contra la referencia de H0.
 Si la captura DOS queda bloqueada, registrar el intento y el obstáculo en `docs/dosbox-trace.md` y continuar con
 oráculos LE y pruebas de integración del port. Eso permite avanzar H2, pero no cerrar su equivalencia integrada.
 
@@ -1117,9 +1164,10 @@ miden su alcance aislado; las capturas DOS miden integración. No son pruebas in
       estado y tarea asociada. Estados detallados y definiciones en "Cobertura del desensamblado".
 - [x] **P2** Pruebas de regresión deterministas: `tests/regress.py` (23 casos: 7 pistas solo, con 3 rivales y con turbo,
       visor y cámara de parrilla; sección, fase, vuelta, NaN y hash del framebuffer; `ctest --test-dir build`).
-      Los resultados esperados son una instantánea histórica, reproducida por `76bfca1`, no del estado actual
-      (incluye el atasco de CANADA en la sección 22). `3213fd5e` pasa 1/23 con imagen y 16/23 sin ella;
-      el informe separa ejecución, estado e imagen y no oculta esos fallos.
+      Los resultados esperados son una instantánea histórica regenerada en `3213fd5` por una compilación no
+      publicada: ninguna revisión la reproduce (`76bfca1` 0/23 y `3213fd5` 1/23; `76bfca1` pasa 23/23 contra
+      su propia versión). Incluye el atasco de CANADA en la sección 22. No se reescribe: las regresiones se
+      miden contra `tests/baselines/` (véase H0). El informe separa ejecución, estado e imagen y no oculta esos fallos.
 - [x] **P2** Conducción sin rivales reproducible: `tests/solo_replay.py`, 21 escenarios / 56 448 ticks
       entre dos ejecuciones, 112 campos por fila y controles negativos. Prueba del port, no fidelidad DOS.
 - [x] **P2** Verificación de dirección, agarre y aritmética vertical contra bytes LE: `tests/car_original.py`,
@@ -1182,7 +1230,7 @@ miden su alcance aislado; las capturas DOS miden integración. No son pruebas in
       posterior del trazado en esta fase.
       La referencia histórica no se regenera: la comparación registrada entonces fue 0/23,
       con 22 diferencias de estado y 23 de imagen, sin fallos de ejecución; no es una medición nueva.
-- [x] **P1** Orden de carrera, posiciones, fin de carrera y número de vueltas por modo (`race.c`; 3 vueltas, modo 3 sin límite; clasificación propia: ver desviaciones).
+- [x] **P1** Orden de carrera, posiciones, fin de carrera y número de vueltas por modo (`race.c`; 3 vueltas, modo 3 sin límite; kernel original de clasificación verificado, productor del sesgo pendiente).
       Cruce/fases/registro de tiempos verificados por fragmentos: 3 024 casos / 4 112 pasos.
       Pendientes geometría de sondas, productor del gate, récords guardados y avisos.
 - [x] **P1** Evento de eliminación `0x2de30` (modo 3): el último coche de cada vuelta queda eliminado. Portada la lógica

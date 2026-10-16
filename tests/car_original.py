@@ -502,7 +502,7 @@ def verify(executable, runner):
                                     max_absolute_error=maxima[mode]) for mode in FIELDS},
                 runner_sha256=hashlib.sha256(runner.read_bytes()).hexdigest(),
                 fixture_input_sha256=hashlib.sha256(inputs.encode()).hexdigest(),
-                source_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+                source_sha256={str(p.resolve().relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                                for p in (ROOT / "src/game/car.c", ROOT / "src/game/car.h",
                                          ROOT / "src/game/physics.c", ROOT / "tests/car_kernels.c",
                                          ROOT / "tests/physics_original.py", ROOT / "tools/le2elf.py", Path(__file__))},

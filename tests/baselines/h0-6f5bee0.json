@@ -1,0 +1,971 @@
+{
+  "label": "H0 6f5bee0",
+  "provenance": {
+    "binary_sha256": "871e1073bee074124004feb39de958e3731168ba6aafbae6d565e4d2e3c306cb",
+    "build_type": "Release",
+    "commit": "6f5bee01533e26322655bb2736a02bf2f0a3af35",
+    "compiler": "AppleClang 21.0.0.21000334",
+    "ctest_arguments": "-j4 --timeout 3600 --output-junit ctest-junit.xml",
+    "game_data": {
+      "files": 314,
+      "sha256": "7818ad54764d4dccb706f7f3eb237aac9bf13972da43e2c8fcabc2f0d5cb5c48"
+    },
+    "options": {
+      "IGN_VERIFY_ORIGINAL": "ON"
+    },
+    "original_sha256": "179c654ba65281f08bbcda2b5943ab9f35c309ec718600f81104644d22db948c",
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "python": "/Users/joel/Repositories/Ignition/.venv/bin/python",
+    "tree_clean": true
+  },
+  "regress": {
+    "current": {
+      "AUSTRIA 3 rivals 40s": {
+        "image": "3270c1d20262a9bff98b5e8b4da087b5",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            120,
+            206,
+            2,
+            0
+          ],
+          [
+            117,
+            0,
+            2,
+            0
+          ],
+          [
+            97,
+            0,
+            1,
+            0
+          ],
+          [
+            112,
+            0,
+            2,
+            0
+          ]
+        ]
+      },
+      "AUSTRIA solo 40s": {
+        "image": "79df2683ab410c981bcaf9dd20c34338",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            111,
+            206,
+            2,
+            0
+          ]
+        ]
+      },
+      "AUSTRIA turbo 8s": {
+        "image": "eeaa5e7631179d4688e59163493dfe75",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            31,
+            206,
+            0,
+            0
+          ]
+        ]
+      },
+      "BRAZIL 3 rivals 40s": {
+        "image": "f02b58d0abf2c64ddf0d2e9278f4b801",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            119,
+            208,
+            2,
+            0
+          ],
+          [
+            105,
+            0,
+            2,
+            0
+          ],
+          [
+            106,
+            0,
+            2,
+            0
+          ],
+          [
+            108,
+            0,
+            2,
+            0
+          ]
+        ]
+      },
+      "BRAZIL solo 40s": {
+        "image": "4e7233203e25c043c925e0c12b3afdb4",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            121,
+            208,
+            2,
+            0
+          ]
+        ]
+      },
+      "BRAZIL turbo 8s": {
+        "image": "efb0fba0e9532752659177944edd5a5b",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            22,
+            208,
+            0,
+            0
+          ]
+        ]
+      },
+      "CANADA 3 rivals 40s": {
+        "image": "f0071cf1cd6808ca9224dc295ea4bb8f",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            126,
+            179,
+            2,
+            0
+          ],
+          [
+            127,
+            0,
+            2,
+            0
+          ],
+          [
+            123,
+            0,
+            2,
+            0
+          ],
+          [
+            118,
+            0,
+            2,
+            0
+          ]
+        ]
+      },
+      "CANADA solo 40s": {
+        "image": "89d4660a976c524ec4b399c3e613a14f",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            139,
+            179,
+            3,
+            0
+          ]
+        ]
+      },
+      "CANADA turbo 8s": {
+        "image": "f8195d6fb49ad6baa780e92ec9d5b5ee",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            10,
+            179,
+            0,
+            0
+          ]
+        ]
+      },
+      "CARIB 3 rivals 40s": {
+        "image": "83c6ff6c06ad9ea2ab967f28f9029516",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            122,
+            209,
+            2,
+            0
+          ],
+          [
+            108,
+            0,
+            2,
+            0
+          ],
+          [
+            125,
+            0,
+            2,
+            0
+          ],
+          [
+            109,
+            0,
+            2,
+            0
+          ]
+        ]
+      },
+      "CARIB solo 40s": {
+        "image": "575a89fffdc516a8cff0eadb97143a00",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            108,
+            209,
+            2,
+            0
+          ]
+        ]
+      },
+      "CARIB turbo 8s": {
+        "image": "4a5e0360d5d9deb6bc19934908e5c1cd",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            16,
+            209,
+            0,
+            0
+          ]
+        ]
+      },
+      "ICELAND 3 rivals 40s": {
+        "image": "92e492eb5a4f7f750bb44573c64fddea",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            124,
+            178,
+            2,
+            0
+          ],
+          [
+            -115,
+            0,
+            2,
+            0
+          ],
+          [
+            113,
+            0,
+            2,
+            0
+          ],
+          [
+            107,
+            0,
+            2,
+            0
+          ]
+        ]
+      },
+      "ICELAND solo 40s": {
+        "image": "bc8957ce7ee5623a42d1e77509a3c93b",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            121,
+            178,
+            2,
+            0
+          ]
+        ]
+      },
+      "ICELAND turbo 8s": {
+        "image": "37c8e80d1e933cd7190e8e0a95408422",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            20,
+            178,
+            0,
+            0
+          ]
+        ]
+      },
+      "JAPAN 3 rivals 40s": {
+        "image": "c4a4afaceb80a8b67a2fd351ab720d54",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            127,
+            242,
+            2,
+            0
+          ],
+          [
+            109,
+            0,
+            1,
+            0
+          ],
+          [
+            103,
+            0,
+            1,
+            0
+          ],
+          [
+            105,
+            0,
+            1,
+            0
+          ]
+        ]
+      },
+      "JAPAN solo 40s": {
+        "image": "495d60395c47cae610e094586d5601b2",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            128,
+            242,
+            2,
+            0
+          ]
+        ]
+      },
+      "JAPAN turbo 8s": {
+        "image": "130f2ad1c8d0364d5748738cf575f12c",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            13,
+            242,
+            0,
+            0
+          ]
+        ]
+      },
+      "USA 3 rivals 40s": {
+        "image": "dc4509da17fda37838979b10100e9412",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            134,
+            143,
+            3,
+            0
+          ],
+          [
+            103,
+            0,
+            2,
+            0
+          ],
+          [
+            131,
+            0,
+            3,
+            0
+          ],
+          [
+            134,
+            0,
+            3,
+            0
+          ]
+        ]
+      },
+      "USA grid camera": {
+        "image": "aad6907aa5a5021d86025fa356580d85",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            142,
+            143,
+            0,
+            0
+          ],
+          [
+            142,
+            0,
+            0,
+            0
+          ],
+          [
+            142,
+            0,
+            0,
+            0
+          ],
+          [
+            142,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "USA solo 40s": {
+        "image": "acbda4063b898db132daf947f3390359",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            129,
+            143,
+            3,
+            0
+          ]
+        ]
+      },
+      "USA turbo 8s": {
+        "image": "38da8bb0e0a4275f80de09570bcea9f0",
+        "nan": false,
+        "rc": 0,
+        "states": [
+          [
+            8,
+            143,
+            0,
+            0
+          ]
+        ]
+      },
+      "USA viewer car 9": {
+        "image": "bc9d842fa77ffdbb912897776582dfeb",
+        "nan": false,
+        "rc": 0,
+        "states": []
+      }
+    },
+    "differing_cases": {
+      "image": 23,
+      "runtime": 0,
+      "state": 22
+    },
+    "historical_reference": "tests/expected.json",
+    "historical_reference_sha256": "28a4ac8745a783a9f78e2e3e2d5389457ac0f98e173f2f85e63c3f209c988eaa",
+    "passed": 0,
+    "total": 23
+  },
+  "reports": {
+    "ai-drive-original-report.json": {
+      "passed": true
+    },
+    "ai-geometry-original-report.json": {},
+    "ai-schedule-original-report.json": {
+      "status": "pass"
+    },
+    "ai-target-original-report.json": {},
+    "body-pair-original-report.json": {
+      "status": "pass"
+    },
+    "camera-angles-original-report.json": {},
+    "car-original-report.json": {
+      "status": "pass"
+    },
+    "contact-original-report.json": {},
+    "driving-original-report.json": {},
+    "hud-original-report.json": {},
+    "input-original-report.json": {
+      "status": "pass"
+    },
+    "lap-original-report.json": {
+      "status": "pass"
+    },
+    "loading-original-report.json": {},
+    "palette-original-report.json": {
+      "status": "pass"
+    },
+    "palette-tables-original-report.json": {},
+    "physics-original-report.json": {
+      "status": "pass"
+    },
+    "pos-original-report.json": {
+      "status": "pass"
+    },
+    "race-management-original-report.json": {
+      "status": "pass"
+    },
+    "race-time-original-report.json": {
+      "status": "pass"
+    },
+    "race-ui-original-report.json": {},
+    "regression-report.json": {
+      "differing_cases": {
+        "image": 23,
+        "runtime": 0,
+        "state": 22
+      },
+      "passed": 0,
+      "status": "fail",
+      "total": 23
+    },
+    "respawn-original-report.json": {
+      "status": "pass"
+    },
+    "runtime-original-report.json": {
+      "total": 45725
+    },
+    "solo-replay-report.json": {
+      "passed": 21,
+      "status": "pass",
+      "total": 21
+    },
+    "surface-spans-original-report.json": {
+      "status": "pass"
+    },
+    "texanim-original-report.json": {
+      "status": "pass"
+    },
+    "track-original-report.json": {}
+  },
+  "schema": 1,
+  "summary": {
+    "failed": {
+      "execution": [],
+      "historical": [
+        "regress"
+      ],
+      "regression": [
+        "function_catalog",
+        "port_dashboard"
+      ]
+    },
+    "passed": 63,
+    "skipped": 0,
+    "tests": 66
+  },
+  "tests": {
+    "ai_drive_original": {
+      "output_tail": [],
+      "seconds": 21.57,
+      "status": "pass",
+      "timeout": false
+    },
+    "ai_geometry_original": {
+      "output_tail": [],
+      "seconds": 3.14,
+      "status": "pass",
+      "timeout": false
+    },
+    "ai_route_choice": {
+      "output_tail": [],
+      "seconds": 0.16,
+      "status": "pass",
+      "timeout": false
+    },
+    "ai_schedule": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "ai_schedule_original": {
+      "output_tail": [],
+      "seconds": 4.82,
+      "status": "pass",
+      "timeout": false
+    },
+    "ai_target_original": {
+      "output_tail": [],
+      "seconds": 9.5,
+      "status": "pass",
+      "timeout": false
+    },
+    "body_pair": {
+      "output_tail": [],
+      "seconds": 0.17,
+      "status": "pass",
+      "timeout": false
+    },
+    "body_pair_original": {
+      "output_tail": [],
+      "seconds": 3.46,
+      "status": "pass",
+      "timeout": false
+    },
+    "btz_defaults_original": {
+      "output_tail": [],
+      "seconds": 0.28,
+      "status": "pass",
+      "timeout": false
+    },
+    "btz_tool": {
+      "output_tail": [],
+      "seconds": 0.04,
+      "status": "pass",
+      "timeout": false
+    },
+    "camera_angles": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "camera_angles_original": {
+      "output_tail": [],
+      "seconds": 1.08,
+      "status": "pass",
+      "timeout": false
+    },
+    "car_kernel_contract": {
+      "output_tail": [],
+      "seconds": 0.83,
+      "status": "pass",
+      "timeout": false
+    },
+    "car_original": {
+      "output_tail": [],
+      "seconds": 88.26,
+      "status": "pass",
+      "timeout": false
+    },
+    "contact": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "contact_original": {
+      "output_tail": [],
+      "seconds": 20.45,
+      "status": "pass",
+      "timeout": false
+    },
+    "contact_real_assets": {
+      "output_tail": [],
+      "seconds": 0.2,
+      "status": "pass",
+      "timeout": false
+    },
+    "driving_kernels": {
+      "output_tail": [],
+      "seconds": 0.22,
+      "status": "pass",
+      "timeout": false
+    },
+    "driving_original": {
+      "output_tail": [],
+      "seconds": 2.51,
+      "status": "pass",
+      "timeout": false
+    },
+    "function_catalog": {
+      "class": "regression",
+      "output_tail": [
+        "Ran 28 tests in 0.664s",
+        "",
+        "FAILED (errors=28)"
+      ],
+      "seconds": 0.76,
+      "status": "fail",
+      "timeout": false
+    },
+    "gearbox": {
+      "output_tail": [],
+      "seconds": 0.17,
+      "status": "pass",
+      "timeout": false
+    },
+    "headless_trace_contract": {
+      "output_tail": [],
+      "seconds": 1.53,
+      "status": "pass",
+      "timeout": false
+    },
+    "hud_assets": {
+      "output_tail": [],
+      "seconds": 0.38,
+      "status": "pass",
+      "timeout": false
+    },
+    "hud_original": {
+      "output_tail": [],
+      "seconds": 47.62,
+      "status": "pass",
+      "timeout": false
+    },
+    "input_backend": {
+      "output_tail": [],
+      "seconds": 0.23,
+      "status": "pass",
+      "timeout": false
+    },
+    "input_original": {
+      "output_tail": [],
+      "seconds": 51.49,
+      "status": "pass",
+      "timeout": false
+    },
+    "lap_original": {
+      "output_tail": [],
+      "seconds": 6.69,
+      "status": "pass",
+      "timeout": false
+    },
+    "loading_original": {
+      "output_tail": [],
+      "seconds": 109.65,
+      "status": "pass",
+      "timeout": false
+    },
+    "menu_background": {
+      "output_tail": [],
+      "seconds": 0.29,
+      "status": "pass",
+      "timeout": false
+    },
+    "menu_flow": {
+      "output_tail": [],
+      "seconds": 0.27,
+      "status": "pass",
+      "timeout": false
+    },
+    "menu_flow_clean": {
+      "output_tail": [],
+      "seconds": 0.02,
+      "status": "pass",
+      "timeout": false
+    },
+    "music_native": {
+      "output_tail": [],
+      "seconds": 1.8,
+      "status": "pass",
+      "timeout": false
+    },
+    "palette": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "palette_original": {
+      "output_tail": [],
+      "seconds": 6.28,
+      "status": "pass",
+      "timeout": false
+    },
+    "palette_tables": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "palette_tables_original": {
+      "output_tail": [],
+      "seconds": 187.27,
+      "status": "pass",
+      "timeout": false
+    },
+    "phase4_helpers": {
+      "output_tail": [],
+      "seconds": 0.17,
+      "status": "pass",
+      "timeout": false
+    },
+    "phase4_helpers_original": {
+      "output_tail": [],
+      "seconds": 0.24,
+      "status": "pass",
+      "timeout": false
+    },
+    "physics_original": {
+      "output_tail": [],
+      "seconds": 0.85,
+      "status": "pass",
+      "timeout": false
+    },
+    "port_dashboard": {
+      "class": "regression",
+      "output_tail": [
+        "Ran 7 tests in 0.155s",
+        "",
+        "FAILED (errors=5)"
+      ],
+      "seconds": 0.22,
+      "status": "fail",
+      "timeout": false
+    },
+    "pos": {
+      "output_tail": [],
+      "seconds": 0.14,
+      "status": "pass",
+      "timeout": false
+    },
+    "pos_original": {
+      "output_tail": [],
+      "seconds": 1.03,
+      "status": "pass",
+      "timeout": false
+    },
+    "race_management": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "race_management_original": {
+      "output_tail": [],
+      "seconds": 2.04,
+      "status": "pass",
+      "timeout": false
+    },
+    "race_time_original": {
+      "output_tail": [],
+      "seconds": 116.35,
+      "status": "pass",
+      "timeout": false
+    },
+    "race_ui": {
+      "output_tail": [],
+      "seconds": 0.21,
+      "status": "pass",
+      "timeout": false
+    },
+    "race_ui_original": {
+      "output_tail": [],
+      "seconds": 0.26,
+      "status": "pass",
+      "timeout": false
+    },
+    "regress": {
+      "class": "historical",
+      "output_tail": [
+        "       [state] car 3: section/count/phase/lap [142, 0, 0, 0], expected [0, 0, 0, 0]",
+        "       [image] framebuffer hash aad6907aa5a5021d86025fa356580d85, expected b46d18a39ea48dab372f8069cc090475",
+        "0/23 passed; differing cases: runtime=0 state=22 image=23"
+      ],
+      "seconds": 0.52,
+      "status": "fail",
+      "timeout": false
+    },
+    "respawn_original": {
+      "output_tail": [],
+      "seconds": 36.78,
+      "status": "pass",
+      "timeout": false
+    },
+    "runtime_native": {
+      "output_tail": [],
+      "seconds": 0.22,
+      "status": "pass",
+      "timeout": false
+    },
+    "runtime_original": {
+      "output_tail": [],
+      "seconds": 10.71,
+      "status": "pass",
+      "timeout": false
+    },
+    "save_btz": {
+      "output_tail": [],
+      "seconds": 0.26,
+      "status": "pass",
+      "timeout": false
+    },
+    "solo_replay": {
+      "output_tail": [],
+      "seconds": 24.61,
+      "status": "pass",
+      "timeout": false
+    },
+    "surface_spans": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "surface_spans_original": {
+      "output_tail": [],
+      "seconds": 3.04,
+      "status": "pass",
+      "timeout": false
+    },
+    "texanim": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "texanim_oom": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "texanim_original": {
+      "output_tail": [],
+      "seconds": 66.87,
+      "status": "pass",
+      "timeout": false
+    },
+    "time_trial": {
+      "output_tail": [],
+      "seconds": 0.54,
+      "status": "pass",
+      "timeout": false
+    },
+    "track_ai_records": {
+      "output_tail": [],
+      "seconds": 0.17,
+      "status": "pass",
+      "timeout": false
+    },
+    "track_gates": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "track_original": {
+      "output_tail": [],
+      "seconds": 35.84,
+      "status": "pass",
+      "timeout": false
+    },
+    "track_real_assets": {
+      "output_tail": [],
+      "seconds": 0.01,
+      "status": "pass",
+      "timeout": false
+    },
+    "track_route_selection": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "track_topology": {
+      "output_tail": [],
+      "seconds": 0.15,
+      "status": "pass",
+      "timeout": false
+    },
+    "verification_tools": {
+      "output_tail": [],
+      "seconds": 0.27,
+      "status": "pass",
+      "timeout": false
+    }
+  }
+}

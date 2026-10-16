@@ -226,7 +226,7 @@ def verify(executable, runner):
         "runner_sha256": hashlib.sha256(runner.read_bytes()).hexdigest(),
         "fixture_input_sha256": hashlib.sha256(inputs.encode()).hexdigest(),
         "source_sha256": {
-            str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+            str(path.resolve().relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in [ROOT / "src/game/palette.c", ROOT / "src/game/palette.h",
                          ROOT / "tests/palette.c", Path(__file__), ROOT / "tools/le2elf.py"]
         },
