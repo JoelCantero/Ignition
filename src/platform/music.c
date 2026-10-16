@@ -64,10 +64,12 @@ static int song_swap(Song *s) {
         song = s;
         ign_audio_unlock();
     }
+    if (!ok && s) fprintf(stderr, "music: audio device is not open\n");
     song_free(old);
     return ok ? 0 : -1;
 }
 
+/* 0x64241 / 0x64332: game track playback; decoded OGG replaces the MSCDEX start/length request. */
 int ign_music_play(const char *data_dir, int track, int loop) {
     char path[1024];
     snprintf(path, sizeof path, "%s/MUSIC/Track%02d.ogg", data_dir, track);
@@ -123,7 +125,7 @@ static int next_frame(Song *s, float *out) {
 
 void ign_music_mix(float *buf, int n, int rate) {
     Song *s = song;
-    if (!s || s->done || gain <= 0.0f) return;
+    if (!s || s->done) return;
     double step = s->rate / (double)rate;
     for (int i = 0; i < n; i++) {
         while (s->frac >= 1.0) {

@@ -98,13 +98,22 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   Celdas (12 B): `u32 offset_lista_B, u32 offset_lista_A, u16 nA, u16 nB` (offsets en bytes). Listas: `u32` offsets en bytes a spans.
   Span (24 B, trapecio en planta): `i32 x0, z0, pendiente_izq, pendiente_der (16.16), i16 dz, u16 cara (dwords desde el inicio del objeto MSH), u32 objeto*42`.
   Lista B: `z0 ≤ z ≤ z0+dz`; lista A: `z0+dz ≤ z ≤ z0`; en ambas `x0 + (t*izq>>16) ≤ x ≤ x0 + (t*der>>16)`, `t = z−z0`.
-  El objeto es el índice PLC (pool del motor de 42 B). Coordenadas = mundo + 25600. El juego elige la cara más cercana a la altura del coche
+  Los recorridos `0x20c18` (B) y `0x20c81` (A) usan IMUL de 32 bits: se descartan los bits altos **antes**
+  del desplazamiento aritmético SAR 16. Las sumas y la resta de coordenadas también envuelven a 32 bits.
+  Por ejemplo, `32767*131072` envuelve a −131072 y produce −2, no 65534.
+  `surface_spans_original` ejecuta ambas funciones completas, sin interceptar callees: 1 816 listas / 7 492 spans;
+  compara los pares objeto/cara en orden, salida vacía, límites inclusivos y signed extremos.
+  El objeto es el índice del pool del motor de 42 B, **no necesariamente el índice PLC**; `engine_to_plc` traduce
+  ambos espacios. Coordenadas = mundo + 25600. El juego elige la cara más cercana a la altura del coche
   y lee `flags >> 16` como **tipo de superficie** (prefiere 0x28–0x4f). Centroides de caras encuentran su propia cara: 62–78 % (el resto son paredes).
 - **POS** (animaciones de objetos, `sub_00041244`/`sub_000412e8`): `n_plc` × `i32` (−1 = sin animar; si no, offset en dwords
   relativo a la propia entrada). Animación: `i32 nframes, i32 frame_actual`, `nframes` × `{i32 x,y,z, rx,ry,rz}`;
   ángulos en décimas de grado (el juego resta 3600 si ≥ 3600). Las posiciones se convierten en deltas del fotograma
   siguiente, con el último enlazado al primero; al avanzar se resta el delta y se asignan los ángulos del fotograma.
-  Verificado byte a byte en las 7 pistas. En el port, `pos.c` copia y valida la tabla, avanza a 36 Hz y aplica las
+  `pos_original` ejecuta `0x41244` completa y compara 169 buffers / 673 312 bytes: siete pistas, registros
+  compartidos, deltas cíclicos y resta wrapping de 32 bits. La conversión conserva ángulos y cursores; un registro
+  compartido se convierte tantas veces como entradas lo referencien. La validación nativa de offsets y tamaños no
+  pretende reproducir accesos inválidos del ejecutable. En el port, `pos.c` copia y valida la tabla, avanza a 36 Hz y aplica las
   transformaciones de posición/rotación al render y a ciertas consultas geométricas. El orden Euler del motor no está
   confirmado: se usa `Z(Y(X(v)))` como aproximación; los spans SRF no se regeneran, así que la consulta de suelo y las
   colisiones para objetos trasladados siguen incompletas. Se animan todas las entradas POS porque aún no se porta el
@@ -128,6 +137,35 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
   copiando las palabras 0–5 de la última muestra (la 6 queda como estaba) y quedan 2 bytes a cero. Solo en contrarreloj
   (`[0x1feefc] == 2`) y si se bate `[0x1fee04] × 0.01`. Pistas: 0 CANADA/MOOSEJAW, 1 USA/GOLDRUSH, 2 CARIB/SNAKEISL,
   3 BRAZIL/LOSTRUIN, 4 AUSTRIA/YODELPEA, 5 ICELAND/CAPETHOR, 6 JAPAN/TOKYOBUL. Coincide con `Ign_win.exe`.
+
+## Animación de texturas: constructor y helpers
+
+`0x10508` construye descriptores de 24 bytes `{n, cur, prev, uv*, page*, faces*}` en la lista `0xab5f0`
+(contador `0xab5f4`). `0x1098c` cuenta el prefijo de caras texturizadas; `0x10bc8` cuenta coincidencias y
+`0x10b30` recoge los punteros. `0x10c5c`/`0x10cf8` comprueban página e inclusión de los tres pares UV en el
+mosaico de 64×64, con límites signed inclusivos y sumas wrapping. El avance `0x10a00` conserva los deltas UV
+de 32 bits; las caras compartidas por varios objetos aparecen varias veces y reciben todos sus incrementos.
+
+`texanim_original` ejecuta constructor, helpers, avance y ambas entradas idénticas de liberación
+(`0x10390`/`0x1044c`); sólo intercepta malloc/free de Watcom. Compara descriptores, bytes de caras y multiconjuntos
+de punteros (incluidos alias) en 218 casos, siete de ellos pistas reales con ocho pasos.
+La comparación no exige el mismo orden de colección, que no cambia las sumas UV.
+**Desviación intencional:** el port libera también el contenedor `+0x14` que pierde el original, las animaciones
+de cero fotogramas y la construcción parcial; deja el propietario vacío e idempotente.
+`texanim_oom` falla cada una de las 12 asignaciones y verifica retorno de error, notificación, ausencia de fugas
+y liberaciones inválidas. Por ello las dos entradas de teardown se anotan `ported`; los cinco helpers y el
+constructor quedan `verified` para la construcción definida.
+
+## Equivalencias nativas de reproducción CD
+
+`cd_busy` `0x63cf3` → `ign_music_playing`, `cd_play_audio` `0x64332` → `ign_music_play`,
+`cd_stop_audio` `0x64391` → `ign_music_stop`. Se reproduce la selección de pistas completas del juego mediante OGG,
+no peticiones MSCDEX, TOC, cambios de disco ni intervalos MSF arbitrarios.
+`music_native` usa el decodificador real y locks/dispositivo inyectados, sin callback ni altavoz real.
+Prueba selección por nivel, aleatorio 2–8 sin pista de datos 1, lectura finita de todas las pistas, stop
+idempotente, errores explícitos, EOF y repetición. Track02 termina tras el mismo número de muestras audible
+y silenciada: volumen cero ya no congela el decodificador ni deja busy activo indefinidamente.
+Estas tres entradas cuentan como `native`, no como instrucciones portadas/verificadas del DOS.
 
 ## IA de rivales (`sub_0001aea0`, ~1900 instr.)
 

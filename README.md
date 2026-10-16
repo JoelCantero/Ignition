@@ -49,7 +49,7 @@ varias pistas y el multijugador.
 |---|---|
 | Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 482 clasificadas como runtime) |
 | Instrucciones únicas desensambladas | **128 832** (20 167 de runtime/libc/DOS/4G) |
-| Código del juego marcado como portado/verificado | **46 393 de 108 665 instrucciones (42,7 %)**; **162 de 630 funciones (25,7 %)** |
+| Código del juego marcado como portado/verificado | **46 913 de 108 665 instrucciones (43,2 %)**; **172 de 630 funciones (27,3 %)** |
 | Código del juego marcado como parcial | **8 348 instrucciones en 17 funciones**; excluido del numerador portado |
 | Funciones de juego vinculadas explícitamente a una tarea del roadmap | **257 de 630 (40,8 %)**; runtime excluido y `unmapped` no significa fuera de alcance |
 | Formatos de datos propios descifrados | 15 de 21 (TRI, POS y TAB solo en parte) |
@@ -600,13 +600,13 @@ instrucciones está en `docs/function-coverage.txt`):
 | Estado | Funciones | Interpretación |
 |---|---:|---|
 | `unknown` | 361 | Sin identificación fiable; requiere análisis |
-| `identified` | 84 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
+| `identified` | 71 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
 | `understood` | 1 | Comportamiento entendido, todavía no implementado |
 | `port-pending` | 0 | Pendiente explícita y priorizada (ninguna: `car_ground_contact` y `collisions_pass` ya están portadas) |
 | `partial` | 17 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
-| `ported` | 140 | Implementada en el port, sin afirmar verificación completa |
-| `verified` | 22 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
-| `native` | 5 | Sustitución nativa explícita: `main`, `main_step` y el temporizador PIT/BIOS (`0x10010`–`0x1034c`) → SDL |
+| `ported` | 141 | Implementada en el port, sin afirmar verificación completa |
+| `verified` | 31 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
+| `native` | 8 | Bucle/temporizador (`0x10010`–`0x1034c`) → SDL; busy, play y stop de CD → reproducción OGG |
 | `library` | 482 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
 
 Los generadores de inventario y cobertura se ejecutan con
@@ -625,8 +625,26 @@ automáticamente como porte literal.
 La libc y DOS/4G se agrupan en `library` mediante la clasificación heurística del desensamblador. El motor Lisa 2
 no se mezcla con esa categoría: el port usa SDL3 y un rasterizador nativo propio, así que no necesita replicar
 literalmente cada rutina interna del motor original. `native` se reserva para sustituciones función-a-función
-explícitas (hoy solo el bucle principal y el temporizador), para no confundir una sustitución de subsistema con equivalencia de cada rutina.
+explícitas (bucle principal, temporizador y tres operaciones de reproducción musical), para no confundir una
+sustitución de subsistema con equivalencia de cada rutina. La equivalencia de CD cubre las pistas completas usadas
+por el juego, no paquetes MSCDEX, TOC, cambios de disco ni rangos MSF arbitrarios.
 Las tareas de render sí siguen registradas por separado cuando afectan al comportamiento visible del juego.
+
+**Portado de las 84 identificadas: primer bloque cerrado, 13/84; quedan 71.**
+Siete helpers de animación de texturas, dos recorridos SRF y la conversión relativa POS pasan a
+`ported`/`verified`; busy, play y stop de CD pasan a `native`. Además, el constructor de animaciones
+`0x10508`, que ya figuraba como portado, queda verificado sin contarlo de nuevo entre las 13.
+`texanim_original` contrasta 218 escenas (incluidas las siete pistas), descriptores y caras completos;
+`surface_spans_original`, 1 816 listas / 7 492 spans y salidas ordenadas;
+`pos_original`, 169 buffers / 673 312 bytes. El cálculo SRF reproduce IMUL de 32 bits antes de SAR 16,
+no el antiguo producto de 64 bits. `texanim_oom` cubre los 12 fallos de asignación posibles, sin fugas.
+El teardown nativo corrige deliberadamente las fugas originales del contenedor de listas y de animaciones sin
+fotogramas; limpia su estado y es idempotente, por lo que sus dos entradas quedan `ported`, no `verified`.
+`music_native` usa el decodificador real con locks/dispositivo inyectados: prueba pistas 2–8, fin, repetición,
+stop y errores; no valida hardware de audio. Al silenciar, la música sigue avanzando hasta EOF, como cuando suena.
+Las siete carreras de 14 400 ticks con ocho coches son finitas, deterministas y conservan estados e imágenes
+del binario previo. Pasan 44 pruebas; `time_trial` mantiene dos fallos también reproducidos en un build limpio de
+HEAD (BTZ sin nuevo récord y slots de eliminación), sin modificar expectativas ni baseline.
 
 Las etiquetas de roadmap se agrupan así: `phase1.*` carrera, controles, física y rutas; `phase2.*` mundo, efectos y
 colisiones móviles; `phase3.*` actualización del coche y render; `phase4.*` HUD, bucle, audio y frontend.
@@ -795,7 +813,9 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    activadas, así que todas tienen el flag de `LI_PLACEOBJECT`). La rotación `Z(Y(X(v)))` del render es aproximada; las
    consultas de suelo y colisión usan, como el motor, solo la traslación.
 10. **Sonido**: mezclador propio en SDL3 (mono, 44,1 kHz) en lugar del driver GUS/Sound Blaster; volumen 0..`0x10000`
-   y frecuencia en Hz como en `0x625f4`. Sin panorama estéreo, sin música y sin los sonidos de objetos móviles.
+   y frecuencia en Hz como en `0x625f4`. Sin panorama estéreo y sin los sonidos de objetos móviles.
+   La música usa OGG nativo; no emula el transporte MSCDEX. La liberación de animaciones de textura corrige fugas
+   del original y revierte todas las asignaciones si falta memoria.
 11. **Objetos móviles y especiales**: los objetos especiales (`0x3383c`, relámpago `0x32dc8`) se evalúan justo antes del
    tick del coche y no dentro de `car_update`; el aplastamiento solo reduce la altura en el render (falta x·1,2 / z·1,6
    en `raster.c`); la inversión temporal de dirección de la IA sí está portada. Los mensajes del HUD se encolan y envejecen pero no se
@@ -946,7 +966,8 @@ implementado.
 
 - [~] **P1** Animaciones **POS** (`pos_make_relative` `0x41244`, `pos_apply_frame` `0x412e8`): parser, deltas cíclicos,
       transformaciones y avance a 36 Hz integrados; la traslación cuenta en la rejilla del motor y en las colisiones
-      (sin spans SRF, como el original). Pendiente el orden exacto de rotación del render.
+      (sin spans SRF, como el original). Conversión completa `0x41244` contrastada byte a byte: 169 casos, incluidas
+      las siete pistas y registros compartidos. Pendiente el orden exacto de rotación del render.
 - [x] **P1** Colisiones con objetos móviles: objetos de colisión (clases 0x96–0xc7, `0x24f22`) y `car_ground_contact`
       `0x350f0` (contacto `0x349e8`/`0x346cc`, vuelo y rebote `0x35f38`, balizas 0x9a); `collisions_pass` `0x3fd04`
       completo (animaciones de textura, mensajes `0x4c858`, humo de eliminación `0x4fcf0`); `0x36ce0` aporta la fase del
@@ -956,7 +977,8 @@ implementado.
 - [x] **P1** Derrape `0x3731c`: marcas (anillo de 700, fila SHD por superficie `0xc34e0`) y polvo (efecto 1,
       `sub_00039d1c`, sprite de `SMOKE.TEX` mezclado con la SHD) y sonido de `GENERAL/SOUND/SKID`.
 - [x] **P2** Objeto especial PLC clase `0xfa` (`0x2abdc`): animaciones de textura por mosaicos de 64×64 (`0x10508`,
-      `0x10a00`, ritmo `0xc4598` por pista); el mar de CARIB, cascadas y luces.
+      `0x10a00`, ritmo `0xc4598` por pista); el mar de CARIB, cascadas y luces. Constructor, helpers y avance
+      contrastados con 218 escenas originales; teardown sin fugas y rollback de los 12 fallos de asignación.
 - [x] **P2** Efectos (`fx.c`, 200 huecos de `0x1d5f10`, `sub_0003fee8`): sprites `0x39d1c`/`0x39fe8`, piezas
       `0x3b744`, salpicadura `0x3d808`, destellos de reaparición `0x3e6ec`; explosión y hundimiento (`0x3a788`,
       `0x3c208`) y turbo (`0x4e97c`), con las texturas `GENERAL/*.TEX`.
@@ -1045,7 +1067,8 @@ implementado.
 - [x] **P2** Ambiente por pista `LEVELS/<pista>/SOUND`: emisores PLC `0x190+n` (`0x2489c`, `0x360f0`), lluvia,
       viento y truenos.
 - [x] **P2** Música `MUSIC/Track02–08.ogg` (antes pistas de CD, MSCDEX `0x63cf3…0x64710`): pista por nivel `0xc3fd8`,
-      repetición `0x212f8`, podio (pista 8) y cambio de pista; falta el menú (pista 7) cuando exista.
+      repetición `0x212f8`, menú (pista 7), podio (pista 8) y cambio de pista. Busy/play/stop son equivalentes nativos
+      probados, no emulación de todas las rutinas CD; EOF y duración se conservan también con volumen cero.
 
 ### Fase 6 — Fantasmas y persistencia
 

@@ -1,7 +1,7 @@
-functions: 1112 (unknown=361, identified=84, understood=1, port-pending=0, partial=17, ported=140, verified=22, native=5, library=482)
+functions: 1112 (unknown=361, identified=71, understood=1, port-pending=0, partial=17, ported=141, verified=31, native=8, library=482)
 library (C runtime / DOS4G) unique instructions: 20167, to exclude from game review
 unique instructions: 128832
-game instructions marked ported/verified: 46393/108665 (42.7%)
+game instructions marked ported/verified: 46913/108665 (43.2%)
 game instructions marked partial: 8348 (excluded from ported/verified)
 game functions linked to roadmap tasks: 258/630 (41.0%)
 all functions linked to roadmap tasks (including library): 258/1112
@@ -14,15 +14,15 @@ address  status      instructions  function
 00010238  native      78            timer_delta
 00010334  identified  12            bios_ticks
 0001034c  native      25            pit_read
-00010390  identified  69            anim_free_all
-0001044c  identified  69            anim_free_all2
-00010508  ported      346           texanim_build
-0001098c  identified  41            anim_count_faces
+00010390  ported      69            anim_free_all
+0001044c  ported      69            anim_free_all2
+00010508  verified    346           texanim_build
+0001098c  verified    41            anim_count_faces
 00010a00  verified    113           texanim_step
-00010b30  identified  53            anim_collect
-00010bc8  identified  52            anim_count_matches
-00010c5c  identified  64            face_in_tile
-00010cf8  identified  16            uv_in_tile
+00010b30  verified    53            anim_collect
+00010bc8  verified    52            anim_count_matches
+00010c5c  verified    64            face_in_tile
+00010cf8  verified    16            uv_in_tile
 00010d34  identified  30            sqr_table_init
 00010d80  identified  51            dead_vga_copy
 00010e04  identified  54            blend_table_avg
@@ -96,8 +96,8 @@ address  status      instructions  function
 00020608  unknown     178           sub_00020608
 00020814  ported      247           ground_query
 00020bbc  ported      33            face_avg_height
-00020c18  identified  45            srf_walk_list_b
-00020c81  identified  45            srf_walk_list_a
+00020c18  verified    45            srf_walk_list_b
+00020c81  verified    45            srf_walk_list_a
 00020cf0  unknown     7             sub_00020cf0
 00020d04  unknown     6             sub_00020d04
 00020d14  identified  2             log_printf
@@ -199,7 +199,7 @@ address  status      instructions  function
 000400f4  ported      187           weather_zone
 000403c8  ported      718           weather_update
 00040ec8  identified  225           cars_body_sway
-00041244  identified  66            pos_make_relative
+00041244  verified    66            pos_make_relative
 000412e8  partial     92            pos_apply_frame
 000413fc  identified  13            ease_curve
 00041430  ported      726           respawn_place
@@ -478,7 +478,7 @@ address  status      instructions  function
 00063ca8  library     7             sub_00063ca8
 00063cc0  library     7             sub_00063cc0
 00063cd8  library     8             sub_00063cd8
-00063cf3  identified  34            cd_busy
+00063cf3  native      34            cd_busy
 00063d56  identified  116           cd_media_check
 00063f3e  ported      52            cd_set_volume
 00063ff3  unknown     31            sub_00063ff3
@@ -487,8 +487,8 @@ address  status      instructions  function
 00064208  unknown     22            sub_00064208
 00064241  ported      34            cd_play_track
 000642a4  unknown     46            sub_000642a4
-00064332  identified  31            cd_play_audio
-00064391  identified  23            cd_stop_audio
+00064332  native      31            cd_play_audio
+00064391  native      23            cd_stop_audio
 000643cb  unknown     23            sub_000643cb
 0006440f  library     18            sub_0006440f
 0006442f  identified  46            cd_init

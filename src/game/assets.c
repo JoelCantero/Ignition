@@ -454,6 +454,22 @@ static void face_plane(const IgnObject *o, const IgnFace *f, IgnGroundHit *hit) 
     hit->normal[2] = (int32_t)((uint32_t)ax * (uint32_t)by - (uint32_t)bx * (uint32_t)ay);
 }
 
+/* 0x20c18 / 0x20c81: imul discards the upper word before the arithmetic shift, not afterwards. */
+int ign_surface_span_contains(const uint8_t span[24], int descending, int32_t x, int32_t z) {
+    int32_t z0 = (int32_t)rd32(span + 4);
+    int32_t end = (int32_t)((uint32_t)z0 + (uint32_t)(int32_t)(int16_t)rd16(span + 16));
+    if (descending ? (z > z0 || end > z) : (z < z0 || end < z)) return 0;
+    uint32_t delta = (uint32_t)z - (uint32_t)z0;
+    int32_t edge[2];
+    for (int k = 0; k < 2; k++) {
+        uint32_t product = delta * rd32(span + 8 + k * 4);
+        uint32_t shifted = product >> 16;
+        if (product & 0x80000000u) shifted |= 0xFFFF0000u;
+        edge[k] = (int32_t)(rd32(span) + shifted);
+    }
+    return x >= edge[0] && x <= edge[1];
+}
+
 static void check_list(const IgnLevel *lv, const uint8_t *list, int off, int n, int descending,
                        int32_t sx, int32_t sz, int32_t probe_up, IgnGroundHit *best, int32_t *best_d,
                        int *best_type, const IgnFace **best_face) {
@@ -464,13 +480,8 @@ static void check_list(const IgnLevel *lv, const uint8_t *list, int off, int n, 
         uint32_t span_off = rd32(list + at);
         if (span_off % 24 || span_off / 24 >= (uint32_t)s->nspan) continue;
         const uint8_t *sp = s->spans + span_off;
-        int32_t x0 = (int32_t)rd32(sp), z0 = (int32_t)rd32(sp + 4);
-        int32_t sl = (int32_t)rd32(sp + 8), sr = (int32_t)rd32(sp + 12);
-        int32_t dz = (int16_t)rd16(sp + 16);
         uint32_t fo = rd16(sp + 18), ob = rd32(sp + 20);
-        if (descending ? (sz > z0 || z0 + dz > sz) : (sz < z0 || z0 + dz < sz)) continue;
-        int64_t t = (int64_t)sz - z0;
-        if (x0 + (int32_t)((t * sl) >> 16) > sx || x0 + (int32_t)((t * sr) >> 16) < sx) continue;
+        if (!ign_surface_span_contains(sp, descending, sx, sz)) continue;
 
         /* Object references are offsets into the engine's 42-byte object pool. */
         if (ob % 42 || ob / 42 >= (uint32_t)s->nengine || s->engine_to_plc[ob / 42] < 0) continue;

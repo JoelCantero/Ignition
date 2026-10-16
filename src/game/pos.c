@@ -37,6 +37,7 @@ int ign_pos_parse(const uint8_t *data, size_t size, int nobj, IgnPos *out) {
     memcpy(copy, data, size);
     IgnPos parsed = {.data = copy, .size = size, .nobj = nobj};
 
+    /* 0x41244: preserve angles/cursors and convert positions to cyclic, wrapping 32-bit deltas. */
     for (int i = 0; i < nobj; i++) {
         int32_t offset = rdi32(copy + (size_t)i * 4);
         if (offset == -1) continue;
@@ -439,13 +440,39 @@ static int textured(const IgnFace *f) {
     return kind >= 0x11 && kind != 0x14;
 }
 
-/* sub_00010c5c: page and the three u/v inside the tile, bounds included. */
+/* 0x10cf8 / 0x10c5c: signed inclusive bounds, including the original 32-bit bound additions. */
+static int uv_in_tile(uint32_t page, int32_t u, int32_t v, uint32_t target,
+                      int32_t u0, int32_t v0, int32_t u1, int32_t v1) {
+    return page == target && u >= u0 && u <= u1 && v >= v0 && v <= v1;
+}
+
 static int in_tile(const IgnFace *f, uint32_t page, int32_t u, int32_t v) {
-    if (f->extra != page) return 0;
+    int32_t u1 = (int32_t)((uint32_t)u + 0x4000u), v1 = (int32_t)((uint32_t)v + 0x4000u);
     for (int k = 0; k < 3; k++)
-        if (f->uv[2 * k] < u || f->uv[2 * k] > u + 0x4000 || f->uv[2 * k + 1] < v || f->uv[2 * k + 1] > v + 0x4000)
+        if (!uv_in_tile(f->extra, f->uv[2 * k], f->uv[2 * k + 1], page, u, v, u1, v1))
             return 0;
     return 1;
+}
+
+/* 0x1098c: only the initial run of textured faces contributes animation frames. */
+static int texanim_count_frames(const IgnObject *object) {
+    int n = 0;
+    while (n < object->nf && textured(&object->faces[n])) n++;
+    return n;
+}
+
+/* 0x10bc8 / 0x10b30: the same traversal counts first, then collects into the allocated list. */
+static size_t texanim_collect(IgnModel *track, uint32_t page, int32_t u, int32_t v, IgnFace **out) {
+    size_t n = 0;
+    for (int o = 0; o < track->nobj; o++) {
+        const IgnObject *object = &track->objs[o];
+        for (int f = 0; f < object->nf && textured(&object->faces[f]); f++) {
+            if (!in_tile(&object->faces[f], page, u, v)) continue;
+            if (out) out[n] = (IgnFace *)&object->faces[f];
+            n++;
+        }
+    }
+    return n;
 }
 
 int ign_texanim_init(IgnTexAnims *t, IgnModel *track, int period) {
@@ -454,18 +481,17 @@ int ign_texanim_init(IgnTexAnims *t, IgnModel *track, int period) {
     for (int i = 0; i < track->nobj; i++) {
         const IgnObject *src = &track->objs[i];
         if ((src->type & 0xfff) != 0xfa) continue; /* after split_plc_types: the class */
-        int n = 0;
-        while (n < src->nf && textured(&src->faces[n])) n++;
+        int n = texanim_count_frames(src);
         if (n == 0) continue; /* 0x106d0: nothing kept */
         IgnTexAnim *na = realloc(t->a, sizeof *t->a * (size_t)(t->n + 1));
-        if (!na) return -1;
+        if (!na) goto fail;
         t->a = na;
         IgnTexAnim *a = &t->a[t->n++];
         *a = (IgnTexAnim){.n = n, .cur = 1, .prev = 0};
         a->uv = calloc((size_t)n, sizeof *a->uv);
         a->page = calloc((size_t)n, sizeof *a->page);
         a->faces = calloc((size_t)n, sizeof *a->faces);
-        if (!a->uv || !a->page || !a->faces) return -1;
+        if (!a->uv || !a->page || !a->faces) goto fail;
         for (int k = 0; k < n; k++) {
             const IgnFace *f = &src->faces[k];
             a->uv[k][0] = (int32_t)((uint32_t)f->uv[0] & 0xffffc000u);
@@ -477,30 +503,25 @@ int ign_texanim_init(IgnTexAnims *t, IgnModel *track, int period) {
             int repeat = 0;
             for (int j = 0; j < k; j++)
                 repeat |= a->page[j] == a->page[k] && a->uv[j][0] == a->uv[k][0] && a->uv[j][1] == a->uv[k][1];
-            size_t count = 0;
-            for (int pass = 0; pass < 2; pass++) {
-                if (pass == 1) {
-                    a->faces[k] = calloc(count + 1, sizeof **a->faces);
-                    if (!a->faces[k]) return -1;
-                    count = 0;
-                }
-                for (int o = 0; o < track->nobj && !repeat; o++) {
-                    IgnObject *obj = &track->objs[o];
-                    for (int f = 0; f < obj->nf && textured(&obj->faces[f]); f++) {
-                        if (!in_tile(&obj->faces[f], a->page[k], a->uv[k][0], a->uv[k][1])) continue;
-                        if (pass == 1) a->faces[k][count] = (IgnFace *)&obj->faces[f]; /* the MSH buffer is ours */
-                        count++;
-                    }
-                }
-            }
+            size_t count = repeat ? 0 : texanim_collect(track, a->page[k], a->uv[k][0], a->uv[k][1], NULL);
+            a->faces[k] = calloc(count + 1, sizeof **a->faces);
+            if (!a->faces[k]) goto fail;
+            if (!repeat) texanim_collect(track, a->page[k], a->uv[k][0], a->uv[k][1], a->faces[k]);
         }
     }
     return t->n;
+
+fail:
+    fprintf(stderr, "texanim: cannot allocate animation data\n");
+    ign_texanim_free(t);
+    return -1;
 }
 
+/* 0x10390 / 0x1044c: identical game teardown; also release the original's leaked face-list container. */
 void ign_texanim_free(IgnTexAnims *t) {
     for (int i = 0; i < t->n; i++) {
-        for (int k = 0; k < t->a[i].n; k++) free(t->a[i].faces[k]);
+        if (t->a[i].faces)
+            for (int k = 0; k < t->a[i].n; k++) free(t->a[i].faces[k]);
         free(t->a[i].faces), free(t->a[i].uv), free(t->a[i].page);
     }
     free(t->a);
@@ -513,10 +534,14 @@ void ign_texanim_step(IgnTexAnims *t) {
         for (int k = 0; k < a->n; k++) {
             int from = (a->prev + k) % a->n, to = (a->cur + k) % a->n;
             uint32_t dpage = a->page[from] - a->page[to];
-            int32_t du = a->uv[from][0] - a->uv[to][0], dv = a->uv[from][1] - a->uv[to][1];
+            int32_t du = (int32_t)((uint32_t)a->uv[from][0] - (uint32_t)a->uv[to][0]);
+            int32_t dv = (int32_t)((uint32_t)a->uv[from][1] - (uint32_t)a->uv[to][1]);
             for (IgnFace **f = a->faces[k]; f && *f; f++) {
                 (*f)->extra -= dpage;
-                for (int c = 0; c < 3; c++) (*f)->uv[2 * c] -= du, (*f)->uv[2 * c + 1] -= dv;
+                for (int c = 0; c < 3; c++) {
+                    (*f)->uv[2 * c] = (int32_t)((uint32_t)(*f)->uv[2 * c] - (uint32_t)du);
+                    (*f)->uv[2 * c + 1] = (int32_t)((uint32_t)(*f)->uv[2 * c + 1] - (uint32_t)dv);
+                }
             }
         }
         a->prev = a->cur;

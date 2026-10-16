@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "game/pos.h"
@@ -23,7 +24,41 @@ static int32_t get32(const uint8_t *data, size_t offset) {
     return (int32_t)v;
 }
 
-int main(void) {
+static int runner(void) {
+    int count;
+    while (scanf("%d", &count) == 1) {
+        size_t size;
+        if (scanf("%zu", &size) != 1 || count < 0 || count > 65536 || size > 0x1000000) goto invalid;
+        uint8_t *data = malloc(size ? size : 1);
+        if (!data) goto invalid;
+        for (size_t i = 0; i < size; i++) {
+            unsigned value;
+            if (scanf("%2x", &value) != 1) {
+                free(data);
+                goto invalid;
+            }
+            data[i] = (uint8_t)value;
+        }
+        IgnPos pos;
+        int rc = ign_pos_parse(data, size, count, &pos);
+        free(data);
+        if (rc) goto invalid;
+        for (size_t i = 0; i < pos.size; i++) printf("%02x", pos.data[i]);
+        printf("\n");
+        ign_pos_free(&pos);
+    }
+    if (feof(stdin)) return 0;
+invalid:
+    fprintf(stderr, "pos: invalid case or allocation failure\n");
+    return 1;
+}
+
+int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--runner")) return runner();
+    if (argc != 1) {
+        fprintf(stderr, "pos: expected --runner or no arguments\n");
+        return 1;
+    }
     uint8_t bytes[64] = {0};
     put32(bytes, 0, 2); /* Entry 0 points two dwords forward to its animation. */
     put32(bytes, 4, -1);

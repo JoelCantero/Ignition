@@ -30,7 +30,7 @@
 0001e638  body_pair_impulse    eax=A, edx=B, stack: cx, cz, theta  roadmap=phase2.collisions
 0002236c  level_prepare        progress bar, load_tri, objects, load_srf_grid  roadmap=phase2.world
 0001fee0  load_srf_grid        eax=path, edx=material table; relocates SRF offsets  roadmap=phase2.world
-00041244  pos_make_relative    converts POS positions to consecutive cyclic frame deltas  roadmap=phase2.world
+00041244  pos_make_relative    ign_pos_parse: cyclic position deltas, angles/cursors untouched; pos_original executes full function, 169 exact buffers incl shared records, wrapping subtraction and seven tracks; invalid files rejected natively  status=verified roadmap=phase2.world
 000412e8  pos_apply_frame      applies current POS delta/rotation to move records [0x1fef94] with +0x1c == 1 (LI_PLACEOBJECT), then LI_MOVEOBJECT; port in src/game/pos.c, rotation order approximate (render only: ground/collision queries use translation)  status=partial roadmap=phase2.world
 00060f40  read_file_into       eax=path, edx=buf, ebx=size
 000240f4  load_fonts           IGNITION.FNT -> [0x1feff4]; yellow/pos/speed{_s,,_h}.lft -> [0x1fea0c..0x1fea38] (font.c/hud.c load the layout's three)  status=ported roadmap=phase4.hud
@@ -73,8 +73,8 @@
 001fec04  g_level_tab
 001fef18  g_level_shd
 00020814  ground_query         eax=x, edx=probe height (up), ebx=z (SRF space) -> 0xebad8: type, normal (p0-p1)x(p2-p1), points (mesh + pool position, no rotation); integer face_avg_height cost  status=ported roadmap=phase1.physics
-00020c18  srf_walk_list_b      spans with dz >= 0  roadmap=phase1.physics
-00020c81  srf_walk_list_a      spans with dz < 0  roadmap=phase1.physics
+00020c18  srf_walk_list_b      ascending inclusive spans; assets.c check_list + ign_surface_span_contains; wrapping IMUL before SAR 16 and wrapping ADD; full original walkers, 1816 lists / 7492 spans, exact ordered object/face outputs incl empty lists and signed limits  status=verified roadmap=phase1.physics
+00020c81  srf_walk_list_a      descending inclusive spans; shares native filtering with 0x20c18; full original walker, ordered outputs and bounds verified by surface_spans_original  status=verified roadmap=phase1.physics
 00020bbc  face_avg_height      roadmap=phase1.physics
 000569ec  engine_alloc_objects 42-byte object pool -> [0x24c058], 256-unit cell grid [0x24c048] width [0x24c014]  status=ported roadmap=phase3.render
 0002ed00  car_update           ~2300 insns, calls ground_query; grip block 0x3070a..0x30874 verified by tests/car_original.py, not whole routine  status=partial roadmap=phase3.car-update
@@ -141,13 +141,13 @@
 00064559  cd_mscdex_check      int 0x2f AX=0x1500 via DPMI 0x300; [0xd7d90] drives, [0x25adec] first drive  status=identified roadmap=phase4.audio
 000645e1  cd_request           int 0x2f AX=0x1510 (send device request [0x25ade8]) via DPMI 0x300  status=identified roadmap=phase4.audio
 00064659  cd_request_header    al=command, edx=IOCTL length: 0x0d-byte header, transfer buffer at +0x20  status=identified roadmap=phase4.audio
-00064332  cd_play_audio        command 0x84, eax=start, edx=frames  status=identified roadmap=phase4.audio
-00064391  cd_stop_audio        command 0x85; menu, options and shutdown  status=identified roadmap=phase4.audio
+00064332  cd_play_audio        command 0x84, eax=start, edx=frames; native game whole-track equivalent ign_music_play, OGG decoder instead of MSCDEX; music_native tests tracks 2-8, EOF, looping and explicit failure; arbitrary CD frame ranges not emulated  status=native roadmap=phase4.audio
+00064391  cd_stop_audio        command 0x85; native ign_music_stop for menu/options/shutdown; decoder released, busy cleared, repeated stop tested by music_native  status=native roadmap=phase4.audio
 00064241  cd_play_track        eax=track 1..[0x25a934], start [0x25a938+4n], length [0x25ab90+4n] (music.c ign_music_play)  status=ported roadmap=phase4.audio
 000640b3  cd_read_toc          IOCTL 0x0a disc info (first +0x21, last +0x22, lead-out +0x23), 0x0b per track (start +0x22); [0x25a934] = last-first+1, length = next start - start; MSF -> frames 0x64710  status=identified roadmap=phase4.audio
 00064710  cd_msf_to_frames     m*4500 + s*75 + f - 150  status=identified roadmap=phase4.audio
 00063f3e  cd_set_volume        eax 0..255 on the 4 channels (IOCTL output 3); race [0x1feef4]*2.55, menu [0xe9cf7]*25.5  status=ported roadmap=phase4.audio
-00063cf3  cd_busy              IOCTL 0x0c audio status + busy bit 9 of the request status; 0 = idle (race loop 0x21320 replays the track)  status=identified roadmap=phase4.audio
+00063cf3  cd_busy              IOCTL 0x0c / request status bit 9; native ign_music_playing, 0=idle; music_native proves completion at identical audible/muted duration, EOF looping and stop; no DOS driver request emulation  status=native roadmap=phase4.audio
 00063d56  cd_media_check       IOCTL 4 channel 0 volume -> [0x25adf0]; 6 device status bit 0 (door open) -> [0x25adf4] = 0 and return, else 1; 9 media changed -> [0x25adf8]; 0x0c busy [0x25ae08], resume start/end MSF [0x25ae00]/[0x25adfc]  status=identified roadmap=phase4.audio
 000c3fd8  t_level_cd_track     7 x int by track id [0x1fef10]: {2,3,4,5,6,6,7}  status=ported roadmap=phase4.audio
 001feed8  g_cd_track           current CD track; set by 0x2293c, keys 0xcb/0xcd (0x2c1cb) and joystick (0x4d228)  status=ported roadmap=phase4.audio
@@ -179,7 +179,14 @@
 00058c1c  engine_view_list     view struct [0x24c05c] -> object list [0x24c01c] (+0x60 count): fixed row pattern 0xc5d8c over the 256-unit grid [0x24c048] (width [0x24c014] = 200), start shifted by 0xc5e40[yaw*0.01, pitch*0.01]; cell chains +0x26 from the head; layer filter [0x24bff0] on word +0x24; verified with view (850, 0)  status=verified roadmap=phase2.collisions
 00031858  car_flatten          copies the car's body mesh scaled x1.2 / y0.2 / z1.6 (set mesh 0x56e9c), COLL 6; car+0x558/+0x55c/+0x560; restored by car_update 0x31316 after 200 ticks with no car within 30 (pop -6, COLL 7)  status=ported roadmap=phase2.collisions
 0002abdc  texanim_create       level_prepare: sub_00010390 then sub_00010508 for every class 0xfa object  status=ported roadmap=phase2.world
-00010508  texanim_build        frames = leading textured faces (64x64 tiles, page), world faces in each tile (sub_00010bc8 count / sub_00010b30 collect / sub_00010c5c match); list [0xab5f0], count [0xab5f4]  status=ported roadmap=phase2.world
+00010390  anim_free_all        shared ign_texanim_free; identical original teardown entry to 0x1044c, exercised under texanim_original; native also frees leaked +0x14 containers/zero-frame state; texanim_oom verifies all 12 allocation-failure paths  status=ported roadmap=phase2.world
+0001044c  anim_free_all2       duplicate of 0x10390; shared native teardown, intentional leak fixes and idempotent ownership reset  status=ported roadmap=phase2.world
+0001098c  anim_count_faces    leading face low-byte >=0x11 and !=0x14; initializes n=0, cur=1, prev=0; texanim_original integrated construction oracle incl empty prefixes  status=verified roadmap=phase2.world
+00010b30  anim_collect        collects matching leading textured faces, retaining shared-mesh pointer multiplicity; same traversal as native count; texanim_original compares multisets and exact animated face bytes  status=verified roadmap=phase2.world
+00010bc8  anim_count_matches  count matching leading textured faces; original returns byte count (4 per face), native returns number of pointers; same collected cardinality verified  status=verified roadmap=phase2.world
+00010c5c  face_in_tile        exact page match and three signed inclusive UV pairs; native in_tile delegates 0x10cf8; wrapped upper bounds preserved; texanim_original 218 complete cases incl seven tracks  status=verified roadmap=phase2.world
+00010cf8  uv_in_tile          page equality, inclusive signed U/V bounds; exercised unmodified by original face matching and compared through complete constructor outputs  status=verified roadmap=phase2.world
+00010508  texanim_build        frames = leading textured faces (64x64 tiles, page), lists [0xab5f0]/count [0xab5f4]; texanim_original runs unmodified constructor and helpers: 218 exact descriptors/face buffers, seven tracks, duplicate tiles and aliased meshes; allocator only intercepted; native OOM rollback/leak fixes intentional  status=verified roadmap=phase2.world
 00010a00  texanim_step         faces of frame i to the tile of frame (i + cur) mod n; prev = cur++; from collisions_pass every 0xc4598[track] frames; verified  status=verified roadmap=phase2.world
 0004c7c0  hud_message_add      eax=text, edx=frames, ebx=blink, ecx=view: first free of 5 x 0x78 B [0x1fefb8]  status=ported roadmap=phase4.ui
 0004c858  hud_messages_age     collisions_pass: age +0x70 += 1, past +0x68 the slot is freed  status=ported roadmap=phase4.ui

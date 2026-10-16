@@ -82,6 +82,9 @@ typedef struct {
     int nengine;
 } IgnSurface;
 
+/* 0x20c18 / 0x20c81: inclusive SRF span test, with wrapping 32-bit fixed-point products. */
+int ign_surface_span_contains(const uint8_t span[24], int descending, int32_t x, int32_t z);
+
 /* SRF coordinates are world x/z + this offset. */
 #define IGN_SRF_ORIGIN 25600
 

@@ -63,6 +63,13 @@ if(NOT MSVC)
 endif()
 target_sources(ignition PRIVATE src/platform/music.c)
 target_link_libraries(ignition PRIVATE stb_vorbis)
+add_executable(music_test tests/music.c src/platform/music.c)
+target_include_directories(music_test PRIVATE src)
+target_link_libraries(music_test PRIVATE SDL3::SDL3 stb_vorbis)
+if(NOT MSVC)
+  target_compile_options(music_test PRIVATE -Wall -Wextra)
+  target_link_libraries(music_test PRIVATE m)
+endif()
 
 # Flat ELF image of the original executable for disassemblers.
 set(GAME_DIR "/Users/Shared/Epic Games/Ignition/ignition" CACHE PATH "Original game data")
@@ -73,6 +80,7 @@ add_custom_target(elf
 
 # Deterministic headless regression (needs the game data); run with `ctest --test-dir build`.
 enable_testing()
+add_test(NAME music_native COMMAND music_test "${GAME_DIR}")
 add_test(NAME regress COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/regress.py
   --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}"
   --report ${CMAKE_BINARY_DIR}/regression-report.json)
@@ -115,6 +123,22 @@ add_test(NAME hud_assets COMMAND hud_assets_test "${GAME_DIR}")
 add_executable(pos_test tests/pos.c)
 target_link_libraries(pos_test PRIVATE ignition_core)
 add_test(NAME pos COMMAND pos_test)
+add_executable(texanim_test tests/texanim.c)
+target_link_libraries(texanim_test PRIVATE ignition_core)
+add_test(NAME texanim COMMAND texanim_test)
+add_executable(texanim_oom_test tests/texanim_oom.c src/game/pos.c)
+target_link_libraries(texanim_oom_test PRIVATE ignition_core)
+target_compile_definitions(texanim_oom_test PRIVATE
+  malloc=ign_test_malloc calloc=ign_test_calloc realloc=ign_test_realloc free=ign_test_free)
+add_test(NAME texanim_oom COMMAND texanim_oom_test)
+add_executable(surface_spans_test tests/surface_spans.c)
+target_link_libraries(surface_spans_test PRIVATE ignition_core)
+add_test(NAME surface_spans COMMAND surface_spans_test)
+if(NOT MSVC)
+  target_compile_options(texanim_test PRIVATE -Wall -Wextra)
+  target_compile_options(texanim_oom_test PRIVATE -Wall -Wextra)
+  target_compile_options(surface_spans_test PRIVATE -Wall -Wextra)
+endif()
 add_executable(palette_test tests/palette.c)
 target_link_libraries(palette_test PRIVATE ignition_core)
 add_test(NAME palette COMMAND palette_test)
@@ -154,6 +178,20 @@ if(IGN_VERIFY_ORIGINAL)
 endif()
 if(IGN_VERIFY_ORIGINAL)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME texanim_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/texanim_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --data "${GAME_DIR}"
+            --runner $<TARGET_FILE:texanim_test>
+            --report ${CMAKE_BINARY_DIR}/texanim-original-report.json)
+  add_test(NAME surface_spans_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/surface_spans_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:surface_spans_test>
+            --report ${CMAKE_BINARY_DIR}/surface-spans-original-report.json)
+  add_test(NAME pos_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/pos_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --data "${GAME_DIR}"
+            --runner $<TARGET_FILE:pos_test>
+            --report ${CMAKE_BINARY_DIR}/pos-original-report.json)
   add_test(NAME track_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/track_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --data "${GAME_DIR}"
