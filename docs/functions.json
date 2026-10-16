@@ -41,12 +41,12 @@
   },
   "coverage": {
     "unique_instructions": 128832,
-    "library_instructions": 20167,
-    "ported_instructions": 48712,
+    "library_instructions": 19093,
+    "ported_instructions": 48756,
     "partial_instructions": 8402,
     "covered_code_bytes": 474981,
     "code_bytes": 482383,
-    "inventory_sha256": "fb0cf822e270051ceeed2e74c5584a45ec3a385c6f4f41acee32630db6b52365"
+    "inventory_sha256": "6b4b83d9e3c8ea4c4b79aeaa4640c2a6042bdbdefbe7d563823a6665bbc48e75"
   },
   "symbols": [
     {
@@ -8405,18 +8405,33 @@
     {
       "address": "00051714",
       "kind": "function",
-      "name": "sub_00051714",
-      "aliases": [],
-      "status": "unknown",
+      "name": "watcom_random14",
+      "aliases": [
+        "sub_00051714"
+      ],
+      "status": "verified",
       "instructions": 22,
       "roadmap": "runtime.math.random",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "ign_random14: (rand15 & 16383)/16384; resultado y estado exactos. Se preservan streams privados de simulacion/HUD; no se verifica orden global DOS."
+      ],
+      "implementation": [
+        "src/platform/runtime.c",
+        "src/game/fx.c",
+        "src/render/hud.c",
+        "src/render/camera.c",
+        "src/game/save.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Estado de la semilla y generadores rand/srand usados por el juego.",
         "evidence": [
           "call:00020d14",
@@ -8454,7 +8469,8 @@
           "caller:0004f874",
           "caller:0004fcf0",
           "string-ref:000aa60c",
-          "static-inspection:00051714"
+          "static-inspection:00051714",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -11040,18 +11056,29 @@
     {
       "address": "0005629e",
       "kind": "function",
-      "name": "sub_0005629e",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_free",
+      "aliases": [
+        "sub_0005629e"
+      ],
+      "status": "native",
       "instructions": 48,
       "roadmap": "runtime.memory.heap",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Sustitucion por free C11, incluido NULL. No se reconstruyen las cabeceras/listas del heap DOS."
+      ],
+      "implementation": [
+        "src/game/assets.c",
+        "src/render/lisa.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "malloc/free/calloc, estructuras del heap y reserva/liberacion de memoria DOS.",
         "evidence": [
           "call:0006f9c2",
@@ -11114,7 +11141,8 @@
           "caller:0007ec5c",
           "caller:00083427",
           "caller:00084d34",
-          "static-inspection:0005629e"
+          "static-inspection:0005629e",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -11122,18 +11150,29 @@
     {
       "address": "00056320",
       "kind": "function",
-      "name": "sub_00056320",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_malloc",
+      "aliases": [
+        "sub_00056320"
+      ],
+      "status": "native",
       "instructions": 84,
       "roadmap": "runtime.memory.heap",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Sustitucion por malloc para tamanos positivos. OOM y malloc(0) no se comparan con el original; rige el contrato C11."
+      ],
+      "implementation": [
+        "src/game/assets.c",
+        "src/render/lisa.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "malloc/free/calloc, estructuras del heap y reserva/liberacion de memoria DOS.",
         "evidence": [
           "call:0006f91a",
@@ -11255,7 +11294,8 @@
           "caller:0007dfe4",
           "caller:000833b0",
           "caller:00084d34",
-          "static-inspection:00056320"
+          "static-inspection:00056320",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -14503,15 +14543,23 @@
       "kind": "function",
       "name": "sprintf",
       "aliases": [],
-      "status": "library",
+      "status": "native",
       "instructions": 18,
       "roadmap": "runtime.io.formatting",
       "notes": [
-        "cdecl (dest, fmt, ...)"
+        "cdecl (dest, fmt, ...)",
+        "Formateo sustituido por snprintf acotado en el port. Se prueban los formatos usados, no ABI/anchos Watcom de todo varargs."
       ],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "implementation": [
+        "src/render/hud.c",
+        "src/game/save.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
         "confidence": "documented",
@@ -14560,7 +14608,8 @@
           "caller:0004bdf4",
           "caller:0004be7c",
           "caller:0004c7c0",
-          "caller:000515f8"
+          "caller:000515f8",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16077,23 +16126,35 @@
     {
       "address": "0006476e",
       "kind": "function",
-      "name": "sub_0006476e",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_random_state",
+      "aliases": [
+        "sub_0006476e"
+      ],
+      "status": "verified",
       "instructions": 2,
       "roadmap": "runtime.math.random",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "ign_random_state: singleton con semilla inicial 1; contrato de identidad estable, no direccion de memoria igual a DOS."
+      ],
+      "implementation": [
+        "src/platform/runtime.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Estado de la semilla y generadores rand/srand usados por el juego.",
         "evidence": [
           "caller:00064774",
           "caller:00064798",
-          "static-inspection:0006476e"
+          "static-inspection:0006476e",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16101,18 +16162,31 @@
     {
       "address": "00064774",
       "kind": "function",
-      "name": "sub_00064774",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_rand",
+      "aliases": [
+        "sub_00064774"
+      ],
+      "status": "verified",
       "instructions": 12,
       "roadmap": "runtime.math.random",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "LCG uint32: s=s*1103515245+12345; (s>>16)&32767. Sustituye rand de libc y mantiene la secuencia previa de IgnFx."
+      ],
+      "implementation": [
+        "src/platform/runtime.c",
+        "src/game/fx.c",
+        "src/frontend/frontend.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Estado de la semilla y generadores rand/srand usados por el juego.",
         "evidence": [
           "call:0006476e",
@@ -16120,7 +16194,8 @@
           "caller:0001aea0",
           "caller:00051714",
           "caller:00058864",
-          "static-inspection:00064774"
+          "static-inspection:00064774",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16128,23 +16203,36 @@
     {
       "address": "00064798",
       "kind": "function",
-      "name": "sub_00064798",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_srand",
+      "aliases": [
+        "sub_00064798"
+      ],
+      "status": "verified",
       "instructions": 8,
       "roadmap": "runtime.math.random",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "ign_random_seed guarda los 32 bits de la semilla. Verificado junto al generador con 42 semillas y reinicializacion por secuencia."
+      ],
+      "implementation": [
+        "src/platform/runtime.c",
+        "src/game/fx.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Estado de la semilla y generadores rand/srand usados por el juego.",
         "evidence": [
           "call:0006476e",
           "caller:0001ce30",
-          "static-inspection:00064798"
+          "static-inspection:00064798",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16152,25 +16240,37 @@
     {
       "address": "000647a8",
       "kind": "function",
-      "name": "sub_000647a8",
-      "aliases": [],
-      "status": "unknown",
+      "name": "watcom_free_nullable",
+      "aliases": [
+        "sub_000647a8"
+      ],
+      "status": "native",
       "instructions": 51,
       "roadmap": "runtime.memory.heap",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Guard de NULL y salto a 0x5629e: free C11. La rutina incluye instrucciones compartidas con el destino."
+      ],
+      "implementation": [
+        "src/game/assets.c",
+        "src/render/lisa.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "malloc/free/calloc, estructuras del heap y reserva/liberacion de memoria DOS.",
         "evidence": [
           "call:0006f9c2",
           "caller:00012bb8",
           "caller:00013a5c",
           "caller:00052a0c",
-          "static-inspection:000647a8"
+          "static-inspection:000647a8",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16178,18 +16278,29 @@
     {
       "address": "000647b2",
       "kind": "function",
-      "name": "sub_000647b2",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_asin_x87",
+      "aliases": [
+        "sub_000647b2"
+      ],
+      "status": "native",
       "instructions": 11,
       "roadmap": "runtime.math.trigonometry",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "atan2(x,sqrt(1-x*x)) -> asin(x). Oracle en dominio finito, tolerancia absoluta 4e-15; sin handlers Watcom/FPU software."
+      ],
+      "implementation": [
+        "src/frontend/frontend.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Funciones trigonometricas y helpers de reduccion/errores de sus implementaciones.",
         "evidence": [
           "call:000647ef",
@@ -16202,7 +16313,8 @@
           "caller:0002fc1c",
           "caller:00043778",
           "caller:000647cd",
-          "static-inspection:000647b2"
+          "static-inspection:000647b2",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16210,22 +16322,34 @@
     {
       "address": "000647cd",
       "kind": "function",
-      "name": "sub_000647cd",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_asin",
+      "aliases": [
+        "sub_000647cd"
+      ],
+      "status": "native",
       "instructions": 3,
       "roadmap": "runtime.math.trigonometry",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Adaptador de double en pila a 0x647b2 -> asin C11. Oracle ejecuta ambas entradas; no se conserva ABI Watcom."
+      ],
+      "implementation": [
+        "src/frontend/frontend.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Funciones trigonometricas y helpers de reduccion/errores de sus implementaciones.",
         "evidence": [
           "call:000647b2",
-          "static-inspection:000647cd"
+          "static-inspection:000647cd",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16233,23 +16357,36 @@
     {
       "address": "000647da",
       "kind": "function",
-      "name": "sub_000647da",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_atan_x87",
+      "aliases": [
+        "sub_000647da"
+      ],
+      "status": "native",
       "instructions": 7,
       "roadmap": "runtime.math.trigonometry",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "fld1/fpatan -> atan C11. Comparacion finita con tolerancia absoluta 4e-15."
+      ],
+      "implementation": [
+        "src/game/physics.c",
+        "src/render/lisa.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Funciones trigonometricas y helpers de reduccion/errores de sus implementaciones.",
         "evidence": [
           "call:0007d2e4",
           "caller:00064804",
-          "static-inspection:000647da"
+          "static-inspection:000647da",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16257,18 +16394,30 @@
     {
       "address": "000647ef",
       "kind": "function",
-      "name": "sub_000647ef",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_atan2_x87",
+      "aliases": [
+        "sub_000647ef"
+      ],
+      "status": "native",
       "instructions": 7,
       "roadmap": "runtime.math.trigonometry",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "fxch/fpatan -> atan2(y,x), conservando el orden de operandos. Oracle finito en los cuatro cuadrantes; tolerancia 4e-15."
+      ],
+      "implementation": [
+        "src/game/physics.c",
+        "src/frontend/frontend.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Funciones trigonometricas y helpers de reduccion/errores de sus implementaciones.",
         "evidence": [
           "call:0007d2e4",
@@ -16289,7 +16438,8 @@
           "caller:000647b2",
           "caller:00064810",
           "caller:0007ee02",
-          "static-inspection:000647ef"
+          "static-inspection:000647ef",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16297,22 +16447,35 @@
     {
       "address": "00064804",
       "kind": "function",
-      "name": "sub_00064804",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_atan",
+      "aliases": [
+        "sub_00064804"
+      ],
+      "status": "native",
       "instructions": 3,
       "roadmap": "runtime.math.trigonometry",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Adaptador de pila a 0x647da -> atan C11. Verificado con ambos signos y cero; sin emulador FPU software."
+      ],
+      "implementation": [
+        "src/game/physics.c",
+        "src/render/lisa.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Funciones trigonometricas y helpers de reduccion/errores de sus implementaciones.",
         "evidence": [
           "call:000647da",
-          "static-inspection:00064804"
+          "static-inspection:00064804",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16320,22 +16483,35 @@
     {
       "address": "00064810",
       "kind": "function",
-      "name": "sub_00064810",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_atan2",
+      "aliases": [
+        "sub_00064810"
+      ],
+      "status": "native",
       "instructions": 4,
       "roadmap": "runtime.math.trigonometry",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Adaptador de dos doubles de pila a 0x647ef -> atan2(y,x). Verificado junto al nucleo x87, sin ABI Watcom."
+      ],
+      "implementation": [
+        "src/game/physics.c",
+        "src/frontend/frontend.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Funciones trigonometricas y helpers de reduccion/errores de sus implementaciones.",
         "evidence": [
           "call:000647ef",
-          "static-inspection:00064810"
+          "static-inspection:00064810",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16343,18 +16519,29 @@
     {
       "address": "00064820",
       "kind": "function",
-      "name": "sub_00064820",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_errno_address",
+      "aliases": [
+        "sub_00064820"
+      ],
+      "status": "native",
       "instructions": 2,
       "roadmap": "runtime.io.stdio",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Direccion de [0x25ae44] -> &errno C11, posiblemente local a hilo. Prueba de lectura/escritura y error nativo de apertura."
+      ],
+      "implementation": [
+        "src/game/save.c",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Apertura/cierre de streams, lectura/escritura y gestion de sus buffers.",
         "evidence": [
           "caller:0001cc44",
@@ -16365,7 +16552,8 @@
           "caller:0007d357",
           "caller:00082207",
           "caller:000822cf",
-          "static-inspection:00064820"
+          "static-inspection:00064820",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16396,18 +16584,29 @@
     {
       "address": "0006482c",
       "kind": "function",
-      "name": "sub_0006482c",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_calloc",
+      "aliases": [
+        "sub_0006482c"
+      ],
+      "status": "native",
       "instructions": 10,
       "roadmap": "runtime.memory.heap",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Producto cantidad*tamano, malloc y memset cero: calloc C11. Overflow y reserva de cero siguen al host, no wraparound Watcom."
+      ],
+      "implementation": [
+        "src/game/assets.c",
+        "src/render/lisa.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "malloc/free/calloc, estructuras del heap y reserva/liberacion de memoria DOS.",
         "evidence": [
           "call:00056320",
@@ -16423,7 +16622,8 @@
           "caller:00069f80",
           "caller:0007e39c",
           "caller:0007ebf8",
-          "static-inspection:0006482c"
+          "static-inspection:0006482c",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16512,18 +16712,30 @@
     {
       "address": "00064a12",
       "kind": "function",
-      "name": "sub_00064a12",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_fopen",
+      "aliases": [
+        "sub_00064a12"
+      ],
+      "status": "native",
       "instructions": 5,
       "roadmap": "runtime.io.stdio",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Apertura de stream -> fopen C11. Assets/BTZ usan rb/wb; prueba de error de apertura y cargas reales. No se emula FILE Watcom."
+      ],
+      "implementation": [
+        "src/game/assets.c",
+        "src/game/save.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/save_btz.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Apertura/cierre de streams, lectura/escritura y gestion de sus buffers.",
         "evidence": [
           "call:000649d9",
@@ -16540,7 +16752,8 @@
           "caller:000629f4",
           "caller:00062bc0",
           "caller:00062cf4",
-          "static-inspection:00064a12"
+          "static-inspection:00064a12",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16598,24 +16811,35 @@
     {
       "address": "00064ac6",
       "kind": "function",
-      "name": "sub_00064ac6",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_fprintf",
+      "aliases": [
+        "sub_00064ac6"
+      ],
+      "status": "native",
       "instructions": 13,
       "roadmap": "runtime.io.stdio",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Formateo varargs a stream -> fprintf C11. Prueba longitud devuelta, contenido y lectura posterior; sin ABI varargs Watcom."
+      ],
+      "implementation": [
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Apertura/cierre de streams, lectura/escritura y gestion de sus buffers.",
         "evidence": [
           "call:0007d4b9",
           "caller:0001dffc",
           "caller:000652da",
-          "static-inspection:00064ac6"
+          "static-inspection:00064ac6",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16623,18 +16847,30 @@
     {
       "address": "00064ae7",
       "kind": "function",
-      "name": "sub_00064ae7",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_fclose",
+      "aliases": [
+        "sub_00064ae7"
+      ],
+      "status": "native",
       "instructions": 20,
       "roadmap": "runtime.io.stdio",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Validacion/cierre de stream -> fclose C11. Buffers y errores administrados por libc; sin punteros FILE invalidos."
+      ],
+      "implementation": [
+        "src/game/assets.c",
+        "src/game/save.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/save_btz.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Apertura/cierre de streams, lectura/escritura y gestion de sus buffers.",
         "evidence": [
           "call:00064b14",
@@ -16650,7 +16886,8 @@
           "caller:000629f4",
           "caller:00062bc0",
           "caller:00062cf4",
-          "static-inspection:00064ae7"
+          "static-inspection:00064ae7",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -16763,18 +17000,29 @@
     {
       "address": "00064c2a",
       "kind": "function",
-      "name": "sub_00064c2a",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_pow_x87",
+      "aliases": [
+        "sub_00064c2a"
+      ],
+      "status": "native",
       "instructions": 121,
       "roadmap": "runtime.math.power-log",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Potencia por productos o log/exp -> pow C11. Contratos nativos de exponentes enteros; no se atribuye verificacion diferencial de esta rutina."
+      ],
+      "implementation": [
+        "src/game/physics.c",
+        "src/game/pos.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "pow y sus helpers numericos y de manejo de errores.",
         "evidence": [
           "call:00064d5d",
@@ -16795,7 +17043,8 @@
           "caller:00064d80",
           "caller:00066e34",
           "caller:0006bca8",
-          "static-inspection:00064c2a"
+          "static-inspection:00064c2a",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -17209,18 +17458,24 @@
     {
       "address": "00065330",
       "kind": "function",
-      "name": "sub_00065330",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_fill_bytes_pattern",
+      "aliases": [
+        "sub_00065330"
+      ],
+      "status": "understood",
       "instructions": 24,
       "roadmap": "runtime.memory.heap",
-      "notes": [],
+      "notes": [
+        "ECX bytes con patron EDX rotado al alinear; delega dwords a 0x65367, cola DL/DH/DL. No se porta ni se confunde con memset general."
+      ],
       "implementation": [],
       "tests": [],
-      "references": [],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "malloc/free/calloc, estructuras del heap y reserva/liberacion de memoria DOS.",
         "evidence": [
           "call:00065367",
@@ -17229,7 +17484,8 @@
           "caller:000559e4",
           "caller:00055cd0",
           "caller:0007d320",
-          "static-inspection:00065330"
+          "static-inspection:00065330",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -17237,18 +17493,24 @@
     {
       "address": "00065367",
       "kind": "function",
-      "name": "sub_00065367",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_fill_dwords",
+      "aliases": [
+        "sub_00065367"
+      ],
+      "status": "understood",
       "instructions": 48,
       "roadmap": "runtime.memory.heap",
-      "notes": [],
+      "notes": [
+        "ECX palabras de 32 bits con patron EDX; EAX avanza 4*ECX. Corrige identificacion previa como memset; contrato general aun no portado."
+      ],
       "implementation": [],
       "tests": [],
-      "references": [],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "malloc/free/calloc, estructuras del heap y reserva/liberacion de memoria DOS.",
         "evidence": [
           "caller:000215d0",
@@ -17261,7 +17523,8 @@
           "caller:00065330",
           "caller:00065990",
           "caller:00068fb8",
-          "static-inspection:00065367"
+          "static-inspection:00065367",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -17464,18 +17727,29 @@
     {
       "address": "00065782",
       "kind": "function",
-      "name": "sub_00065782",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_fmod_x87",
+      "aliases": [
+        "sub_00065782"
+      ],
+      "status": "native",
       "instructions": 10,
       "roadmap": "runtime.math.remainder",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Bucle fprem/C2 -> fmod, no remainder. C11 conserva el signo del dividendo en cero; cuatro diferencias frente a FPREM emulado quedan registradas."
+      ],
+      "implementation": [
+        "src/render/camera.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "fmod y helpers de resto en la biblioteca matematica.",
         "evidence": [
           "call:000858e2",
@@ -17491,7 +17765,8 @@
           "caller:0004f874",
           "caller:00050464",
           "caller:0006579c",
-          "static-inspection:00065782"
+          "static-inspection:00065782",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -17499,22 +17774,34 @@
     {
       "address": "0006579c",
       "kind": "function",
-      "name": "sub_0006579c",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_fmod",
+      "aliases": [
+        "sub_0006579c"
+      ],
+      "status": "native",
       "instructions": 4,
       "roadmap": "runtime.math.remainder",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Adaptador de pila a 0x65782 -> fmod C11. Oracle finito con divisor no nulo; no verifica NaN/inf/handlers Watcom."
+      ],
+      "implementation": [
+        "src/render/camera.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "fmod y helpers de resto en la biblioteca matematica.",
         "evidence": [
           "call:00065782",
-          "static-inspection:0006579c"
+          "static-inspection:0006579c",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -17522,18 +17809,30 @@
     {
       "address": "000657ac",
       "kind": "function",
-      "name": "sub_000657ac",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_fread",
+      "aliases": [
+        "sub_000657ac"
+      ],
+      "status": "native",
       "instructions": 161,
       "roadmap": "runtime.io.stdio",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Lectura por elementos -> fread C11. Contrato binario probado con bytes especiales, lectura parcial, EOF y size cero; texto sigue al host."
+      ],
+      "implementation": [
+        "src/game/assets.c",
+        "src/game/save.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/save_btz.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Apertura/cierre de streams, lectura/escritura y gestion de sus buffers.",
         "evidence": [
           "call:0007d34b",
@@ -17548,7 +17847,8 @@
           "caller:000629f4",
           "caller:00062bc0",
           "caller:00062cf4",
-          "static-inspection:000657ac"
+          "static-inspection:000657ac",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -22210,22 +22510,34 @@
     {
       "address": "00070078",
       "kind": "function",
-      "name": "sub_00070078",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_strcat",
+      "aliases": [
+        "sub_00070078"
+      ],
+      "status": "native",
       "instructions": 31,
       "roadmap": "runtime.strings.primitives",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Concatenacion terminada en NUL -> strcat. Oracle exacto con guardas, capacidad suficiente y sin solapamiento; conserva puntero destino."
+      ],
+      "implementation": [
+        "src/frontend/frontend.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Primitivas de longitud, copia y comparacion de cadenas y bloques de bytes.",
         "evidence": [
           "caller:000586d0",
-          "static-inspection:00070078"
+          "static-inspection:00070078",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -22282,18 +22594,30 @@
     {
       "address": "00070135",
       "kind": "function",
-      "name": "sub_00070135",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_fwrite",
+      "aliases": [
+        "sub_00070135"
+      ],
+      "status": "native",
       "instructions": 159,
       "roadmap": "runtime.io.stdio",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Escritura por elementos -> fwrite C11. Prueba retorno y roundtrip binario; no fuerza CRLF/EOF Ctrl-Z del modo texto DOS."
+      ],
+      "implementation": [
+        "src/game/save.c",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/save_btz.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Apertura/cierre de streams, lectura/escritura y gestion de sus buffers.",
         "evidence": [
           "call:00064820",
@@ -22304,7 +22628,8 @@
           "call:0008240e",
           "caller:000586d0",
           "caller:00061078",
-          "static-inspection:00070135"
+          "static-inspection:00070135",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -25115,25 +25440,37 @@
     {
       "address": "00076ee2",
       "kind": "function",
-      "name": "sub_00076ee2",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_ftell",
+      "aliases": [
+        "sub_00076ee2"
+      ],
+      "status": "native",
       "instructions": 23,
       "roadmap": "runtime.io.stdio",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Posicion del stream ajustada por buffer -> ftell C11. Verificada antes/despues de seek/read/write; long del host."
+      ],
+      "implementation": [
+        "src/game/assets.c",
+        "src/frontend/frontend.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Apertura/cierre de streams, lectura/escritura y gestion de sus buffers.",
         "evidence": [
           "call:000826a7",
           "caller:000610c8",
           "caller:00061100",
           "caller:00064b9a",
-          "static-inspection:00076ee2"
+          "static-inspection:00076ee2",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -25164,18 +25501,29 @@
     {
       "address": "00076f54",
       "kind": "function",
-      "name": "sub_00076f54",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_fseek",
+      "aliases": [
+        "sub_00076f54"
+      ],
+      "status": "native",
       "instructions": 101,
       "roadmap": "runtime.io.stdio",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Busqueda de stream -> fseek C11. SEEK_SET/CUR/END y borrado de EOF probados; sin estructura de buffer Watcom."
+      ],
+      "implementation": [
+        "src/game/assets.c",
+        "src/frontend/frontend.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Apertura/cierre de streams, lectura/escritura y gestion de sus buffers.",
         "evidence": [
           "call:00076f12",
@@ -25189,7 +25537,8 @@
           "caller:00062cf4",
           "caller:00064915",
           "caller:00076ed6",
-          "static-inspection:00076f54"
+          "static-inspection:00076f54",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -25197,24 +25546,36 @@
     {
       "address": "00077050",
       "kind": "function",
-      "name": "sub_00077050",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_remove",
+      "aliases": [
+        "sub_00077050"
+      ],
+      "status": "native",
       "instructions": 18,
       "roadmap": "runtime.io.descriptors",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "int 21h AH=41h -> remove C11. Persistencia usa eliminacion y limpieza nativas; codigos de error del host."
+      ],
+      "implementation": [
+        "src/game/save.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/save_btz.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "open/read/close/filelength, seek y traduccion de parametros/errores DOS.",
         "evidence": [
           "call:0007df06",
           "caller:0006114c",
           "caller:00064b9a",
-          "static-inspection:00077050"
+          "static-inspection:00077050",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -25222,23 +25583,35 @@
     {
       "address": "00077055",
       "kind": "function",
-      "name": "sub_00077055",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_rename",
+      "aliases": [
+        "sub_00077055"
+      ],
+      "status": "native",
       "instructions": 27,
       "roadmap": "runtime.io.descriptors",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "int 21h AH=56h -> rename C11. Se conserva la estrategia preexistente de persistencia portable; no equivalencia de codigos DOS."
+      ],
+      "implementation": [
+        "src/game/save.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/save_btz.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "open/read/close/filelength, seek y traduccion de parametros/errores DOS.",
         "evidence": [
           "call:0007df06",
           "caller:00061164",
-          "static-inspection:00077055"
+          "static-inspection:00077055",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -25343,18 +25716,29 @@
     {
       "address": "000770d0",
       "kind": "function",
-      "name": "sub_000770d0",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_strcmp",
+      "aliases": [
+        "sub_000770d0"
+      ],
+      "status": "native",
       "instructions": 67,
       "roadmap": "runtime.strings.primitives",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Comparacion unsigned de cadenas -> strcmp C11. Se compara signo, no magnitud; oracle incluye bytes >=128."
+      ],
+      "implementation": [
+        "src/game/assets.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Primitivas de longitud, copia y comparacion de cadenas y bloques de bytes.",
         "evidence": [
           "caller:00061399",
@@ -25362,7 +25746,8 @@
           "caller:00063310",
           "caller:00069f80",
           "caller:0007e39c",
-          "static-inspection:000770d0"
+          "static-inspection:000770d0",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -25370,23 +25755,36 @@
     {
       "address": "00077171",
       "kind": "function",
-      "name": "sub_00077171",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_strlen",
+      "aliases": [
+        "sub_00077171"
+      ],
+      "status": "native",
       "instructions": 17,
       "roadmap": "runtime.strings.primitives",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "repne scasb hasta NUL -> strlen C11. Resultado size_t del host; oracle hasta 256 bytes, incluidas cadenas vacias."
+      ],
+      "implementation": [
+        "src/game/save.c",
+        "src/frontend/frontend.c"
+      ],
+      "tests": [
+        "tests/runtime.c",
+        "tests/runtime_original.py"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Primitivas de longitud, copia y comparacion de cadenas y bloques de bytes.",
         "evidence": [
           "caller:000616db",
           "caller:00061959",
-          "static-inspection:00077171"
+          "static-inspection:00077171",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -27256,24 +27654,35 @@
     {
       "address": "0007d338",
       "kind": "function",
-      "name": "sub_0007d338",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_ascii_tolower",
+      "aliases": [
+        "sub_0007d338"
+      ],
+      "status": "native",
       "instructions": 6,
       "roadmap": "runtime.io.stdio",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "ASCII A..Z -> a..z: tolower((unsigned char)c) en locale C. Contrato nativo exhaustivo de 0..255; no equivalencia de locales arbitrarios."
+      ],
+      "implementation": [
+        "src/render/hud.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Apertura/cierre de streams, lectura/escritura y gestion de sus buffers.",
         "evidence": [
           "caller:00064844",
           "caller:00064915",
           "caller:000841aa",
-          "static-inspection:0007d338"
+          "static-inspection:0007d338",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }
@@ -27305,18 +27714,29 @@
     {
       "address": "0007d34b",
       "kind": "function",
-      "name": "sub_0007d34b",
-      "aliases": [],
-      "status": "library",
+      "name": "watcom_set_errno",
+      "aliases": [
+        "sub_0007d34b"
+      ],
+      "status": "native",
       "instructions": 6,
       "roadmap": "runtime.io.stdio",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Almacena codigo en 0x64820 -> errno C11. Se conservan codigos del host; no se traduce numeracion Watcom."
+      ],
+      "implementation": [
+        "src/game/save.c",
+        "src/platform/main.c"
+      ],
+      "tests": [
+        "tests/runtime.c"
+      ],
+      "references": [
+        "docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
+      ],
       "review": [],
       "classification": {
-        "confidence": "inferred",
+        "confidence": "documented",
         "rationale": "Apertura/cierre de streams, lectura/escritura y gestion de sus buffers.",
         "evidence": [
           "call:00064820",
@@ -27336,7 +27756,8 @@
           "caller:0007e07a",
           "caller:0008239a",
           "caller:0008240e",
-          "static-inspection:0007d34b"
+          "static-inspection:0007d34b",
+          "implementation-reference:docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos"
         ],
         "previous_roadmap": "unmapped"
       }

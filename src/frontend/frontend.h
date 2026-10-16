@@ -52,6 +52,8 @@ void ign_frontend_destroy(void);
 const IgnMenuSprite *ign_frontend_loading_sprite(void);
 const IgnPic *ign_frontend_system_picture(void); /* N_SYSG_2.PIC */
 const IgnPalette *ign_frontend_system_palette(void); /* SYS.COL, not installed by this resource loader */
+/* RED_DARK, RED_LITE, BLUEDARK, BLUELITE, RED_GREY, BLUEGREY, MINI, SMALL; invalid slots return NULL. */
+const IgnFont *ign_frontend_font(int slot);
 int ign_frontend_load(void);     /* menu_load_gfx 0x11504 */
 int ign_frontend_frame(void);    /* menu_frame 0x12bb8: IGN_FRONTEND_STAY / RACE / QUIT */
 int ign_frontend_shutdown(void); /* menu_shutdown 0x13a5c */

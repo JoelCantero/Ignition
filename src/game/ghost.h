@@ -10,7 +10,7 @@
 #define IGN_GHOST_FILE_SIZE 0x49d4c /* 10-byte header + samples * 14 + 2 zero bytes */
 
 typedef struct {
-    int16_t x, y, z;    /* mesh x/z (engine x/z - 25600); y = height, up positive, +5000 once wrecked */
+    int16_t x, y, z;    /* mesh x/z (engine x/z - 25600); y = height, up positive, +5000 only when exploded */
     int16_t roll;       /* car+0x108 ground roll, [0, 2pi) * 1024 */
     int16_t heading;    /* car+0xf8, original convention (body heading, forward = cos/sin in x/z) */
     int16_t pitch;      /* car+0x110 ground pitch */

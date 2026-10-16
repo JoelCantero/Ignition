@@ -35,6 +35,7 @@ void ign_race_ui_draw(IgnRaceUi *ui, IgnFrame *frame, const IgnHud *hud, const I
 /* 0x21448 notification deduplication; status 100 host quit, 101 restart, 102 participant quit. */
 int ign_race_ui_notify(IgnRaceUi *ui, IgnHud *hud, int status, int car, const char *name, IgnCar *participant);
 int ign_race_points(int place);
+int ign_champ_track(int klass, int round);
 /* Stable descending order, preserving the initial car order on equal scores (0x44f73). */
 void ign_race_score_order(const int *points, int n, int *order);
 
@@ -50,5 +51,16 @@ typedef struct {
 double ign_frame_time_sample(IgnFrameTime *time, int32_t now, int paused);
 /* BIOS int 1Ah replacement, modulo the original daily tick count. */
 uint32_t ign_bios_ticks(uint64_t milliseconds);
+
+typedef struct {
+    IgnPic background;
+    IgnFont font;
+    uint8_t *pan;
+    int language, track;
+} IgnRaceLoading;
+
+int ign_race_loading_init(IgnRaceLoading *loading, const char *data_dir, const char *level, int language);
+int ign_race_loading_draw(const IgnRaceLoading *loading, IgnFrame *frame, int percent);
+void ign_race_loading_destroy(IgnRaceLoading *loading);
 
 #endif

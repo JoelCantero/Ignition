@@ -20,6 +20,7 @@
 #include "../render/raster.h"
 #include "../frontend/frontend.h"
 #include "../frontend/settings.h"
+#include "../frontend/race_ui.h"
 #include "audio.h"
 #include "input.h"
 #include "music.h"
@@ -84,6 +85,8 @@ static double finish_clock;
  * or IGN_SAVE_DIR. */
 static IgnSession session;
 static int session_on, session_saved;
+static int interactive_race, race_action;
+static int championship_points[8], championship_retries = 3;
 static int tv_index = 3, spectated, spectate_wait;
 static IgnSkids skids;
 static IgnFx fx;
@@ -212,7 +215,7 @@ static void session_hooks(IgnCar *const *all, int n, const IgnTrack *t, double b
                    session_saved & IGN_SAVED_GHOST ? session.ghost_path : "not saved");
     }
     /* sub_0002ccc8 once every car is out: championship round and grid, grid shuffle, IGN_DOS.BTZ. */
-    if (race.finished >= n && !session.ended) {
+    if (!interactive_race && race.finished >= n && !session.ended) {
         int place[MAX_RIVALS + 1];
         for (int i = 0; i < n; i++) place[i] = all[i]->place - 1;
         if (ign_session_race_end(&session, race.mode, place, n) < 0)
@@ -295,6 +298,7 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
         ai_control_tick(&rival_ai[i], &rivals[i], t, all, i + 1);
     ign_race_ai_step(&race, nrivals + 1);
     ign_race_wrecks(all, nrivals + 1, lv, t);
+    ign_race_rank(&race, all, nrivals + 1);
     float focus_x = all[spectated]->x, focus_z = all[spectated]->z;
     /* sub_0003f37c runs in the frame pass, where car+0x278 is still 1 only after a landing in the frame's last tick. */
     if (skids.tick % 2 == 0)
@@ -381,7 +385,6 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
     }
     ign_set_race_started(ign_race_started(&race));
     ign_set_level_clock(race.total);
-    for (int i = 0; i <= nrivals; i++) all[i]->position = ign_race_position((const IgnCar *const *)all, nrivals + 1, i);
     return hits;
 }
 
@@ -488,6 +491,7 @@ static SDL_Renderer *shared_ren;
 static bool quit_requested;
 
 static int run_game(int argc, char **argv) {
+    race_action = IGN_FLOW_STAY;
     nrivals = 0;
     ai_trace = 0;
     memset(&race, 0, sizeof race);
@@ -503,7 +507,9 @@ static int run_game(int argc, char **argv) {
     const char *level = "USA";
     const char *shot = NULL;
     float sim_seconds = 0.0f, sim_steer = 0.0f;
-    int autopilot = 0, want_rivals = -1, sim_turbo = 0, race_mode = 0, countdown = 0, rear_view = 0, car_id = -1;
+    int autopilot = 0, want_rivals = -1, sim_turbo = 0;
+    int race_mode = shared_win ? ign_cfg_get(CFG_GAME_MODE) : 0;
+    int countdown = 0, rear_view = 0, car_id = -1;
     int sim_ticks = -1;
     bool manual_start = false;
     IgnCamera cam = {0};
@@ -636,6 +642,7 @@ static int run_game(int argc, char **argv) {
         fprintf(stderr, "--sim-ticks requires --shot\n");
         return 1;
     }
+    interactive_race = !shot;
     IgnLevel lv;
     if (ign_load_level(data_dir, level, &lv)) {
         fprintf(stderr, "cannot load level %s from %s\n", level, data_dir);
@@ -704,6 +711,7 @@ static int run_game(int argc, char **argv) {
         return 1;
     }
     ign_race_init(&race, race_mode, nrivals + 1);
+    race.section_count = track.count;
     /* Headless runs keep the user folder untouched unless --time-trial or an explicit IGN_SAVE_DIR. */
     if ((race_mode == IGN_MODE_TIME_TRIAL || !shot || getenv("IGN_SAVE_DIR")) &&
         !session_setup(data_dir, level, car.id, race_mode == IGN_MODE_TIME_TRIAL) &&
@@ -897,9 +905,27 @@ static int run_game(int argc, char **argv) {
             ign_music_start(data_dir, level, music_mode, music_volume);
     }
 
+    IgnRaceUi ui;
+    if (ign_race_ui_init(&ui, data_dir, session_on ? &session.btz : NULL, race.mode, nrivals + 1,
+                         championship_points)) {
+        ign_music_stop();
+        ign_sound_stop();
+        SDL_DestroyTexture(tex);
+        if (own_window) {
+            ign_input_shutdown(&platform_input);
+            SDL_DestroyRenderer(ren);
+            SDL_DestroyWindow(win);
+            SDL_Quit();
+        }
+        ign_hud_destroy(&hud);
+        ign_free_level(&lv);
+        return 1;
+    }
+    ui.retries = championship_retries;
+    const IgnCar *ui_cars[MAX_RIVALS + 1] = {&car};
+    for (int i = 0; i < nrivals; i++) ui_cars[i + 1] = &rivals[i];
     bool free_cam = false;
     bool manual_gear = manual_start;
-    char typed[16] = {0};
     SDL_StartTextInput(win);
     float accumulator = 0.0f;
     int pos_ticks = 0;
@@ -908,14 +934,37 @@ static int run_game(int argc, char **argv) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             int input_key = ign_input_event(&platform_input, &ev);
-            if (ev.type == SDL_EVENT_WINDOW_FOCUS_LOST) memset(typed, 0, sizeof typed);
             if (ev.type == SDL_EVENT_QUIT) quit_requested = true;
-            if (ev.type == SDL_EVENT_QUIT ||
-                (input_key == 1 && ev.type == SDL_EVENT_KEY_DOWN) ||
-                (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && platform_input.focused &&
-                 ev.gbutton.button == SDL_GAMEPAD_BUTTON_BACK))
-                running = false;
+            if (ev.type == SDL_EVENT_QUIT) running = false;
+            int ui_key = -1;
             if (ev.type == SDL_EVENT_KEY_DOWN && input_key) {
+                switch (ev.key.key) {
+                case SDLK_ESCAPE: ui_key = IGN_UI_ESCAPE; break;
+                case SDLK_RETURN: case SDLK_KP_ENTER: ui_key = IGN_UI_ENTER; break;
+                case SDLK_UP: ui_key = IGN_UI_UP; break;
+                case SDLK_DOWN: ui_key = IGN_UI_DOWN; break;
+                case SDLK_LEFT: ui_key = IGN_UI_LEFT; break;
+                case SDLK_RIGHT: ui_key = IGN_UI_RIGHT; break;
+                case SDLK_Y: ui_key = IGN_UI_YES; break;
+                case SDLK_N: ui_key = IGN_UI_NO; break;
+                default: break;
+                }
+            } else if (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && platform_input.focused) {
+                switch (ev.gbutton.button) {
+                case SDL_GAMEPAD_BUTTON_BACK: ui_key = IGN_UI_ESCAPE; break;
+                case SDL_GAMEPAD_BUTTON_SOUTH: ui_key = IGN_UI_ENTER; break;
+                case SDL_GAMEPAD_BUTTON_DPAD_UP: ui_key = IGN_UI_UP; break;
+                case SDL_GAMEPAD_BUTTON_DPAD_DOWN: ui_key = IGN_UI_DOWN; break;
+                default: break;
+                }
+            }
+            if (ui_key >= 0) {
+                int music_delta;
+                race_action = ign_race_ui_key(&ui, ui_key, &music_delta);
+                if (music_delta) ign_music_step(music_delta);
+                if (race_action != IGN_FLOW_STAY) running = false;
+            }
+            if (ev.type == SDL_EVENT_KEY_DOWN && input_key && !ev.key.repeat) {
                 if (ev.key.key == SDLK_F1) free_cam = !free_cam, hud_debug = free_cam;
                 else if (ev.key.key == SDLK_M) manual_gear = !manual_gear;
                 /* sub_0002b9e4 0x2c017: TAB (scancode 0x0f) steps the post-race camera 0, 1, 2, 3. */
@@ -926,16 +975,10 @@ static int run_game(int argc, char **argv) {
             }
             /* Cheat words are typed during play (0x160c4); BANARNE toggles 3x tall bodies. */
             if (ev.type == SDL_EVENT_TEXT_INPUT && platform_input.focused) {
-                for (const char *c = ev.text.text; *c; c++) {
-                    memmove(typed, typed + 1, sizeof typed - 2);
-                    typed[sizeof typed - 2] = (char)SDL_toupper((unsigned char)*c);
-                }
-                size_t len = strlen(typed);
-                if (len >= 7 && !strcmp(typed + len - 7, "BANARNE")) {
+                if (ign_input_typed(&platform_input, "BANARNE")) {
                     float s = car.body_stretch == 1.0f ? 3.0f : 1.0f;
                     car.body_stretch = s;
                     for (int r = 0; r < nrivals; r++) rivals[r].body_stretch = s;
-                    memset(typed, 0, sizeof typed);
                 }
             }
         }
@@ -944,7 +987,12 @@ static int run_game(int argc, char **argv) {
         last = now;
         const bool *keys = platform_input.keys;
 
-        if (free_cam) {
+        bool paused = ui.page == IGN_RACE_UI_PAUSE || ui.page == IGN_RACE_UI_QUIT ||
+                      ui.page == IGN_RACE_UI_RESTART;
+        if (paused || !running) {
+            accumulator = 0;
+            ign_input_clear_edges(&platform_input);
+        } else if (free_cam) {
             free_camera(&cam, keys, dt);
             ign_input_clear_edges(&platform_input); /* Do not defer camera-mode shifts into the race. */
         } else {
@@ -980,6 +1028,8 @@ static int run_game(int argc, char **argv) {
         ign_render_set_view(&lv, track_id, car.section,
                             car.out && finish_clock >= 120.0 ? -1 : ign_track_section_object(&track, car.section));
         draw(&lv, &car, &cam);
+        ign_race_ui_update(&ui, ui_cars);
+        ign_race_ui_draw(&ui, &frame, &hud, ui_cars, session_on ? &session.btz : NULL, music_mode);
         IgnPalette shown;
         ign_fx_palette(&fx, &lv.palette, &shown);
         to_rgb(&frame, &shown, rgb);
@@ -989,6 +1039,21 @@ static int run_game(int argc, char **argv) {
         SDL_RenderPresent(ren);
     }
 
+    if (session_on && ui.committed && race_action != IGN_FLOW_RESTART) {
+        int place[8];
+        for (int i = 0; i <= nrivals; i++) place[i] = ui_cars[i]->place - 1;
+        if (ign_session_race_end(&session, race.mode, place, nrivals + 1) < 0)
+            fprintf(stderr, "cannot save final race settings in %s\n", session.dir);
+        if (race.mode == 0 && ui.qualified && ui.complete && ui.standings[0] == 0) {
+            ign_champ_unlock(&session.btz);
+            char path[1100];
+            if (ign_save_path(path, sizeof path, session.dir, IGN_BTZ_NAME) || ign_btz_save(path, &session.btz))
+                fprintf(stderr, "cannot save championship unlock in %s\n", session.dir);
+        }
+    }
+    if (race_action == IGN_FLOW_ADVANCE) memcpy(championship_points, ui.total, sizeof championship_points);
+    if (race.mode == 0 && race_action == IGN_FLOW_RESTART && championship_retries > 0) championship_retries--;
+    ign_race_ui_destroy(&ui);
     ign_music_stop();
     ign_sound_stop();
     SDL_DestroyTexture(tex);
@@ -1138,6 +1203,8 @@ static int run_frontend(const char *data_dir) {
     }
     int rc = 0;
     while (!quit_requested) {
+        memset(championship_points, 0, sizeof championship_points);
+        championship_retries = 3;
         menu_tex = SDL_CreateTexture(shared_ren, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING,
                                      IGN_FRONTEND_W, IGN_FRONTEND_H);
         SDL_SetTextureScaleMode(menu_tex, SDL_SCALEMODE_NEAREST);
@@ -1196,7 +1263,18 @@ static int run_frontend(const char *data_dir) {
         argv[argc++] = (char *)ign_frontend_level((int)ign_cfg_get(CFG_TRACK));
         argv[argc] = NULL;
         printf("menu: race on %s, car %s, %s rivals\n", argv[argc - 1], car, rivals);
-        rc = run_game(argc, argv);
+        do {
+            if (ign_cfg_get(CFG_GAME_MODE) == 0) {
+                static const char *const levels[] = {"CANADA", "USA", "CARIB", "BRAZIL", "AUSTRIA", "ICELAND", "JAPAN"};
+                int next = ign_champ_track(ign_cfg_get(CFG_DIFFICULTY), ign_cfg_get(CFG_TRACK));
+                if (next < 0) { rc = 1; break; }
+                argv[argc - 1] = (char *)levels[next];
+            }
+            rc = run_game(argc, argv);
+            if (race_action == IGN_FLOW_ADVANCE && session_on) {
+                ign_cfg_set(CFG_TRACK, ign_btz_i32(&session.btz, IGN_BTZ_TRACK));
+            }
+        } while (!rc && !quit_requested && (race_action == IGN_FLOW_RESTART || race_action == IGN_FLOW_ADVANCE));
         if (rc) break;
         if (!quit_requested) printf("menu: back from the race\n");
     }
@@ -1212,7 +1290,11 @@ int main(int argc, char **argv) {
     int menu = argc == 1;
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "--menu")) menu = 1;
-    if (!menu) return run_game(argc, argv);
+    if (!menu) {
+        int rc;
+        do rc = run_game(argc, argv); while (!rc && !quit_requested && race_action == IGN_FLOW_RESTART);
+        return rc;
+    }
     const char *data_dir = getenv("IGNITION_DATA");
     return run_frontend(data_dir ? data_dir : DEFAULT_DATA_DIR);
 }

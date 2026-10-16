@@ -1,6 +1,5 @@
 #include "race_ui.h"
 #include "race_ui_data.h"
-#include "gfx2d.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -10,6 +9,18 @@ int ign_race_points(int place) {
     /* 0xc548c is indexed by one-based car+0x3a0; only slots 1..6 are a points table. */
     static const int points[] = {0, 10, 7, 5, 3, 2, 1};
     return place >= 1 && place <= 6 ? points[place] : 0;
+}
+
+int ign_champ_track(int klass, int round) {
+    static const int tracks[4][7] = {
+        {0, 1, 2, 3, 4, 0, 0}, {3, 2, 0, 4, 1, 5, 0},
+        {4, 3, 5, 1, 0, 2, 6}, {5, 0, 4, 6, 2, 1, 3}
+    };
+    if (klass < 0 || klass > 3 || round < 0 || round > 6) {
+        fprintf(stderr, "race UI: invalid championship class/round %d/%d\n", klass, round);
+        return -1;
+    }
+    return tracks[klass][round];
 }
 
 void ign_race_score_order(const int *points, int n, int *order) {
@@ -58,6 +69,60 @@ static int load_font(IgnFont *font, const char *dir, const char *name) {
     return 0;
 }
 
+int ign_race_loading_init(IgnRaceLoading *loading, const char *data_dir, const char *level, int language) {
+    memset(loading, 0, sizeof *loading);
+    loading->language = language >= 0 && language < 6 ? language : 0;
+    loading->track = ign_ghost_track_id(level);
+    char path[1200];
+    int n = snprintf(path, sizeof path, "%s/LEVELS/%s/%s.PIC", data_dir, level, level);
+    if (loading->track < 0 || n < 0 || (size_t)n >= sizeof path ||
+        ign_load_pic(path, &loading->background) ||
+        load_font(&loading->font, data_dir, "BALTAZAR/DATA/RED_LITE.LFT")) goto fail;
+    n = snprintf(path, sizeof path, "%s/LEVELS/%s/%s.PAN", data_dir, level, level);
+    size_t size;
+    if (n < 0 || (size_t)n >= sizeof path || !(loading->pan = ign_read_file(path, &size)) || size != 65536)
+        goto fail;
+    return 0;
+fail:
+    fprintf(stderr, "race UI: cannot load loading screen for %s\n", level);
+    ign_race_loading_destroy(loading);
+    return -1;
+}
+
+void ign_race_loading_destroy(IgnRaceLoading *loading) {
+    ign_free_pic(&loading->background);
+    ign_font_free(&loading->font);
+    free(loading->pan);
+    memset(loading, 0, sizeof *loading);
+}
+
+int ign_race_loading_draw(const IgnRaceLoading *loading, IgnFrame *frame, int percent) {
+    if (percent < 0 || percent > 100 || !loading->background.pixels || !loading->pan) {
+        fprintf(stderr, "race UI: invalid loading progress %d or uninitialised resources\n", percent);
+        return -1;
+    }
+    const IgnPic *pic = &loading->background;
+    for (int y = 0; y < frame->h; y++)
+        for (int x = 0; x < frame->w; x++)
+            frame->color[y * frame->w + x] =
+                pic->pixels[(size_t)(y * pic->height / frame->h) * pic->width + x * pic->width / frame->w];
+    IgnFont font = loading->font;
+    int x = frame->w / 3 + 13;
+    ign_font_draw(frame, NULL, &font, race_text_track[loading->language][loading->track], x, 30, loading->pan);
+    const char *label = race_text_loading[loading->language][0];
+    /* 0x222aa..0x222e8: trunc((text_width + 20) * percent * .01 * 1.19). */
+    int width = (int)((double)((ign_font_text_width(&font, label) + 20) * percent) * 0.01 * 1.19);
+    int start = frame->w / 3;
+    for (int y = 50; y < 75 && y < frame->h; y++)
+        for (int col = start; col < start + width && col < frame->w; col++)
+            frame->color[y * frame->w + col] = loading->pan[0x800 | frame->color[y * frame->w + col]];
+    ign_font_draw(frame, NULL, &font, label, x, 57, loading->pan);
+    char value[16];
+    snprintf(value, sizeof value, "%d%%", percent);
+    ign_font_draw(frame, NULL, &font, value, x, 107, loading->pan);
+    return 0;
+}
+
 int ign_race_ui_init(IgnRaceUi *ui, const char *data_dir, const IgnBtz *btz, int mode, int ncars,
                      const int previous_points[8]) {
     memset(ui, 0, sizeof *ui);
@@ -74,11 +139,10 @@ int ign_race_ui_init(IgnRaceUi *ui, const char *data_dir, const IgnBtz *btz, int
     ui->klass = btz ? ign_btz_i32(btz, IGN_BTZ_CLASS) : 0;
     if (previous_points) memcpy(ui->total, previous_points, sizeof ui->total);
     char path[1200];
-    int n = snprintf(path, sizeof path, "%s/MENUBKG.DAT", data_dir);
+    int n;
     if (load_font(&ui->normal, data_dir, "BALTAZAR/DATA/RED_DARK.LFT") ||
         load_font(&ui->selected, data_dir, "BALTAZAR/DATA/RED_LITE.LFT") ||
-        load_font(&ui->small, data_dir, "FONTS/MINI.LFT") ||
-        n < 0 || (size_t)n >= sizeof path || ign_menubox_init(path)) goto fail;
+        load_font(&ui->small, data_dir, "FONTS/MINI.LFT")) goto fail;
     n = snprintf(path, sizeof path, "%s/POKAL.PIC", data_dir);
     if (n < 0 || (size_t)n >= sizeof path || ign_load_pic(path, &ui->trophy)) goto fail;
     return 0;
@@ -93,7 +157,6 @@ void ign_race_ui_destroy(IgnRaceUi *ui) {
     ign_font_free(&ui->selected);
     ign_font_free(&ui->small);
     ign_free_pic(&ui->trophy);
-    ign_menubox_free();
 }
 
 void ign_race_ui_update(IgnRaceUi *ui, const IgnCar *const *cars) {
@@ -103,14 +166,15 @@ void ign_race_ui_update(IgnRaceUi *ui, const IgnCar *const *cars) {
         finished += cars[i]->out != 0;
     }
     int places[8];
-    for (int i = 0; i < ui->ncars; i++) places[i] = -cars[i]->place;
+    for (int i = 0; i < ui->ncars; i++)
+        places[i] = cars[i]->out && cars[i]->place > 0 ? -cars[i]->place : -100 - i;
     ign_race_score_order(places, ui->ncars, ui->order);
     /* 0x44030: results may open once all humans are out, while the AI keeps racing. */
     if (cars[0]->out && ui->page == IGN_RACE_UI_PLAY) ui->page = IGN_RACE_UI_RESULTS;
     if (finished == ui->ncars && !ui->committed) {
         for (int i = 0; i < ui->ncars; i++) ui->total[i] += ui->points[i];
         ui->committed = 1;
-        ui->qualified = cars[0]->place < 4;
+        ui->qualified = cars[0]->place >= 1 && cars[0]->place < 4;
         ui->complete = ign_champ_class_complete(ui->round, ui->klass);
     }
     int totals[8];
@@ -123,7 +187,7 @@ int ign_race_ui_key(IgnRaceUi *ui, int key, int *music_delta) {
     if (ui->page == IGN_RACE_UI_PLAY) {
         if (key == IGN_UI_ESCAPE) ui->page = IGN_RACE_UI_PAUSE, ui->selection = 0;
     } else if (ui->page == IGN_RACE_UI_QUIT || ui->page == IGN_RACE_UI_RESTART) {
-        if (key == IGN_UI_YES) {
+        if (key == IGN_UI_YES && (ui->page != IGN_RACE_UI_RESTART || ui->mode != 0 || ui->retries > 0)) {
             ui->action = ui->page == IGN_RACE_UI_QUIT ? IGN_FLOW_MENU : IGN_FLOW_RESTART;
         } else if (key == IGN_UI_NO || key == IGN_UI_ESCAPE) ui->page = ui->return_page;
     } else if (ui->page == IGN_RACE_UI_PAUSE) {
@@ -145,12 +209,18 @@ int ign_race_ui_key(IgnRaceUi *ui, int key, int *music_delta) {
     } else if (ui->mode != 0 && ui->page == IGN_RACE_UI_RESULTS) {
         if (key == IGN_UI_YES) ui->action = IGN_FLOW_RESTART;
         else if (key == IGN_UI_NO || key == IGN_UI_ENTER) ui->action = IGN_FLOW_MENU;
+    } else if (ui->page == IGN_RACE_UI_PODIUM && !ui->qualified && key == IGN_UI_UP) {
+        ui->selection = 0;
+    } else if (ui->page == IGN_RACE_UI_PODIUM && !ui->qualified && key == IGN_UI_DOWN) {
+        ui->selection = 1;
     } else if (key == IGN_UI_ENTER && ui->committed) {
         if (ui->page == IGN_RACE_UI_RESULTS) ui->page = IGN_RACE_UI_TRACK_SCORE;
         else if (ui->page == IGN_RACE_UI_TRACK_SCORE) ui->page = IGN_RACE_UI_TOTAL_SCORE;
         else if (ui->page == IGN_RACE_UI_TOTAL_SCORE) ui->page = IGN_RACE_UI_PODIUM;
-        else if (ui->page == IGN_RACE_UI_PODIUM)
-            ui->action = ui->qualified && !ui->complete ? IGN_FLOW_ADVANCE : IGN_FLOW_MENU;
+        else if (ui->page == IGN_RACE_UI_PODIUM) {
+            if (!ui->qualified && ui->selection == 0 && ui->retries > 0) ui->action = IGN_FLOW_RESTART;
+            else ui->action = ui->qualified && !ui->complete ? IGN_FLOW_ADVANCE : IGN_FLOW_MENU;
+        }
     }
     return ui->action;
 }
@@ -194,6 +264,9 @@ void ign_race_ui_draw(IgnRaceUi *ui, IgnFrame *frame, const IgnHud *hud, const I
     const uint8_t *lut = hud->pan;
     int lang = ui->language;
     int left = (frame->w - 320) / 2, top = frame->h / 2 - 50;
+    for (int y = 0; y < frame->h; y++)
+        for (int x = 0; x < frame->w; x++)
+            frame->color[y * frame->w + x] = lut ? lut[0x800 | frame->color[y * frame->w + x]] : 0;
     if (ui->page <= IGN_RACE_UI_RESTART) {
         if (ui->page == IGN_RACE_UI_PAUSE) {
             for (int i = 0; i < 4; i++)
@@ -239,7 +312,9 @@ void ign_race_ui_draw(IgnRaceUi *ui, IgnFrame *frame, const IgnHud *hud, const I
             else if (cars[i]->out && !cars[i]->wrecked) ign_hud_format_time(value, cars[i]->race_elapsed);
             else snprintf(value, sizeof value, "--:--:--");
             int y = 38 + row * step;
-            text(frame, i == 0 ? &ui->selected : &ui->normal, label, left + 40, y, 0, lut);
+            const IgnFont *font = step < ui->normal.height ? &ui->small :
+                                  i == 0 ? &ui->selected : &ui->normal;
+            text(frame, font, label, left + 40, y, 0, lut);
             text(frame, &ui->small, value, left + 225, y + 3, 0, lut);
         }
         const char *prompt = ui->mode == 0 ? race_text_continue[lang][0] : race_text_again[lang][0];

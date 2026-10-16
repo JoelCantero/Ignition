@@ -179,6 +179,10 @@ static void assets(const char *dir, const char *incomplete_dir) {
     const IgnPic *sysg2 = ign_frontend_system_picture();
     CHECK(loading && loading->s.w == 61 && loading->s.h == 58);
     CHECK(sysg2 && sysg2->pixels && ign_frontend_system_palette());
+    CHECK(!ign_frontend_font(-1) && !ign_frontend_font(8));
+    for (int slot = 0; slot < 8; slot++)
+        CHECK(ign_frontend_font(slot) && ign_frontend_font(slot)->proportional == 1 &&
+              ign_frontend_font(slot)->spacing == 1);
     char path[1400];
     snprintf(path, sizeof path, "%s/N_SYSGFX.PIC", dir);
     size_t size;
@@ -215,6 +219,7 @@ static void assets(const char *dir, const char *incomplete_dir) {
     ign_frontend_destroy();
     ign_frontend_destroy();
     CHECK(!ign_frontend_loading_sprite() && !ign_frontend_system_picture() && !ign_frontend_system_palette());
+    for (int slot = 0; slot < 8; slot++) CHECK(!ign_frontend_font(slot));
     if (incomplete_dir) {
         CHECK(ign_frontend_init(incomplete_dir, &host) == -1);
         CHECK(!ign_frontend_loading_sprite() && !ign_frontend_system_picture() && !ign_frontend_system_palette());

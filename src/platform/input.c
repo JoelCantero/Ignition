@@ -47,6 +47,8 @@ void ign_input_reset(IgnPlatformInput *in) {
     memset(in->keys, 0, sizeof in->keys);
     memset(in->held, 0, sizeof in->held);
     memset(in->pressed, 0, sizeof in->pressed);
+    memset(in->repeated, 0, sizeof in->repeated);
+    memset(in->typed, 0, sizeof in->typed);
     in->read = in->write = 0;
     for (int i = 0; i < IGN_INPUT_DEVICES; i++) {
         IgnInputDevice *d = &in->devices[i];
@@ -147,6 +149,24 @@ bool ign_input_key_pressed(IgnPlatformInput *in, int dos) {
     return down;
 }
 
+bool ign_input_key_repeat(IgnPlatformInput *in, int dos) {
+    if (dos <= 0 || dos >= 256) return false;
+    bool repeat = in->repeated[dos] != 0;
+    in->repeated[dos] = 0;
+    return repeat;
+}
+
+bool ign_input_any_key(const IgnPlatformInput *in) {
+    for (int i = 1; i < 256; i++) if (in->held[i]) return true;
+    return false;
+}
+
+bool ign_input_typed(IgnPlatformInput *in, const char *word) {
+    if (!word || !*word || !strstr(in->typed, word)) return false;
+    memset(in->typed, 0, sizeof in->typed);
+    return true;
+}
+
 int ign_input_read_key(IgnPlatformInput *in) {
     if (in->read == in->write) return 0;
     return in->queue[in->read++ % IGN_INPUT_KEY_QUEUE];
@@ -188,6 +208,19 @@ int ign_input_event(IgnPlatformInput *in, const SDL_Event *e) {
         return 0;
     }
     if (!in->focused) return 0;
+    if (e->type == SDL_EVENT_TEXT_INPUT) {
+        if (in->window && e->text.windowID && e->text.windowID != in->window) return 0;
+        for (const unsigned char *p = (const unsigned char *)e->text.text; p && *p; p++) {
+            size_t length = strlen(in->typed);
+            if (length == sizeof in->typed - 1) {
+                memmove(in->typed, in->typed + 1, length);
+                length--;
+            }
+            in->typed[length] = *p < 128 ? (char)SDL_toupper(*p) : (char)*p;
+            in->typed[length + 1] = 0;
+        }
+        return 0;
+    }
     if (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP) {
         if (in->window && e->key.windowID && e->key.windowID != in->window) return 0;
         int sc = e->key.scancode, key = ign_input_dos_scancode((SDL_Scancode)sc);
@@ -198,8 +231,9 @@ int ign_input_event(IgnPlatformInput *in, const SDL_Event *e) {
         if (key) {
             in->held[key] = down;
             if (fresh) in->pressed[key] = 1;
+            if (fresh || (down && e->key.repeat)) in->repeated[key] = 1;
         }
-        return fresh ? enqueue(in, key) : 0;
+        return fresh || (down && e->key.repeat) ? enqueue(in, key) : 0;
     }
     bool pad = e->type == SDL_EVENT_GAMEPAD_AXIS_MOTION ||
                e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e->type == SDL_EVENT_GAMEPAD_BUTTON_UP;

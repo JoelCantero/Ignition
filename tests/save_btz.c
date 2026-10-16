@@ -124,8 +124,9 @@ static void defaults_and_championship(void) {
               ign_btz_i32(&b, IGN_BTZ_GRID + 28) == 7 && b.raw[0x17f] == 0xcb && ign_btz_i32(&b, 0x52f) == 1,
           "sub_0001a864 defaults");
 
-    check(ign_champ_qualified(3, 99, 0) && !ign_champ_qualified(4, 0, 0) && ign_champ_qualified(5, 3, 1),
-          "top 4 of car 0, or car 1 with two players");
+    check(ign_champ_qualified(2, 99, 0) && !ign_champ_qualified(3, 0, 0) && ign_champ_qualified(5, 2, 1) &&
+              !ign_champ_qualified(-1, 99, 0),
+          "top 3 of car 0, or car 1 with two players (zero-based API)");
     check(ign_champ_class_complete(4, 0) && !ign_champ_class_complete(4, 1) && ign_champ_class_complete(6, 3) &&
               ign_champ_class_complete(5, 1) && !ign_champ_class_complete(6, 1),
           "class lengths 5, 6, 7, 7");
@@ -134,10 +135,10 @@ static void defaults_and_championship(void) {
     ign_champ_end_race(&b, 0, place, 3);
     check(ign_btz_i32(&b, IGN_BTZ_TRACK) == 2 && ign_btz_i32(&b, IGN_BTZ_GRID) == 0, "not qualified: unchanged");
     ign_champ_end_race(&b, 1, place, 3);
-    check(ign_btz_i32(&b, IGN_BTZ_TRACK) == 3 && ign_btz_i32(&b, IGN_BTZ_GRID) == 5 &&
-              ign_btz_i32(&b, IGN_BTZ_GRID + 4) == 6 && ign_btz_i32(&b, IGN_BTZ_GRID + 8) == 4 &&
+    check(ign_btz_i32(&b, IGN_BTZ_TRACK) == 3 && ign_btz_i32(&b, IGN_BTZ_GRID) == 4 &&
+              ign_btz_i32(&b, IGN_BTZ_GRID + 4) == 5 && ign_btz_i32(&b, IGN_BTZ_GRID + 8) == 3 &&
               ign_btz_i32(&b, IGN_BTZ_GRID + 12) == 3,
-          "next round and grid 6 - place");
+          "next round and grid 5 - zero-based place");
     ign_btz_set_i32(&b, IGN_BTZ_TRACK, 6);
     ign_champ_end_race(&b, 1, place, 3);
     check(ign_btz_i32(&b, IGN_BTZ_TRACK) == 6, "round capped at 6");

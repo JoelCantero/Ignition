@@ -208,7 +208,7 @@ void ign_btz_before_save(IgnBtz *b, int mode, int ncars, int value_107, int valu
 }
 
 int ign_champ_qualified(int place0, int place1, int players_minus_one) {
-    return place0 < 4 || (players_minus_one == 1 && place1 < 4);
+    return (place0 >= 0 && place0 < 3) || (players_minus_one == 1 && place1 >= 0 && place1 < 3);
 }
 
 int ign_champ_class_complete(int round, int klass) {
@@ -220,7 +220,7 @@ void ign_champ_end_race(IgnBtz *b, int qualified_advance, const int *place, int 
     int round = ign_btz_i32(b, IGN_BTZ_TRACK) + 1;
     ign_btz_set_i32(b, IGN_BTZ_TRACK, round > 6 ? 6 : round);
     /* 0x2cf12: the points of 0xc548c go to [0x1aebb0], outside the image */
-    for (int i = 0; i < ncars && i < 8; i++) ign_btz_set_i32(b, IGN_BTZ_GRID + i * 4, 6 - place[i]);
+    for (int i = 0; i < ncars && i < 8; i++) ign_btz_set_i32(b, IGN_BTZ_GRID + i * 4, 5 - place[i]);
 }
 
 void ign_champ_unlock(IgnBtz *b) {

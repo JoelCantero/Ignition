@@ -79,13 +79,13 @@ int ign_records_insert_lap(IgnTrackRecords *r, const char *name, double seconds)
 void ign_btz_shuffle_grid(IgnBtz *b, int mode, int ncars, double (*random01)(void));
 
 /* Championship (mode 0). render_main 0x44a2a: qualified when car 0 (or car 1 with two players) finished in the
- * first 4; the loop does not advance its car pointer, so only these two cars are looked at. place = car+0x3a0
- * (0-based). */
+ * first 3; the loop does not advance its car pointer, so only these two cars are looked at. This API takes
+ * zero-based places; car+0x3a0 in the executable is one-based. */
 int ign_champ_qualified(int place0, int place1, int players_minus_one);
 /* 0x44a66: round 4 of class 0, 5 of class 1 or 6 of classes 2/3 completes the class. */
 int ign_champ_class_complete(int round, int klass);
 /* sub_0002ccc8 0x2ce8d..0x2cf40 for mode 0: a qualified car 0 that did not complete the class advances the round
- * ([0x1fee54] = track + 1 > track; capped at 6); grid slot i becomes 6 - place[i]. */
+ * ([0x1fee54] = track + 1 > track; capped at 6); grid slot i becomes 5 - zero_based_place[i]. */
 void ign_champ_end_race(IgnBtz *b, int qualified_advance, const int *place, int ncars);
 /* render_main 0x44fd2..0x45095, only when car 0 leads the standings with one player: the last round of a class
  * raises +0x587 and moves +0x00c to the next class; the last round of class 3 sets +0x58b. */

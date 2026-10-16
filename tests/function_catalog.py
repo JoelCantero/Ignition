@@ -23,7 +23,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len(self.catalog["symbols"]) - len(functions), 62)
         self.assertEqual(sum(metrics["statuses"].values()), metrics["functions"])
         self.assertEqual(metrics["game_functions"], metrics["functions"] - metrics["statuses"]["library"])
-        self.assertEqual(metrics["game_instructions"], 108665)
+        self.assertEqual(metrics["game_instructions"], 109739)
         self.assertGreater(sum(s["instructions"] for s in functions), metrics["unique_instructions"])
         self.assertEqual(metrics["inventory_sha256"], catalog_tools.inventory_fingerprint(self.catalog))
 
@@ -36,6 +36,23 @@ class CatalogTests(unittest.TestCase):
         metrics = catalog_tools.summarize(self.catalog)
         self.assertEqual(metrics["review_functions"],
                          sum(bool(s["review"]) for s in self.catalog["symbols"] if s["kind"] == "function"))
+
+    def test_runtime_native_batch_has_individual_evidence_and_preserves_pending_work(self):
+        runtime = [s for s in self.catalog["symbols"] if s.get("roadmap", "").startswith("runtime.")]
+        self.assertEqual(len(runtime), 306)
+        resolved = [s for s in runtime if s["status"] in ("native", "verified")]
+        self.assertEqual(sum(s["status"] == "native" for s in resolved), 29)
+        self.assertEqual(sum(s["status"] == "verified" for s in resolved), 4)
+        for symbol in resolved:
+            self.assertTrue(symbol["implementation"], symbol["address"])
+            self.assertIn("tests/runtime.c", symbol["tests"])
+            self.assertIn("docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos", symbol["references"])
+            self.assertEqual(symbol["classification"]["confidence"], "documented")
+        for address in ("00065330", "00065367"):
+            symbol = next(s for s in runtime if s["address"] == address)
+            self.assertEqual(symbol["status"], "understood")
+            self.assertFalse(symbol["implementation"])
+            self.assertFalse(symbol["tests"])
 
     def test_documented_reference_paths_exist(self):
         for symbol in self.catalog["symbols"]:

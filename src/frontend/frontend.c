@@ -309,6 +309,7 @@ void ign_frontend_destroy(void) {
 const IgnMenuSprite *ign_frontend_loading_sprite(void) { return g_loading.px ? &g_loading : NULL; }
 const IgnPic *ign_frontend_system_picture(void) { return g_sysg2.pixels ? &g_sysg2 : NULL; }
 const IgnPalette *ign_frontend_system_palette(void) { return g_sysgfx ? &g_system_palette : NULL; }
+const IgnFont *ign_frontend_font(int slot) { return slot >= 0 && slot < 8 ? g_font_slot[slot] : NULL; }
 
 /* ---- settings (0x198bc) ----------------------------------------------------------------------------------------- */
 

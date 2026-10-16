@@ -121,6 +121,8 @@ class Original:
         end = BUFFER + 16 + len(expected)
         if bytes(self.uc.mem_read(end, 16)) != b"\xa5" * 16:
             raise ValueError("String routine overwrote trailing guard")
+        if bytes(self.uc.mem_read(BUFFER + 2048, len(b) + 17)) != b + b"\0" + b"\xa5" * 16:
+            raise ValueError("String routine modified its source")
         if kind == "A":
             return (a + b).hex() or "-"
         if kind == "C":

@@ -57,6 +57,12 @@ if(NOT MSVC)
   target_compile_options(ignition PRIVATE -Wall -Wextra)
 endif()
 
+add_executable(driving_kernels_test tests/driving_kernels.c)
+target_link_libraries(driving_kernels_test PRIVATE ignition_core)
+if(NOT MSVC)
+  target_compile_options(driving_kernels_test PRIVATE -Wall -Wextra)
+endif()
+
 # Music: MUSIC/TrackNN.ogg (the original CD audio) decoded by the vendored stb_vorbis.
 add_library(stb_vorbis STATIC third_party/stb_vorbis/stb_vorbis.c)
 target_compile_definitions(stb_vorbis PRIVATE STB_VORBIS_NO_PUSHDATA_API STB_VORBIS_NO_STDIO)
@@ -83,6 +89,7 @@ add_custom_target(elf
 
 # Deterministic headless regression (needs the game data); run with `ctest --test-dir build`.
 enable_testing()
+add_test(NAME driving_kernels COMMAND driving_kernels_test --self-test)
 add_executable(runtime_test tests/runtime.c)
 target_link_libraries(runtime_test PRIVATE ignition_core)
 if(NOT MSVC)
@@ -204,6 +211,10 @@ option(IGN_VERIFY_ORIGINAL "Compare physics and car kernels with original LE byt
 if(IGN_VERIFY_ORIGINAL)
   # Triangle primitive 0x729f3 and matrix sprites 0x82950 against the original LE bytes (Unicorn).
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME driving_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/driving_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:driving_kernels_test>
+            --report ${CMAKE_BINARY_DIR}/driving-original-report.json)
   add_test(NAME hud_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/hud_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:hud_assets_test>

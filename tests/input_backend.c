@@ -25,16 +25,21 @@ static void keyboard(void) {
     CHECK(ign_input_dos_scancode(SDL_SCANCODE_PRINTSCREEN) == 0xb7);
     CHECK(ign_input_dos_scancode(SDL_SCANCODE_UNKNOWN) == 0);
     CHECK(key(&in, SDL_SCANCODE_UP, true, false) == 0xc8);
-    CHECK(key(&in, SDL_SCANCODE_UP, true, true) == 0);
+    CHECK(key(&in, SDL_SCANCODE_UP, true, true) == 0xc8);
     CHECK(key(&in, SDL_SCANCODE_UP, true, false) == 0);
     CHECK(ign_input_key_down(&in, 0xc8));
     CHECK(ign_input_key_pressed(&in, 0xc8));
     CHECK(!ign_input_key_pressed(&in, 0xc8));
+    CHECK(ign_input_key_repeat(&in, 0xc8));
+    CHECK(!ign_input_key_repeat(&in, 0xc8));
+    CHECK(ign_input_any_key(&in));
+    CHECK(ign_input_read_key(&in) == 0xc8);
     CHECK(ign_input_read_key(&in) == 0xc8);
     CHECK(ign_input_read_key(&in) == 0);
     CHECK(ign_input_sample(&in, &c, true, &rear).accel);
     key(&in, SDL_SCANCODE_UP, false, false);
     CHECK(!ign_input_sample(&in, &c, true, &rear).accel);
+    CHECK(!ign_input_any_key(&in));
     c.legacy_keys = false;
     c.keys[2] = 0x20; /* Saved key remap: D is accelerate, not steer. */
     key(&in, SDL_SCANCODE_D, true, false);
@@ -50,6 +55,13 @@ static void keyboard(void) {
     key(&in, SDL_SCANCODE_SLASH, true, false);
     CHECK(ign_input_sample(&in, &c, true, &rear).gear_shift == 0);
     ign_input_reset(&in);
+    SDL_Event text = {0};
+    text.type = SDL_EVENT_TEXT_INPUT;
+    text.text.text = "prefixbanarne";
+    ign_input_event(&in, &text);
+    CHECK(ign_input_typed(&in, "BANARNE"));
+    CHECK(!ign_input_typed(&in, "BANARNE"));
+    CHECK(!ign_input_typed(&in, ""));
     c.legacy_keys = true;
     key(&in, SDL_SCANCODE_W, true, false);
     key(&in, SDL_SCANCODE_SPACE, true, false);

@@ -47,11 +47,11 @@ varias pistas y el multijugador.
 
 | Métrica | Valor |
 |---|---|
-| Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 482 clasificadas como runtime) |
-| Instrucciones únicas desensambladas | **128 832** (20 167 de runtime/libc/DOS/4G) |
-| Código del juego marcado como portado/verificado | **48 712 de 108 665 instrucciones (44,8 %)**; **187 de 630 funciones (29,7 %)** |
+| Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 449 clasificadas como runtime) |
+| Instrucciones únicas desensambladas | **128 832** (19 093 de runtime/libc/DOS/4G) |
+| Código del juego marcado como portado/verificado | **48 756 de 109 739 instrucciones (44,4 %)**; **191 de 663 funciones (28,8 %)** |
 | Código del juego marcado como parcial | **8 402 instrucciones en 18 funciones**; excluido del numerador portado |
-| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **630 de 630 (100,0 %)**; 303 documentadas, 297 inferidas y 30 por resolver; no es cobertura de portado |
+| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **663 de 663 (100,0 %)**; 338 documentadas, 295 inferidas y 30 por resolver; no es cobertura de portado |
 | Formatos de datos propios descifrados | 15 de 21 (TRI, POS y TAB solo en parte) |
 | Código del port | ≈ 13 900 líneas de C (`src/`, sin contar las tablas generadas `menu_data.c`) |
 
@@ -634,15 +634,15 @@ Las tablas de este README y el dashboard son vistas derivadas; se edita una sola
 
 | Estado | Funciones | Interpretación |
 |---|---:|---|
-| `unknown` | 361 | Sin identificación fiable; requiere análisis |
+| `unknown` | 359 | Sin identificación fiable; requiere análisis |
 | `identified` | 55 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
-| `understood` | 1 | Comportamiento entendido, todavía no implementado |
+| `understood` | 3 | Comportamiento entendido, todavía no implementado |
 | `port-pending` | 0 | Pendiente explícita y priorizada (ninguna: `car_ground_contact` y `collisions_pass` ya están portadas) |
 | `partial` | 18 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
 | `ported` | 141 | Implementada en el port, sin afirmar verificación completa |
-| `verified` | 46 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
-| `native` | 8 | Bucle/temporizador (`0x10010`–`0x1034c`) → SDL; busy, play y stop de CD → reproducción OGG |
-| `library` | 482 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
+| `verified` | 50 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
+| `native` | 37 | Bucle/temporizador (`0x10010`–`0x1034c`) → SDL; busy, play y stop de CD → reproducción OGG |
+| `library` | 449 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
 
 ### Catálogo único de funciones
 

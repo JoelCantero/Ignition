@@ -31,7 +31,8 @@ typedef struct {
     Uint32 window;
     bool initialized, focused;
     bool keys[SDL_SCANCODE_COUNT];
-    Uint8 held[256], pressed[256], queue[IGN_INPUT_KEY_QUEUE];
+    Uint8 held[256], pressed[256], repeated[256], queue[IGN_INPUT_KEY_QUEUE];
+    char typed[IGN_INPUT_KEY_QUEUE];
     unsigned read, write;
     IgnInputDevice devices[IGN_INPUT_DEVICES];
 } IgnPlatformInput;
@@ -53,7 +54,11 @@ int ign_input_event(IgnPlatformInput *input, const SDL_Event *event);
 int ign_input_dos_scancode(SDL_Scancode scancode);
 bool ign_input_key_down(const IgnPlatformInput *input, int dos);
 bool ign_input_key_pressed(IgnPlatformInput *input, int dos);
+bool ign_input_key_repeat(IgnPlatformInput *input, int dos);
+bool ign_input_any_key(const IgnPlatformInput *input);
 int ign_input_read_key(IgnPlatformInput *input);
+/* ASCII command/cheat matcher over SDL's text stream; a match clears the bounded history. */
+bool ign_input_typed(IgnPlatformInput *input, const char *word);
 int ign_input_axis(int value, IgnInputAxis calibration); /* signed -100..100, invalid calibration = 0 */
 bool ign_input_calibrate_axis(IgnPlatformInput *input, int device, int axis, IgnInputAxis calibration);
 void ign_input_config_defaults(IgnInputConfig *config);

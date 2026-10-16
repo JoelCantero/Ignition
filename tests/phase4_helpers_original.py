@@ -11,7 +11,7 @@ from pathlib import Path
 import struct
 import subprocess
 
-from hud_original import ESP, RETURN, WORK, Original
+from hud_original import ESP, WORK, Original
 
 
 def signed(value):
@@ -182,6 +182,7 @@ def main():
         elif kind == "sprite":
             layout, index, *desc = map(int, words[1:])
             assert tuple(desc) == sprites[layout][index], (line, sprites[layout][index])
+    assert counts == {"workspace": 36, "layout": 24, "message": 95, "sprite": 111}, counts
     print(json.dumps({"native_original_vectors": counts, "original_release_observations": original.releases(),
                       "sha256": "179c654ba65281f08bbcda2b5943ab9f35c309ec718600f81104644d22db948c"}))
 
