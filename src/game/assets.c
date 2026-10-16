@@ -1,5 +1,6 @@
 #include "assets.h"
 #include "pos.h"
+#include "track.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -295,6 +296,7 @@ int ign_load_level(const char *data_dir, const char *name, IgnLevel *out) {
     if (!col_data || ign_parse_col(col_data, col_size, &out->palette)) goto done;
     if (ign_load_pic(pic, &out->backdrop)) goto done;
     if (ign_load_model(plc, msh, tex, &out->track)) goto done;
+    if (ign_track_recenter_model(&out->track)) goto done;
     if (ign_engine_place(&out->track)) goto done;
     if (ign_pos_load(pos, out->track.nobj, &out->pos)) {
         fprintf(stderr, "invalid or unreadable POS animation file %s\n", pos);
@@ -669,9 +671,8 @@ int ign_collect_walls(const IgnLevel *lv, float x, float y, float z, int jump, I
     int32_t ix = (int32_t)x, iy = (int32_t)y, iz = (int32_t)z;
     for (int oi = 0; oi < lv->track.nobj; oi++) {
         const IgnObject *o = &lv->track.objs[oi];
-        /* |height - raw PLC y|: the per-track reaches just cover each track's road vertices (AUSTRIA 346 < 350,
-         * JAPAN 71 < 125); with the literal `add` at 0x34027 JAPAN and CARIB would have no walls at all. */
-        if (abs(ix - o->pos[0]) >= radius || abs(iy + o->pos[1]) >= height || abs(iz - o->pos[2]) >= radius ||
+        /* 0x34027 adds the engine object's y (= raw recentered PLC y = -pos[1]) to car height. */
+        if (abs(ix - o->pos[0]) >= radius || abs(iy - o->pos[1]) >= height || abs(iz - o->pos[2]) >= radius ||
             (o->type & 0xfff) >= 100)
             continue;
         for (int fi = 0; fi < o->nf; fi++) {

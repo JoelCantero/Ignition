@@ -62,15 +62,15 @@ address	function	status	instructions	roadmap
 00019ac8	menu_setup	ported	798	phase4.ui
 0001a864	settings_defaults	ported	153	phase4.ui
 0001aaf8	menu_load_car	ported	242	phase4.ui
-0001aea0	ai_drive	partial	1869	phase1.ai-route
+0001aea0	ai_drive	ported	1869	phase1.ai-route
 0001cc44	sub_0001cc44	unknown	41	unmapped
 0001ccd0	sub_0001ccd0	unknown	48	unmapped
 0001cd6c	sub_0001cd6c	unknown	39	unmapped
 0001cdfa	sub_0001cdfa	unknown	24	unmapped
-0001ce30	load_tri	partial	1079	phase1.ai-route
+0001ce30	load_tri	ported	1079	phase1.ai-route
 0001dcc4	sub_0001dcc4	unknown	12	unmapped
 0001dcfc	sub_0001dcfc	unknown	146	unmapped
-0001decc	ai_find_section	partial	94	phase1.ai-route
+0001decc	ai_find_section	ported	94	phase1.ai-route
 0001dffc	sub_0001dffc	unknown	60	unmapped
 0001e090	body_step	verified	446	phase1.physics
 0001e638	body_pair_impulse	identified	375	phase2.collisions
@@ -128,7 +128,7 @@ address	function	status	instructions	roadmap
 00028000	hud_build_sprites	ported	668	phase4.hud
 00028a14	hud_select_layout	partial	28	phase4.hud
 00028a84	hud_rebuild_sprites	identified	289	phase4.hud
-00028f08	build_sections	partial	1227	phase1.ai-route
+00028f08	build_sections	ported	1227	phase1.ai-route
 0002a410	reset_race_times	identified	43	unmapped
 0002a4ec	sound_load	ported	306	phase4.audio
 0002a97c	sub_0002a97c	unknown	143	unmapped
@@ -245,7 +245,7 @@ address	function	status	instructions	roadmap
 00051760	sub_00051760	unknown	70	unmapped
 000517fc	sub_000517fc	unknown	11	unmapped
 00051818	blit_lut_rect	ported	73	phase4.ui
-00051938	sub_00051938	unknown	29	unmapped
+00051938	angle_normalize	verified	29	phase3.car-update
 00051980	sub_00051980	unknown	27	unmapped
 000519c8	sub_000519c8	unknown	40	unmapped
 00051a38	palette_step	understood	52	unmapped

@@ -52,6 +52,7 @@ typedef struct {
     int32_t *cell;    /* per object: z cell * 200 + x cell, engine coordinates */
     uint32_t *stamp;  /* per object: insertion order into its cell */
     uint32_t clock;
+    int track_recentered; /* build_sections has normalized the mutable PLC/MSH before world creation */
 } IgnModel;
 
 #define IGN_ENGINE_GRID 200
@@ -103,7 +104,7 @@ int ign_load_model(const char *plc_path, const char *msh_path, const char *tex_p
                    IgnModel *out);
 void ign_free_model(IgnModel *m);
 
-/* data_dir: game root; name: e.g. "USA". Returns 0 on success. */
+/* data_dir: game root; name: e.g. "USA". Recentres track PLC/MSH before placing the engine grid. */
 int ign_load_level(const char *data_dir, const char *name, IgnLevel *out);
 void ign_free_level(IgnLevel *lv);
 

@@ -19,8 +19,8 @@
 000230f4  load_plc             LEVELS\..PLC + CARS\CARS.PLC  roadmap=phase2.world
 0002322c  load_msh             LEVELS\..MSH + CARS\CARS.MSH  roadmap=phase2.world
 00023368  load_tex             LEVELS\..TEX + CARS.TEX  roadmap=phase2.world
-0001ce30  load_tri             direct PLC sections, two canonical slots, record +1 = TRI block byte 0, float32 angles and binary64 insets (CW 0x127f); bounded geometry oracle tests/ai_geometry_original.py, full loader excluded  status=partial roadmap=phase1.ai-route
-0001aea0  ai_drive             rival AI, al=car; params 0xbfb30, state [0xeb7c0] 0x7c B/car; stored TRI heading, travel blend, lookahead index clamp, target clipping by insets and curvature 0x1b4a2..0x1b823 (oracle tests/ai_target_original.py); record/lane selection, slope, spin, 5/8 gains and avoidance sign excluded  status=partial roadmap=phase1.ai-route
+0001ce30  load_tri             direct recentered PLC sections, two canonical slots, float32 angles/binary64 insets (CW 0x127f); full-entry oracle tests/track_original.py: 1565 normal records + 70 one-byte placeholders on 7 tracks; host I/O/allocation native  status=ported roadmap=phase1.ai-route
+0001aea0  ai_drive             rival controller al=car; lane selection, slope, pedals, steering/model-5/8 gain, avoidance, flat spin, stuck/reverse, turbo; tests/ai_drive_original.py compares full entry through car_input arguments and epilogue; undefined placeholder reads have logged native alternatives, car_input effects/whole race excluded  status=ported roadmap=phase1.ai-route
 00026458  cars_init            allocs cars/bodies, torque splines, start grid (slots 0xc33d0); bounded turbo initialization 0x27451..0x27497 verified, full init excluded  roadmap=phase1.car
 00048a14  car_place_objects    per frame: body/wheels/shadow/name engine objects, front wheel steer  roadmap=phase3.render
 00040ec8  cars_body_sway       body tilt car+0x584/+0x58c = ground tilt + lean, smoothed 0.25  roadmap=phase1.car
@@ -83,8 +83,9 @@
 0002f617  lap_probe_retain     preserves car+370 on sentinel 10000; geometry supplied, not verified  status=partial roadmap=phase1.race
 0002fc1c  lap_phase_update     abs(car+364), quarter intervals [q,2q),[2q,3q),[3q,4q); one transition per call, final upper bound verified  status=ported roadmap=phase1.race
 001fb390  g_best_lap           shared strict minimum; original seed from saved track table 1ff367+track*78; port DBL_MAX session-only deviation  status=identified
-0002d008  cars_update_all      status=partial calls car_update; rotating AI scheduler, cached input replay and pre-input gearbox ported; LE-fragment oracle tests/ai_schedule_original.py; dispatcher remains incomplete roadmap=phase3.car-update
+0002d008  cars_update_all      status=partial calls car_update; scheduler/replay/gearbox and 0x2d9c7..0x2d9e8 body+28 -> angle_normalize -> car+f8 before controls ported; separate normalized drive_heading preserves accumulated body; corrected seven-track diagnostics: 48945 defined decisions, zero controller/copy mismatches, section dwells 24->0; remaining dispatcher partial roadmap=phase3.car-update
 0001e090  body_step            rigid-body bicycle model, dt 1/72; isolated x87 replay vs physics.c, 190 fixtures (tests/physics_original.py), not whole-game equivalence  status=verified roadmap=phase1.physics
+00051938  angle_normalize      stack double -> st0, ret 8; repeated +/-6.2831853071796 into [0,2pi); ign_car_sync_heading preserves accumulated body+28 and copies car+f8; car_original kernel N executes unmodified caller 0x2d9c7..0x2d9ee plus helper, 291 bit-exact cases incl signed zero/boundaries, CW=0x127f; finite input  status=verified roadmap=phase3.car-update
 00053e70  torque_spline        Hermite curve -> 200 int16  status=ported roadmap=phase1.physics
 0004d5f4  car_input            verified D/A and J turbo arbitration fragments (10728 cases/82440 steps); J composes decision/refusal commit/countdown excluding audio/FX side effects; human request generation/latch separately verified in P; full dispatcher and cached input unverified  status=partial roadmap=phase1.controls
 0004db90  car_throttle         drive to 0x4dfbe verified: 6829 cases/30174 steps; drive+revs to 0x4e1a7: 6941/32734, final torque index shared; supplied torque tables, finished/hardware-mode2 input override excluded  status=partial roadmap=phase1.controls
@@ -165,7 +166,7 @@
 00041430  respawn_place        after glide: probe point with ground_list_query 0x32dc8 (view at the point, layer of its object; or 20 to -x), still, airborne; bounded controls reset verified: gear 1/counter 0, preserves delay/turbo/clocks; geometry/full FX excluded (respawn oracle 7422 cases/31344 steps)  status=ported roadmap=phase1.race
 0004e688  turbo_start_fx       10 nitro puffs (0xc41a0) when a turbo starts  status=ported roadmap=phase1.controls
 000413fc  ease_curve           table 0xc0678[f*200]*0.005 (ease in-out)  roadmap=phase3.render
-00028f08  build_sections       route topology from PLC-origin distances; parallel branch B, class-6 merge and next-object angles (track.c)  status=partial roadmap=phase1.ai-route
+00028f08  build_sections       integer recentering, PLC/vertex mutation before world creation, main/B topology, signed fork overwrite, unequal-branch -2, jumps and terminal repetitions; full-entry oracle: 2182 objects/55735 vertices/1365 sections on 7 tracks  status=ported roadmap=phase1.ai-route
 000247b0  split_plc_types      rewrites the PLC type to its class (type & 0xfff) before world creation and level_prepare; [0x1fef7c] 12 B per object: layer (bits 12-15), byte 2, byte 3  roadmap=phase2.world
 001ff004  g_section_count
 001feff8  g_sections           24 bytes per section
@@ -194,9 +195,9 @@
 001fee3c  g_push_sound_wait    0x12e push sample cooldown (15 car updates)
 001fede4  g_lightning_active   set by fx_lightning 0x3bdac
 0002de30  race_elimination    mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), "%s IS OUT"; [0x1fed78]-- ; at 1 left, all finish  roadmap=phase1.race
-0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> wrap/fallback/invalid-record selection ported; route topology remains approximate  status=partial roadmap=phase1.ai-route
+0001decc  ai_find_section      (ax=section, dx=branch, ebx=step) -> single wrap, persistent slot fallback, reject invalid and split-to-single, CANADA exception; 5516 original full-function queries on 7 tracks; returns at 0x1dffb  status=ported roadmap=phase1.ai-route
 000bf994  t_ai_lookahead        6 i16 section offsets {1,2,3,4,6,8} (read as dword [0xbf992+2k] >> 16)
-000bf9a0  t_ai_lanes           4 x {section, chance, lane} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; rand per matching row
+000bf9a0  t_ai_lanes           4 x {section, chance, selector} per track idx (0x18 B); idx = [0xeb7e4+2*track] = {1,2,3,6,4,0,5}; FIRST matching row consumes one rand; selector alone uses unpermuted track id
 000bfa48  t_ai_curve_limits    8 x {section&~1, km/h} per idx (32 B); 500 = no limit, -999 = empty
 # Lisa 2 engine and rasterizer (src/render/lisa.c, lisa_raster.c)
 000564d8  engine_init          sine table of every tenth of a degree (-180..630 deg, float)  status=ported roadmap=phase3.render

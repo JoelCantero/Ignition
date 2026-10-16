@@ -21,6 +21,58 @@ static void print_target_record(const IgnAiRouteRecord *record) {
     printf("%" PRIu32 " %d ", bits, record->surface);
 }
 
+static void print_original_oracle(const IgnTrack *track, const IgnLevel *level, const char *name) {
+    printf("T %s %d %d\n", name, track->count, track->nobj);
+    for (int i = 0; i < track->nobj; i++) {
+        const IgnObject *o = &level->track.objs[i];
+        int32_t raw[3];
+        memcpy(raw, level->track.plc + 12 + i * 20, sizeof raw);
+        printf("P %d %" PRId32 " %" PRId32 " %" PRId32 " %" PRId32 " %" PRId32 " %" PRId32
+               " %" PRId32 "\n", i, o->pos[0], o->pos[1], o->pos[2],
+               raw[0], raw[1], raw[2], level->track.cell[i]);
+        printf("V %d ", i);
+        const uint8_t *v = (const uint8_t *)o->verts;
+        for (int k = 0; k < o->nv * 12; k++) printf("%02x", v[k]);
+        puts("");
+    }
+    for (int o = 0; o < track->nobj; o++)
+        printf("O %d %d %.0f %.0f %.0f\n", o, track->section[o],
+               track->center[o][0], track->center[o][1], track->center[o][2]);
+    for (int s = 0; s < track->count; s++) {
+        double a = -1, b = -1;
+        ign_track_section_angle(track, level, s, &a);
+        if (s) ign_track_section_angle(track, level, -s, &b);
+        printf("S %d %d %d %d %d %.17g %.17g\n", s, track->section_obj[s],
+               track->section_obj_b[s], track->section_next_obj[s],
+               track->section_next_obj_b[s], a, b);
+        for (int slot = 0; slot < 2; slot++) {
+            const IgnAiRouteRecord *r = ign_track_ai_record(track, s, slot);
+            printf("R %d %d %d", s, slot, r != NULL);
+            if (r) {
+                printf(" %d %d %d", r->valid, r->surface, r->tri_type);
+                for (int k = 0; k < 6; k++) printf(" %" PRId32, r->point[k]);
+                for (int k = 0; k < 4; k++) printf(" %" PRId32, r->inset[k]);
+                for (int k = 0; k < 8; k++) {
+                    const float *v = k < 3 ? &r->heading[k] :
+                                     k < 6 ? &r->slope[k - 3] : &r->across[k - 6];
+                    uint32_t bits;
+                    memcpy(&bits, v, sizeof bits);
+                    printf(" %" PRIu32, bits);
+                }
+            }
+            puts("");
+        }
+    }
+    for (int s = -1; s <= track->count; s++)
+        for (int slot = 0; slot < 2; slot++)
+            for (int step = -1; step <= 1; step += 2) {
+                int ns = -999, nb = -999, object = -999;
+                int ok = ign_track_find_section(track, s, slot, step, ign_ghost_track_id(name),
+                                                 &ns, &nb, &object);
+                printf("Q %d %d %d %d %d %d %d\n", s, slot, step, ok, ns, nb, object);
+            }
+}
+
 /* Inputs for tests/ai_target_original.py: slot-0 records at the clamped lookahead indices of
  * 0x1b1a5..0x1b1f3 and car positions around the current gate (SRF coordinates). */
 static void print_target_fixtures(const IgnTrack *track) {
@@ -71,6 +123,12 @@ static int validate_track(const char *data_dir, const char *name, int oracle) {
         ign_free_level(&level);
         return 1;
     }
+    if (oracle == 3) {
+        print_original_oracle(&track, &level, name);
+        ign_free_track(&track);
+        ign_free_level(&level);
+        return 0;
+    }
 
     int main_objects = 0, main_gaps = 0, first_main_gap = -1, branch_objects = 0, records = 0;
     failed |= check(track.start_obj >= 0 && track.dir_obj >= 0, name,
@@ -93,7 +151,7 @@ static int validate_track(const char *data_dir, const char *name, int oracle) {
                 main_objects++;
                 int mapped_section = main_obj < track.nobj ? track.section[main_obj] : -1;
                 if (main_obj >= track.nobj ||
-                    (mapped_section != s &&
+                    (mapped_section != s && !(mapped_section == -s && branch_obj == main_obj) &&
                      !(mapped_section > s && mapped_section < track.count &&
                        track.section_obj[mapped_section] == main_obj))) {
                     fprintf(stderr, "FAIL %s: main section %d -> object %d -> mapped section %d\n",
@@ -133,6 +191,13 @@ static int validate_track(const char *data_dir, const char *name, int oracle) {
                                 name, "a main split suppresses branch B");
                 for (int r = 0; r < count; r++) {
                     const IgnAiRouteRecord *record = &track.ai_records[s][path][r];
+                    if (!record->valid) {
+                        failed |= check(path == 1 && count == 1 && branch_obj == -2 &&
+                                            ign_track_ai_record(&track, s, 1) == record &&
+                                            !record->geometry_valid,
+                                        name, "missing branch B retains its byte-only invalid slot");
+                        continue;
+                    }
                     failed |= check(record->valid && record->object >= 0 &&
                                         record->object < track.nobj &&
                                         record->plc == record->object,
@@ -201,9 +266,10 @@ int main(int argc, char **argv) {
         "USA", "CANADA", "AUSTRIA", "BRAZIL", "CARIB", "ICELAND", "JAPAN",
     };
     int oracle = argc != 3 ? 0 : strcmp(argv[2], "--geometry-oracle") == 0 ? 1 :
-                 strcmp(argv[2], "--target-fixtures") == 0 ? 2 : -1;
+                 strcmp(argv[2], "--target-fixtures") == 0 ? 2 :
+                 strcmp(argv[2], "--original-oracle") == 0 ? 3 : -1;
     if (argc != 2 && oracle <= 0) {
-        fprintf(stderr, "usage: %s GAME_DATA_DIRECTORY [--geometry-oracle|--target-fixtures]\n", argv[0]);
+        fprintf(stderr, "usage: %s GAME_DATA_DIRECTORY [--geometry-oracle|--target-fixtures|--original-oracle]\n", argv[0]);
         return 2;
     }
 

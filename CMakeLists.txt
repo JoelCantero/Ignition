@@ -94,6 +94,8 @@ add_test(NAME track_ai_records COMMAND track_ai_records_test)
 add_executable(ai_route_choice_test tests/ai_route_choice.c)
 target_link_libraries(ai_route_choice_test PRIVATE ignition_core)
 add_test(NAME ai_route_choice COMMAND ai_route_choice_test)
+add_executable(ai_drive_test tests/ai_drive.c)
+target_link_libraries(ai_drive_test PRIVATE ignition_core)
 add_executable(ai_schedule_test tests/ai_schedule.c)
 target_link_libraries(ai_schedule_test PRIVATE ignition_core)
 add_test(NAME ai_schedule COMMAND ai_schedule_test)
@@ -136,6 +138,7 @@ if(NOT MSVC)
   target_compile_options(track_topology_test PRIVATE -Wall -Wextra)
   target_compile_options(track_real_assets_test PRIVATE -Wall -Wextra)
   target_compile_options(ai_route_choice_test PRIVATE -Wall -Wextra)
+  target_compile_options(ai_drive_test PRIVATE -Wall -Wextra)
   target_compile_options(ai_schedule_test PRIVATE -Wall -Wextra)
   target_compile_options(hud_assets_test PRIVATE -Wall -Wextra)
   target_compile_options(palette_test PRIVATE -Wall -Wextra)
@@ -151,6 +154,13 @@ if(IGN_VERIFY_ORIGINAL)
 endif()
 if(IGN_VERIFY_ORIGINAL)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME track_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/track_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --data "${GAME_DIR}"
+            --runner $<TARGET_FILE:track_real_assets_test>
+            --report ${CMAKE_BINARY_DIR}/track-original-report.json
+            --export ${CMAKE_BINARY_DIR}/track-original-records.json)
+  set_tests_properties(track_original PROPERTIES FIXTURES_SETUP original_track_tables)
   add_test(NAME ai_geometry_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_geometry_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:track_ai_records_test>
@@ -161,6 +171,12 @@ if(IGN_VERIFY_ORIGINAL)
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:ai_route_choice_test>
             --assets-runner $<TARGET_FILE:track_real_assets_test> --data "${GAME_DIR}"
             --report ${CMAKE_BINARY_DIR}/ai-target-original-report.json)
+  add_test(NAME ai_drive_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_drive_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:ai_drive_test>
+            --report ${CMAKE_BINARY_DIR}/ai-drive-original-report.json
+            --records ${CMAKE_BINARY_DIR}/track-original-records.json)
+  set_tests_properties(ai_drive_original PROPERTIES FIXTURES_REQUIRED original_track_tables)
   add_test(NAME ai_schedule_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ai_schedule_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:ai_schedule_test>

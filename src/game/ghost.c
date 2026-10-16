@@ -130,6 +130,7 @@ void ign_ghost_pose(const IgnGhost *g, int tick, IgnCar *car) {
     car->height = car->ground = s->y;
     car->y = (float)-car->height;
     car->body.heading = s->heading / 1024.0;
+    ign_car_sync_heading(car);
     car->heading = (float)(TWO_PI / 4.0 - car->body.heading);
     car->body.roll = car->body_roll = s->roll / 1024.0;
     car->body.pitch = car->body_pitch = s->pitch / 1024.0;

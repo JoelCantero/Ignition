@@ -93,6 +93,59 @@ static const IgnTrack *hud_track;
 /* The free camera (F1) shows the debug camera overlay of sub_00049fdc. */
 static bool hud_debug;
 static IgnWeather weather;
+static int ai_trace;
+
+static void trace_ai_car(const IgnCar *c) {
+    fprintf(stderr, "[%d,%d,%d,%d,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
+                    "%.17g,%.17g,%.17g,%.17g,%.17g]",
+            c->section, c->spec, c->airborne, c->flat, (double)c->x, (double)c->z, (double)c->kmh,
+            c->body.v_fwd, c->drive_heading, c->step_x, c->step_z, c->turbo_charge, c->ai_side,
+            c->axle[0][0], c->axle[0][1], c->axle[1][0], c->axle[1][1]);
+}
+
+/* Capture the actual decision boundary, not a controller call reconstructed after the tick. */
+static void ai_control_tick(IgnAi *ai, IgnCar *c, const IgnTrack *t, IgnCar *const *all, int index) {
+    int capture = ai_trace && ign_race_ai_action(&race, c, index, 1) == IGN_AI_CONTROLS_DRIVE;
+    IgnCar before;
+    IgnAi previous;
+    unsigned seed = 0;
+    if (capture) {
+        before = *c;
+        previous = *ai;
+        seed = fx.seed;
+    }
+    ign_ai_control_tick(ai, c, t, &fx, &race, index);
+    if (capture) {
+        const IgnAiParams *p = &previous.p;
+        const IgnCar *b = &before;
+        fprintf(stderr, "AI_DIAG {\"schema\":2,\"tick\":%d,\"index\":%d,\"case\":[%d,%d,%d,[",
+                ghost_tick, index, track_id, ign_get_difficulty(), t->count);
+        trace_ai_car(b);
+        for (int i = 0; i <= nrivals; i++)
+            if (i != index) {
+                fputc(',', stderr);
+                trace_ai_car(all[i]);
+            }
+        fprintf(stderr, "],%u,[%.17g,%.17g,%d,%d,%d,%d,%d,%.17g],"
+                        "[%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d]],"
+                        "\"motion\":{\"lap\":%d,\"out\":%d,\"wrecks\":%d,\"gear\":%d,"
+                        "\"ground_object\":%d,\"height\":%.17g,\"ground\":%.17g,"
+                        "\"fall_speed\":%.17g,\"wall_hit\":%d,\"wall_impact\":%.17g,"
+                        "\"drive_before\":%.17g,\"slip\":%.17g,\"grip\":%.17g,\"body_heading\":%.17g,"
+                        "\"wheel_types\":[%d,%d,%d,%d]}",
+                seed, previous.side, previous.steer, previous.stuck, previous.accel, previous.section,
+                previous.route_choice, previous.route_selector, previous.route_random,
+                p->s00, p->s08, p->s10, p->s18, p->s20, p->s28, p->s38, p->s40, p->s48,
+                b->lap, b->out, b->wrecks, b->gear, b->ground_object, b->height, b->ground,
+                b->fall_speed, b->wall_hit, b->wall_impact, b->body.drive, b->slip, b->grip_avg, b->body.heading,
+                b->wheel_type[0], b->wheel_type[1], b->wheel_type[2], b->wheel_type[3]);
+        fprintf(stderr, ",\"native\":[%d,%d,%d,%d,%d,%d,%d,%d,%d,%u,%.17g,%.17g,%.17g],"
+                        "\"applied\":{\"drive\":%.17g,\"steer\":%.17g,\"gear\":%d}}\n",
+                ai->input.a_accel, ai->input.a_brake, ai->input.a_steer, ai->input.turbo,
+                ai->stuck, ai->accel, ai->section, ai->route_choice, ai->route_selector,
+                fx.seed, ai->side, ai->steer, ai->route_random, c->body.drive, c->body.steer, c->gear);
+    }
+}
 
 /* Start grid of sub_00026458: PLC origin of the type-0 object facing the type-1 object; slot i is
  * (i/2)*180 + 200 units back and 60 units to the side by parity (a lone car: 200 back, centred). */
@@ -240,11 +293,14 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
     IgnCarHit impacts[MAX_RIVALS * (MAX_RIVALS + 1) / 2 + 1];
     int nimpacts = 0;
     int hits = ign_cars_collide(all, nrivals + 1, impacts, (int)(sizeof impacts / sizeof impacts[0]), &nimpacts);
+    /* 0x2d9c7: car+0xf8 is copied after the collision passes and before any control decision. */
+    for (int i = 0; i <= nrivals; i++)
+        if (!all[i]->wrecked) ign_car_sync_heading(all[i]);
     /* cars_update_all 0x2dcbc: control phase follows physics and pair collisions for all cars. */
     if (autopilot || player->progress_lock == 1)
-        ign_ai_control_tick(player_ai, player, t, &fx, &race, 0);
+        ai_control_tick(player_ai, player, t, all, 0);
     for (int i = 0; i < nrivals; i++)
-        ign_ai_control_tick(&rival_ai[i], &rivals[i], t, &fx, &race, i + 1);
+        ai_control_tick(&rival_ai[i], &rivals[i], t, all, i + 1);
     ign_race_ai_step(&race, nrivals + 1);
     ign_race_wrecks(all, nrivals + 1, lv, t);
     float focus_x = all[spectated]->x, focus_z = all[spectated]->z;
@@ -441,6 +497,7 @@ static bool quit_requested;
 
 static int run_game(int argc, char **argv) {
     nrivals = 0;
+    ai_trace = 0;
     memset(&race, 0, sizeof race);
     ghost_on = ghost_tick = 0;
     finish_clock = 0;
@@ -710,6 +767,7 @@ static int run_game(int argc, char **argv) {
 
     if (shot) {
         const char *trace = getenv("IGN_TRACE");
+        ai_trace = trace && !strcmp(trace, "ai");
         int full_trace = trace && !strcmp(trace, "full"), trace_tick = 0;
         IgnInput in = {.accel = sim_seconds > 0, .left = sim_steer < 0, .right = sim_steer > 0,
                        .turbo = sim_turbo};
@@ -750,7 +808,7 @@ static int run_game(int argc, char **argv) {
             ticks++;
             hits += car.wall_hit;
             air += car.airborne;
-            if (trace && !full_trace)
+            if (trace && !full_trace && !ai_trace)
                 fprintf(stderr, "t=%.3f x=%.0f z=%.0f h=%.1f g=%.1f v=%.2f air=%d type=0x%x drive=%.0f/%.0f turbo=%d/%.0f kmh=%.0f\n",
                         t, car.x, car.z, car.height, car.ground, car.fall_speed, car.airborne,
                         car.surface_type, car.body.drive, car.body.fmax_f, car.turbo_mode,

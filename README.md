@@ -33,7 +33,8 @@ original (`MAINDOS.EXE`, DOS/4GW, Watcom C). El objetivo es un juego nativo para
 
 El port implementa **carreras de 3 vueltas** en las 7 pistas: física, choques con muros y entre coches, turbo,
 parrilla de salida y coches bien montados (sombra y dirección incluidas), contra hasta 7 rivales. Hay fin de carrera y
-clasificación básicos; los rivales usan una **IA aproximada**. POS ya carga y anima los objetos de pista, con rotación
+clasificación básicos; los rivales usan el **controlador de IA original portado**, contrastado contra sus bytes LE.
+POS ya carga y anima los objetos de pista, con rotación
 aproximada; los objetos móviles cuentan en las colisiones como en el motor original: conos y barriles que salen
 volando, peligros móviles que destruyen el coche, géiseres, coches aplastados y animaciones de textura. El HUD de carrera
 (`0x4a320`) está portado en sus tres resoluciones con las coordenadas, estados, aguja, turbo, señales, semáforo
@@ -41,20 +42,21 @@ volando, peligros móviles que destruyen el coche, géiseres, coches aplastados 
 con matriz) son idénticos píxel a píxel a los bytes originales. El **frontend original está portado**: pantalla de
 idioma, intro en vídeo CDP, menús en 6 idiomas con su motor de páginas, fondo vectorial animado (idéntico al píxel al
 original), carrusel de coches 3D, récords, créditos y configuración en `IGN_DOS.BTZ`; al elegir pista y coche arranca
-la carrera y al salir de ella se vuelve al menú. Faltan la IA fiel, el sombreado original, el campeonato completo de
+la carrera y al salir de ella se vuelve al menú. Faltan la validación integral de una carrera DOS, el sombreado original, el campeonato completo de
 varias pistas y el multijugador.
 
 | Métrica | Valor |
 |---|---|
 | Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 482 clasificadas como runtime) |
 | Instrucciones únicas desensambladas | **128 832** (20 167 de runtime/libc/DOS/4G) |
-| Código del juego marcado como portado/verificado | **42 095 de 108 665 instrucciones (38,7 %)**; **157 de 630 funciones (24,9 %)** |
-| Código del juego marcado como parcial | **12 617 instrucciones en 21 funciones**; excluido del numerador portado |
+| Código del juego marcado como portado/verificado | **46 393 de 108 665 instrucciones (42,7 %)**; **162 de 630 funciones (25,7 %)** |
+| Código del juego marcado como parcial | **8 348 instrucciones en 17 funciones**; excluido del numerador portado |
 | Funciones de juego vinculadas explícitamente a una tarea del roadmap | **257 de 630 (40,8 %)**; runtime excluido y `unmapped` no significa fuera de alcance |
 | Formatos de datos propios descifrados | 15 de 21 (TRI, POS y TAB solo en parte) |
 | Código del port | ≈ 13 900 líneas de C (`src/`, sin contar las tablas generadas `menu_data.c`) |
 
-Los totales anteriores se regeneran con `disasm.py coverage`; el detalle completo está en
+Los totales anteriores conservan el inventario publicado, con las cuatro funciones de IA/trazado actualizadas;
+el detalle completo está en
 [`docs/function-coverage.txt`](docs/function-coverage.txt) y el inventario conciliable por función en
 [`docs/function-roadmap.tsv`](docs/function-roadmap.tsv). La cobertura cuenta instrucciones únicas de las funciones
 marcadas `ported` o `verified`, excluye `partial` y las funciones clasificadas heurísticamente como `library`.
@@ -371,7 +373,7 @@ src/game/physics.{c,h}  cuerpo rígido (modelo bicicleta), par motor, muros, cho
 src/game/car.{c,h}      coche: suelo bajo 4 ruedas, vertical, dirección, acelerador, turbo, pose visual, vueltas,
                         contacto con objetos, aplastamiento, reaparición
 src/game/track.{c,h}    clases PLC, orden de tramos y bifurcaciones, puertas por tramo (TRI)
-src/game/ai.{c,h}       IA de rivales (port parcial de 0x1aea0)
+src/game/ai.{c,h}       IA de rivales (controlador original 0x1aea0)
 src/game/ghost.{c,h}    fantasmas GST: leer, grabar a 72 Hz y guardar con el formato exacto del original; reglas de contrarreloj
 src/game/save.{c,h}     IGN_DOS.BTZ: imagen por defecto, récords, campeonato y persistencia en la carpeta de usuario
 src/game/skid.{c,h}     efectos de derrape: marcas en la pista y polvo (`sub_0003731c`)
@@ -464,7 +466,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | PLC | colocación de objetos (pistas y coches) | ✅ portado |
 | MSH | mallas: vértices + caras de 44 B (UV 8.8, página, tipo de superficie) | ✅ portado |
 | SRF | rejilla de consulta de suelo (celdas, listas A/B, spans trapezoidales) | ✅ portado |
-| TRI | bordes izquierdo/derecho por tramo (puertas de la IA) | 🟡 bordes portados; `double`s sin descifrar |
+| TRI | bordes izquierdo/derecho por tramo (puertas de la IA) | ✅ cargador, slots y geometría derivados portados; quedan bytes del archivo no usados por el cargador |
 | POS | animaciones de objetos (fotogramas pos+rot) | 🟡 parser, avance a 36 Hz, render y colisiones (solo traslación, como el motor); orden de rotación del render aproximado |
 | TAB | tabla de sombreado `color×nivel` (64 niveles) | 🟡 significado conocido; no se usa |
 | PAN / SHD | tablas 256×256 de 64 KB | 🟡 SHD fila 0x28 = sombra; PAN = tabla de mezcla de los sprites y primitivas del HUD (portada) |
@@ -495,7 +497,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Rejilla y lista de objetos del motor, consulta sobre ella | `0x569ec`, `LI_PLACEOBJECT`/`LI_MOVEOBJECT`, `0x58c1c`, `0x32dc8` | `assets.c` | verificadas: 300 listas y 1 500 consultas exactas; usadas por la reaparición y el relámpago |
 | Objetos de colisión (conos, barriles, balizas) | `0x24f22`, `car_ground_contact` `0x350f0`, `0x349e8`, `0x346cc`, `0x35f38` | `pos.c`, `car.c` | núcleos y fragmentos verificados: 7 503 casos |
 | Objetos especiales 0x12c–0x131 | `car_update` `0x2ef9d`/`0x30dbb`, `0x3383c` | `pos.c`, `car.c` | consulta verificada (1 500); peligros móviles 0x12c, alud 0x130, vuelta de campana 0x12d/géiser, empujón 0x12e, aplastamiento 0x12f |
-| Aplastamiento | `0x31858`, `cars_update_all` `0x2d3c2`, `car_update` `0x31316` | `car.c`, `pos.c` | fiel salvo render (solo altura) y dirección invertida de la IA |
+| Aplastamiento | `0x31858`, `cars_update_all` `0x2d3c2`, `car_update` `0x31316` | `car.c`, `pos.c`, `ai.c` | fiel salvo render (solo altura); inversión de dirección IA con ventana/dificultad original |
 | Animaciones de textura | `0x2abdc`, `0x10508`, `0x10a00` | `pos.c` | paso verificado (500); creación portada |
 | Resto de `collisions_pass` | `0x3fd04`: `0x4c858`, `0x4fcf0` | `pos.c`, `main.c` | cola de mensajes (sin dibujo) y humo de eliminación portados |
 | Suelo bajo 4 ruedas, ruedas anómalas | `car_update` `0x2eea4`–`0x30d98` | `car.c` | fiel: esquinas de la caja ×1,1 escaladas por `1 + km/h / 220`, cabeceo `asin` limitado a 0,1 rad/tick |
@@ -503,7 +505,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Muros (aristas no compartidas, activación por superficie, modo salto, caché de 150) | `collect_walls` `0x33ee8`, `car_update` `0x2f856`, `cars_update_all` `0x2d77a` | `assets.c`, `car.c` | fiel |
 | Choque con muros | `box_vs_walls` `0x1f708`, `wall_impulse` `0x1f3fc` | `physics.c` | fiel |
 | Choque entre coches | pase en `0x2d2f8`, `0x1ebb4`, `0x1e638` | `physics.c`, `car.c` | fiel (el solape aplasta, ver abajo) |
-| Tramos, bifurcaciones y saltos | `split_plc_types` `0x247b0`, `build_sections` `0x28f08` | `track.c` | búsqueda por origen PLC, contador de bifurcación, ruta B paralela y merge portados; prueba estructural sobre assets de las 7 pistas (`track_real_assets`), sin cotejo runtime completo con el original |
+| Tramos, bifurcaciones y saltos | `split_plc_types` `0x247b0`, `build_sections` `0x28f08` | `track.c` | topología, mapas y ángulos de 1 365 secciones comparados con ejecución original en las 7 pistas (`track_original`) |
 | Vueltas, fases y tiempos | `car_update` `0x2f2be`, `0x2fc1c` | `race.c`, `car.c` | 3 024 casos / 4 112 pasos exactos por fragmentos; geometría, récord guardado y avisos excluidos |
 | Parrilla de salida | `cars_init` `0x26458` | `main.c` | fiel |
 | Turbo | `car_turbo` `0x4e2d8`, `car_input` `0x4d8eb`, `human_input` `0x2c99e` | `car.c` | aritmética: 2 016 casos / 96 768 pasos; arbitraje por fragmentos: 10 728 / 82 440 exactos; generación humana/latch: 5 184 / 31 104 exactos; sondeo, timer DOS, IA/joystick, sonido/efectos y coherencia del rumbo del caller no verificados |
@@ -515,7 +517,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Sombra del coche | `0x48a14` | `raster.c` | geometría fiel; sombreado aproximado |
 | Trucos (BANARNE, SURMULE, SLASKTRATT…) | `menu_page_key` `0x160c4` | `frontend.c`, `main.c` | fiel: se teclean en el menú; BANARNE también en carrera |
 | BTZ, récords, contrarreloj y campeonato | `0x2293c`, `0x2adf8`, `0x2ccc8`, `0x2cf60`, `render_main` `0x45938`, menú `0x1a864` | `save.c`, `ghost.c` | ida y vuelta byte a byte del BTZ real; imagen por defecto idéntica al original (Unicorn); reglas por pruebas unitarias; sin clasificación por puntos |
-| IA de rivales | `ai_drive` `0x1aea0`, `load_tri` `0x1ce30` | `ai.c`, `track.c` | ⚠️ **port parcial**: tabla `t_ai_lanes`/RNG, índices PLC directos, dos slots canónicos, selector y topología implementados; ángulos float32/interiores verificados por fragmentos con el CW real `0x127f` (4 920 comparaciones exactas) y mezcla de rumbo (1 184 casos); recorte del objetivo y curvatura `0x1b4a2..0x1b823` verificados por fragmento (7 562 casos); faltan pendiente Y, giro por solape, ganancias 5/8, esquiva y cotejo integral de carriles/controlador |
+| IA de rivales | `ai_drive` `0x1aea0`, `load_tri` `0x1ce30`, `ai_find_section` `0x1decc` | `ai.c`, `track.c` | portados: 4 323 casos de controlador definido, 1 635 registros y 5 516 consultas comparados con el original; incluye pendiente, giro por aplastamiento, ganancia de modelos 5/8, esquiva, carriles y turbo; desviaciones explícitas ante lecturas indefinidas del original |
 | Render 3D | motor Lisa 2 | `raster.c` | propio: z-buffer, sin sombreado TAB |
 | HUD de carrera y mensajes | `race_hud` `0x4a320`, `0x4be7c`, `0x4c7c0`/`0x4c858`/`0x4c89c`, `0x4a150`, `0x28000` | `hud.c` | fiel: tablas de recortes, colocación y texto de las tres resoluciones, ventanas de uno y dos jugadores; contadores a 36 Hz |
 | Fuentes LFT/FNT | `0x61220`, `0x61399`, `0x616db`, `0x61959`, `0x53d60` | `font.c` | fiel; pruebas del parser |
@@ -529,7 +531,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Configuración y récords | `0x1a864`, `0x198bc`, `IGN_DOS.BTZ` | `frontend/settings.c` | literal |
 
 Geometría IA: `tests/ai_geometry_original.py` compara ambos fragmentos LE con `atan2`/`__CHP`
-reales, para 902 fixtures sintéticos y 1 558 registros de las siete pistas; compara bits float32
+reales, para 902 fixtures sintéticos y 1 565 registros de las siete pistas; compara bits float32
 y coordenadas enteras. Ahora se ejecuta con el control word del runtime **`0x127f`** (53 bits), como
 los demás oracles: con el antiguo `0x037F` (64 bits) el oracle pasaba, pero con `0x127f` el residuo
 extendido del port fallaba en 297 comparaciones de interiores (20 registros reales) y en un límite de
@@ -537,22 +539,56 @@ la mezcla de rumbo. Interiores y mezcla usan ya aritmética binary64 directa; co
 
 Recorte del objetivo: `tests/ai_target_original.py` ejecuta sin parchear `0x1b4a2→0x1b823` de `ai_drive`
 (cambio de rumbo inicial, recorte por interiores, byte TRI de agarre y suma de curvatura) con `atan2` real
-y CW `0x127f`: **7 562 casos** (1 830 sintéticos y 5 432 de registros slot 0 de las siete pistas) sin
+y CW `0x127f`: **7 590 casos** (2 130 sintéticos y 5 460 de registros slot 0 de las siete pistas) sin
 fallos; enteros, centros, signo y doubles comparados bit a bit. Cubre 224 de 228 instrucciones del
 fragmento; mutaciones del port (bucle interior, signo, orden de producto, constante π, centro) se detectan.
-No valida la selección de registros/carril ni el controlador completo. Los consumidores posteriores
+Ese oracle por fragmento no valida la selección de registros/carril ni el controlador completo. Los consumidores posteriores
 (divisor `3·índice+6` del acelerador, condición `índice>2` del ajuste interior, `look_off[índice]` del turbo,
-`a8 = 1+(agarre+0.8)·curva`) se portan por lectura del desensamblado, sin oracle propio; esa lectura
+`a8 = 1+(agarre+0.8)·curva`) se contrastan ahora además en `ai_drive_original`; la lectura inicial
 corrigió además el divisor invertido del ajuste interior con signo +1 (`0x1c57a..0x1c5a4`).
 
-Controles humanos (`--sim 60` con dirección 0, 1 y turbo): **21/21** trazas `IGN_TRACE` de 60 s e imágenes idénticas al build
+Referencia histórica del bloque de recorte del objetivo: controles humanos (`--sim 60` con dirección 0, 1 y turbo):
+**21/21** trazas `IGN_TRACE` de 60 s e imágenes idénticas al build
 anterior al bloque, en las siete pistas. El smoke repetido de 200 s con siete rivales es determinista en las
 **7/7** pistas y sin NaN. Frente al build anterior (casi todos los rivales en la vuelta 0), en USA, BRAZIL,
 CARIB, ICELAND y JAPAN la mayoría pasa a las vueltas 1–3, pero CANADA (secciones −158/−159) y AUSTRIA
 (196–201, todos en la vuelta 0) siguen atascados y quedan rivales a <10 km/h: no demuestra carreras
-completas ni IA terminada. Se conserva la referencia histórica sin
+completas ni equivalencia integral. Se conserva la referencia histórica sin
 regenerar: **0/23** (22 diferencias de estado, 23 de imagen, ninguna de ejecución).
 Véanse [alcance geométrico y límites](docs/formats.md#geometría-derivada-de-load_tri-y-mezcla-de-rumbo-verificación-por-fragmentos).
+
+Controlador y trazado completos: `track_original` ejecuta las entradas originales y compara **2 182 objetos,
+55 735 vértices, 1 365 secciones, 1 635 registros y 5 516 consultas** en siete pistas. El recentrado se aplica
+antes de construir grid/POS, conservando vértices mundiales y usando los nuevos orígenes en paredes/culling.
+`ai_drive_original` compara **4 323 casos definidos** (1 617 sintéticos y 2 706 reales), con controles y
+estado entero exactos; los doubles usan tolerancias `2e-13`. Otros 212 candidatos leen heap indefinido
+en el original (24 reales): se enumeran, se coteja su estado de ruta/RNG definido y se exige salida nativa finita.
+No se simulan los efectos de `car_input` en ese oracle ni una carrera DOS completa.
+El smoke actual de 200 s con ocho coches, repetido dos veces, es determinista y finito en las siete pistas.
+Vueltas del jugador automático tras corregir el rumbo: USA/CANADA/CARIB/ICELAND 3,
+AUSTRIA/BRAZIL/JAPAN 2. No es una garantía de terminar todas las carreras en ese tiempo.
+**Diagnóstico integrado anterior a la corrección:** 49 225 decisiones reales de siete carreras de 200 s;
+48 580 casos definidos coinciden con el controlador DOS y 645 lecturas indefinidas se excluyen explícitamente.
+Se confirmó una frontera sin portar en `cars_update_all`: el original llama a `angle_normalize` (`0x51938`)
+para copiar `body+0x28` a `car+0xf8`, pero la IA nativa recibía directamente el rumbo acumulado del cuerpo.
+Aplicar sólo esa copia DOS a los estados capturados cambiaba **11 984 controles** y 220 actualizaciones del atasco.
+**Corrección aplicada:** `IgnCar.drive_heading` conserva la copia normalizada separada de `body.heading`;
+se sincroniza al inicializar/cambiar pose, tras física y después de colisiones, antes de los controles.
+El helper y su fragmento llamador pasan **291 casos bit a bit**, incluidos límites y cero con signo.
+Las nuevas carreras registran **49 444 decisiones: 48 945 comparaciones definidas sin discrepancias**
+y 499 lecturas indefinidas DOS excluidas. No hay discrepancias de copia ni entradas IA fuera de rango.
+Las permanencias de ≥5 s en una sección pasan de **24 a 0**; CARIB pasa de vuelta 0 a 3 y CANADA de 1 a 3.
+En 14 pruebas humanas recta/turbo sin rivales se conservan estados e imágenes del binario anterior.
+`car_update` y el resto de `cars_update_all` siguen parciales; esto no verifica una carrera DOS integral.
+Véase [diagnóstico y reproducción](docs/formats.md#diagnóstico-integrado-de-atascos-2026-10-16).
+Los informes se generan con:
+
+```sh
+ctest --test-dir build -R '^(track_original|ai_drive_original)$' --output-on-failure
+```
+
+Con `IGN_VERIFY_ORIGINAL=ON`, CTest genera primero las tablas originales como fixture compartida.
+Detalle y desviaciones: [controlador completo](docs/formats.md#controlador-completo-y-tablas-originales).
 
 ---
 
@@ -563,21 +599,25 @@ instrucciones está en `docs/function-coverage.txt`):
 
 | Estado | Funciones | Interpretación |
 |---|---:|---|
-| `unknown` | 362 | Sin identificación fiable; requiere análisis |
+| `unknown` | 361 | Sin identificación fiable; requiere análisis |
 | `identified` | 84 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
 | `understood` | 1 | Comportamiento entendido, todavía no implementado |
 | `port-pending` | 0 | Pendiente explícita y priorizada (ninguna: `car_ground_contact` y `collisions_pass` ya están portadas) |
-| `partial` | 21 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
-| `ported` | 136 | Implementada en el port, sin afirmar verificación completa |
-| `verified` | 21 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
+| `partial` | 17 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
+| `ported` | 140 | Implementada en el port, sin afirmar verificación completa |
+| `verified` | 22 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
 | `native` | 5 | Sustitución nativa explícita: `main`, `main_step` y el temporizador PIT/BIOS (`0x10010`–`0x1034c`) → SDL |
 | `library` | 482 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
 
-El inventario de 1 112 filas se puede regenerar con
+Los generadores de inventario y cobertura se ejecutan con
 `.venv/bin/python tools/disasm.py roadmap -o docs/function-roadmap.tsv`; la cobertura con
-`.venv/bin/python tools/disasm.py coverage > docs/function-coverage.txt`. En el TSV, `unmapped` significa que aún no
-se ha asociado la función a una tarea concreta, no que esté fuera de alcance. La conciliación cubre **257 de 630
-funciones de juego (40,8 %)**; el informe conserva también el recuento bruto de 257/1 112 para que no se confunda con
+`.venv/bin/python tools/disasm.py coverage > docs/function-coverage.txt`.
+**Limitación del inventario:** las etiquetas históricas publicadas aún no están todas conciliadas en
+`tools/symbols.txt`; regenerar desde ese archivo reclasifica también funciones ajenas a este bloque.
+Por eso aquí sólo se actualizaron las funciones investigadas y sus agregados, sin degradar etiquetas de otros sistemas.
+En el TSV, `unmapped` significa que aún no
+se ha asociado la función a una tarea concreta, no que esté fuera de alcance. La conciliación cubre **258 de 630
+funciones de juego (41,0 %)**; el informe conserva también el recuento bruto de 258/1 112 para que no se confunda con
 una proporción del código de juego. Las tareas `roadmap=` usadas son identificadores estables de subsistema; las
 sustituciones de la biblioteca estándar, DOS/4G y el motor gráfico se deben decidir por separado, no contabilizar
 automáticamente como porte literal.
@@ -684,7 +724,7 @@ pulsada `0x55c28` · palabra tecleada `0x55cd0` · `atan2` `0x647ef` · `pow` `0
 | `+0x20` | velocidad vertical |
 | `+0xb0` | dirección visual (grados) |
 | `+0xb8/+0xc0`, `+0xc8/+0xd0`, `+0xd8/+0xe0` | inclinación dinámica, amortiguación 0,97 y límites 35°/20° |
-| `+0xf8` | rumbo |
+| `+0xf8` | rumbo normalizado `[0, 2π)`, copia separada del rumbo acumulado del cuerpo |
 | `+0x108/+0x110` | balanceo y cabeceo del suelo |
 | `+0x120/+0x128` | suelo actual y anterior |
 | `+0x148` | agarre medio |
@@ -708,21 +748,24 @@ longitudinal/lateral `+0x98/+0xa0`, dirección `+0xac`, cabeceo/balanceo `+0xb4/
 motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esquinas `+0x138`, impacto `+0x1b8`.
 
 **Otros**: tramo (`g_sections` `0x1feff8`, 24 B: objeto, ángulo `double`, …) · objeto del motor (42 B, `[0x24c058]`)
-· estado de IA (`[0xeb7c0]`, `0x7c` B por coche) · parámetros de IA (`0xbfb30`, 9 `double` por coche) · trucos
+· estado de IA (`[0xeb7c0]`, `0x7c` B por coche) · parámetros fuente IA (`0xbfb28`, 9 `double` por coche) · trucos
 (`0x1fb2f0[7]`) · estado del rasterizador (`0xc4840`).
 
 ---
 
 ## Desviaciones conocidas respecto al original
 
-1. **IA**: port parcial de `0x1aea0` (`ai.c`): tablas de carril, dos slots TRI por sección PLC, ángulos float32
-   y mezcla de rumbo implementados; el recorte del objetivo por interiores y la suma de curvatura siguen el
-   original, pero acelerador/controlador (pendiente Y, giro por solape, ganancias 5/8, esquiva) aún incompletos.
-   La selección de los seis registros de lookahead usa los helpers de ruta del port; sin geometría TRI (no ocurre
-   en las siete pistas) se apunta al centro de la puerta siguiente, y un byte de agarre fuera de tabla distinto de
-   −21/79/90/97 lee 0 en lugar de memoria del original. Las puertas antiguas
-   `ign_track_gates` usadas por progreso/reaparición aún hacen una segunda conversión engine→PLC
-   incorrecta para secciones; se conserva su comportamiento en este bloque y se documenta como deuda separada.
+1. **IA**: controlador, cargador TRI, selector y topología portados y contrastados con bytes LE.
+   El original puede consultar altura/extremos fuera de placeholders TRI de un byte: el port conserva
+   la puerta seleccionada o busca una pendiente válida y emite diagnóstico una vez por pista.
+   Un registro actual ausente/inválido se rechaza con diagnóstico en vez de leer heap indefinido.
+   Los informes enumeran esas exclusiones; no se afirma igualdad de una carrera DOS completa.
+   Un byte de agarre fuera de tabla distinto de −21/79/90/97 lee 0 en lugar de memoria del original.
+   Las puertas antiguas
+   `ign_track_gates` aún hacen una segunda conversión engine→PLC incorrecta para secciones; se conservan como
+   deuda separada. En el bucle actual sólo se usan para diagnóstico, no para conducción/progreso/reaparición.
+   La copia normalizada `body+0x28 → car+0xf8` de `cars_update_all` ya está integrada y verificada;
+   el resto del dispatcher continúa parcial: véase el diagnóstico integrado.
 2. **Render**: z-buffer propio en lugar del orden del pintor del motor Lisa 2 (el original no usa profundidad por
    píxel). Texturas afines como el original (`--persp` activa la corrección de perspectiva, la opción PERSP. POLY).
    Sin TAB: el motor la pasa al rasterizador (`[0xc484c]`) pero las caras texturizadas se dibujan sin sombrear (en
@@ -755,7 +798,7 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    y frecuencia en Hz como en `0x625f4`. Sin panorama estéreo, sin música y sin los sonidos de objetos móviles.
 11. **Objetos móviles y especiales**: los objetos especiales (`0x3383c`, relámpago `0x32dc8`) se evalúan justo antes del
    tick del coche y no dentro de `car_update`; el aplastamiento solo reduce la altura en el render (falta x·1,2 / z·1,6
-   en `raster.c`) y la IA no invierte su dirección (`ai.c`); los mensajes del HUD se encolan y envejecen pero no se
+   en `raster.c`); la inversión temporal de dirección de la IA sí está portada. Los mensajes del HUD se encolan y envejecen pero no se
    dibujan (`hud.c`), usan "PLAYER/CPU n" en vez de los nombres y no hay "TRACK RECORD"; en `0x32dc8` más de 8 caras se
    descartan (el original desborda) y un objeto especial devuelve sus puntos con la posición del objeto; en
    `0x346cc` 1 ulp float en empates de `jB0` (ver la verificación).
@@ -793,14 +836,14 @@ implementado.
 
 1. ~~Contacto y colisiones con objetos móviles~~ (hecho: `car_ground_contact`, `collisions_pass`, objetos especiales,
    aplastamiento y animaciones de textura; véase Fase 2). Quedan en otras áreas el dibujo de los mensajes (`hud.c`), el
-   ensanchamiento del coche aplastado (`raster.c`) y la dirección invertida de la IA aplastada (`ai.c`).
+   ensanchamiento del coche aplastado (`raster.c`).
 2. **Entrada y controles fieles (P1, alcance medio):** completar `human_input` (`0x2c5b8`, 424),
    `car_input` (`0x4d5f4`, 335), `car_steer` (`0x500f0`, 121), `car_throttle` (`0x4db90`, 389) y
    `car_turbo` (`0x4e2d8`, 215). Esto permite reemplazar los controles aproximados, conservar las reglas originales
    de salida y añadir el joystick; véase Fase 1.
-3. **Terminar la IA original (P1, grande):** completar `ai_drive` (`0x1aea0`, 1 869) y `ai_find_section`
-   (`0x1decc`, 94): selección de carril y puertas reales, velocidad según curvatura/pendiente, adelantamientos y
-   frenada. Ya hay un núcleo portado; véase Fase 1.
+3. ~~Terminar el controlador y trazado de IA~~ (hecho: `ai_drive`, `load_tri`, `ai_find_section` y
+   `build_sections`; oracles desde sus entradas originales, tablas de las siete pistas y desviaciones
+   de heap indefinido documentadas). Sigue pendiente validar una carrera DOS integral con física/dispatcher.
 4. **Fidelidad del paso de coche (P1, muy grande):** portar por partes `car_update` (`0x2ed00`, 2 335) y
    `cars_update_all` (`0x2d008`, 846). El planificador rotatorio de IA ya está conectado; siguen pendientes la
    actualización completa de superficies y el resto del dispatcher. Requiere
@@ -854,16 +897,19 @@ implementado.
 
 ### Fase 1 — Carrera completa de un jugador (jugabilidad)
 
-- [~] **P1** Portar 1:1 la **IA original** `0x1aea0` (hecho: contador de atasco/turnos, tablas de carril/RNG,
-      registros PLC y dos slots `load_tri`, selector `0x1decc` y topología observada; geometría derivada con
-      4 920 comparaciones exactas contra fragmentos originales con CW `0x127f` y mezcla de rumbo con 1 184 casos;
-      recorte del objetivo por interiores y curvatura `0x1b4a2..0x1b823` con 7 562 casos.
-      No acredita cargador/controlador completo. Pendientes: asignación final de carriles,
-      pendiente Y, giro por solape, ganancias 5/8 y esquiva) (1 869 instrucciones): elección de carril (`+0x64/+0x66`,
-      byte `+0x6d` de TRI), consulta de puertas `0x1decc`, velocidad objetivo por curvatura y pendiente
-      (`curveinflu`, `slopeinflu`), frenada (`carebed`), adelantamientos (`careother`, `aggr`), turbo (`0x1ca15`).
-      Descifrar los `double`s de los bloques TRI y el estado de 0x7c B.
-- [x] **P1** Arreglar el atasco en la bifurcación de CANADA (tramo −34): la IA usa las puertas de la rama B (`gate_b`) en tramos negativos.
+- [x] **P1** Portar **IA y trazado originales**: `ai_drive` `0x1aea0`, `load_tri` `0x1ce30`,
+      `ai_find_section` `0x1decc` y `build_sections` `0x28f08`. Carriles/RNG, pendiente Y,
+      aplastamiento, ganancia de dirección de los modelos 5/8, esquiva, frenada, turbo, ramas y geometría integrados.
+      `track_original`: 1 365 secciones, 1 565 registros normales + 70 placeholders y 5 516 consultas.
+      `ai_drive_original`: 4 323 casos definidos de controles/estado contra bytes LE, CW `0x127f`.
+      Las lecturas indefinidas del original se enumeran y tienen sustitución nativa explícita;
+      no acredita equivalencia de una carrera completa.
+- [x] **P1** Portar `angle_normalize` (`0x51938`) y completar su integración en `cars_update_all`
+      (`0x2d9c7..0x2d9e8`): copiar el rumbo normalizado a un estado separado del cuerpo antes de los controles.
+      `drive_heading` preserva el cuerpo acumulado; 291 casos bit exactos del helper/fragmento original.
+      Diagnóstico repetido: 48 945 decisiones definidas sin discrepancias y permanencias de ≥5 s de 24 a 0.
+      No acredita todos los productores del dispatcher ni equivalencia de una carrera DOS completa.
+- [x] **P1** Arreglar el atasco en la bifurcación de CANADA (tramo −34): la IA usa registros de la rama B en tramos negativos.
 - [x] **P1** Orden de carrera, posiciones, fin de carrera y número de vueltas por modo (`race.c`; 3 vueltas, modo 3 sin límite; clasificación propia: ver desviaciones).
       Cruce/fases/registro de tiempos verificados por fragmentos: 3 024 casos / 4 112 pasos.
       Pendientes geometría de sondas, productor del gate, récords guardados y avisos.
@@ -873,7 +919,7 @@ implementado.
 - [x] **P1** Solape entre coches (`cars_update_all` `0x2d3c2`, |dx|,|dz| < 25): el de abajo queda aplastado
       (`0x31858`: malla ×1,2/×0,2/×1,6, COLL 6, dirección del humano invertida, humo; a los 200 ticks se recupera si no
       hay coches a < 30, salto de 6 y COLL 7) y efectos de golpe `0x2ea44` (impacto > 15). Pendientes en otras áreas:
-      ensanchamiento en el render y dirección invertida de la IA.
+      ensanchamiento en el render.
 - [x] **P1** Destrucción y reaparición (`car_vertical` `0x2e397`, `car_update` `0x2fd63`, `sub_0003a788`): al aterrizar
       en superficies prohibidas, sin suelo bajo las 4 ruedas o 6 ticks con las 4 sobre tipos > 0x28, el coche explota
       (o se hunde) y 80 fotogramas después reaparece dos tramos más adelante, con explosión, piezas y humo
@@ -935,10 +981,11 @@ implementado.
       caras 18/19/22). **SHD**: fila 0x28 = sombra de coche (hecho); resto de filas por confirmar en el DOS.
 - [ ] **P1** USA tramos 48–50: la IA no salta el barranco a ~70 km/h, cae al fondo y no hay reaparición
       (`0x00435910` en `Ign_win.exe`), así que se queda atascada.
-- [ ] **P1** IA contra los muros: ahora los bordes contienen a los coches en las 7 pistas. La IA ya elige el punto
-      medio de +1…+8 tramos con el recorte original por interiores, pero siguen atascos (CANADA −159, AUSTRIA 198,
-      rivales a 0–8 km/h en ICELAND). Faltan pendiente, giro por solape, esquiva y la selección de carril original.
-      El contador de atasco y las ventanas de marcha atrás ya siguen el original; no garantizan desatascarse.
+- [ ] **P1** Integración IA/física contra los muros: controlador y trazado originales ya portados y cotejados.
+      La simulación de 200 s con ocho coches avanza vueltas en las siete pistas, pero siguen rivales lentos
+      o atascados (por ejemplo ICELAND). No se atribuye ya a términos ausentes del controlador;
+      falta cotejar la carrera completa, física y dispatcher. Las ventanas originales de marcha atrás
+      no garantizan desatascarse.
 - [x] **P1** Planificador rotatorio de IA de `cars_update_all`: fase de controles a 36 Hz, pero decisión nueva
       por coche a **36/N Hz**, con N coches totales, incluidos humanos/inactivos. Resto de turnos: replay de
       pedales, dirección y solicitud de turbo; caja automática antes de controles, física a 72 Hz.

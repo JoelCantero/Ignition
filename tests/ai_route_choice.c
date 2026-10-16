@@ -15,15 +15,14 @@ static int test_geometry_consumers(void) {
     IgnFx fx;
     IgnInput input;
     IgnCar car = {0};
-    int objects[4] = {0, 1, 2, 3};
-    unsigned char has_b[4] = {1, 0, 1, 0};
-    float gates[4][4] = {{0}};
-    uint8_t counts[4][2] = {{2, 0}, {1, 0}, {2, 0}, {1, 0}};
-    IgnAiRouteRecord records[4][2][2] = {0};
-    IgnTrack track = {.count = 4, .section_obj = objects, .has_b = has_b, .gate = gates,
+    int objects[12] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    uint8_t counts[12][2] = {{2, 0}, {1, 0}, {2, 0}, {1, 0}};
+    IgnAiRouteRecord records[12][2][2] = {0};
+    IgnTrack track = {.count = 12, .section_obj = objects, .section_obj_b = objects,
                       .ai_record_count = counts, .ai_records = records};
     const double half_pi = 1.5707963267948966;
-    for (int s = 0; s < 4; s++) {
+    for (int s = 0; s < 12; s++) {
+        counts[s][0] = 2;
         for (int slot = 0; slot < counts[s][0]; slot++) {
             IgnAiRouteRecord *record = &records[s][0][slot];
             record->valid = record->geometry_valid = 1;
@@ -50,26 +49,28 @@ static int test_geometry_consumers(void) {
                         "split side ratio uses the whole gate for either slot");
         failed |= check(ai.stuck == 0, "road error consumes stored float32 heading, not gate direction");
     }
-    records[1][0][0].valid = 0;
-    car.section = 1;
-    car.z = 200;
+    counts[1][0] = 1;
+    records[1][0][0].tri_type = 0;
+    records[1][0][0].point[3] = 25700;
+    car.section = IGN_NO_SECTION;
+    car.z = 100;
     ign_ai_init(&ai, 0);
+    ai.section = 1;
     ign_fx_init(&fx);
     ign_ai_drive(&ai, &car, &track, &fx, &input);
-    failed |= check(fabs(ai.side + 1.5) < 1e-12,
-                    "whole gate is reconstructed from the resolved split section");
-    records[1][0][0].valid = 1;
+    failed |= check(fabs(ai.side - expected_side) < 1e-12,
+                    "an unavailable progress section reuses the previous AI section");
+    car.section = 1;
     car.z = 100;
     ign_ai_init(&ai, 0);
     ign_fx_init(&fx);
     ai.route_selector = ai.route_choice = 1;
     ign_ai_drive(&ai, &car, &track, &fx, &input);
     failed |= check(fabs(ai.side - expected_side) < 1e-12,
-                    "missing split slot resolves to the next normal gate");
+                    "a normal current section keeps its direct slot despite the route choice");
 
-    for (int s = 0; s < 4; s++) {
+    for (int s = 0; s < 12; s++) {
         counts[s][0] = 1;
-        has_b[s] = 0;
         records[s][0][0].tri_type = 0;
         records[s][0][0].point[0] = -2;
         records[s][0][0].point[3] = 5;
@@ -83,12 +84,31 @@ static int test_geometry_consumers(void) {
     car.z = 0;
     car.body.v_fwd = 0;
     car.body.heading = half_pi;
+    ign_car_sync_heading(&car);
     car.step_z = 1;
     ign_ai_init(&ai, 0);
     ign_fx_init(&fx);
     ign_ai_drive(&ai, &car, &track, &fx, &input);
     failed |= check(input.analog && input.a_steer == 0,
                     "odd signed endpoints target the truncated integer midpoint");
+    car.body.heading += 0.1;
+    ign_car_sync_heading(&car);
+    car.spec = 4;
+    ign_ai_init(&ai, 0);
+    ign_ai_drive(&ai, &car, &track, &fx, &input);
+    double base_steer = ai.steer;
+    car.body.heading += 6 * 6.2831853071796;
+    ign_ai_init(&ai, 0);
+    ign_ai_drive(&ai, &car, &track, &fx, &input);
+    failed |= check(ai.steer == base_steer,
+                    "AI consumes the separate car heading, not accumulated body revolutions");
+    for (int model = 5; model <= 8; model += 3) {
+        car.spec = model;
+        ign_ai_init(&ai, 0);
+        ign_ai_drive(&ai, &car, &track, &fx, &input);
+        failed |= check(fabs(base_steer) > 1 && fabs(ai.steer - base_steer * 1.2) < 1e-12,
+                        "model indices 5/8 use the original extra steering gain");
+    }
     return failed;
 }
 
@@ -220,17 +240,17 @@ int main(int argc, char **argv) {
     ign_ai_init(&ai, 0);
     ign_fx_init(&fx);
     ign_ai_update_route_choice(&ai, 190, &fx);
-    failed |= check(ai.route_selector == 1 && ai.route_choice == 0, "zero threshold forces route 0 and retains selector");
+    failed |= check(ai.route_selector == 0 && ai.route_choice == 0,
+                    "zero chance uses the permuted row but selector uses the direct track row");
 
     ign_ai_set_track("CANADA");
     ign_ai_init(&ai, 0);
     ign_fx_init(&fx);
     ign_fx_init(&expected_fx);
-    ign_fx_rand15(&expected_fx);
-    unsigned second = ign_fx_rand15(&expected_fx);
+    unsigned first = ign_fx_rand15(&expected_fx);
     ign_ai_update_route_choice(&ai, 2, &fx);
-    failed |= check(fx.seed == expected_fx.seed, "duplicate section rows each consume one random value");
-    failed |= check(ai.route_random == (double)second / 32768.0, "duplicate section rows retain the last random value");
+    failed |= check(fx.seed == expected_fx.seed, "duplicate section rows stop after the first match");
+    failed |= check(ai.route_random == (double)first / 32768.0, "only the first matching row consumes RNG");
 
     unsigned seed = fx.seed;
     ign_ai_update_route_choice(&ai, 3, &fx);

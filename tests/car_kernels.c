@@ -10,7 +10,15 @@ int main(void) {
     int count;
     while ((count = scanf(" %c", &mode)) != EOF) {
         IgnCar car = {0};
-        if (mode == 'L') {
+        if (mode == 'N') {
+            if (scanf("%lf", &car.body.heading) != 1 || !isfinite(car.body.heading) ||
+                fabs(car.body.heading) > 10000) {
+                fprintf(stderr, "Invalid car heading fixture\n");
+                return 1;
+            }
+            ign_car_sync_heading(&car);
+            printf("%.17g %.17g\n", car.drive_heading, car.body.heading);
+        } else if (mode == 'L') {
             IgnRace race = {0};
             int ticks, sections, probe, section, pattern;
             if (scanf("%d %d %d %d %d %d %d %d %d %d %d %d %d %lf %lf %lf %lf %lf %d",
@@ -379,6 +387,7 @@ int main(void) {
                 fprintf(stderr, "Invalid turbo fixture\n");
                 return 1;
             }
+            car.drive_heading = car.body.heading;
             for (int i = 0; i < ticks; i++) {
                 ign_car_turbo(&car);
                 printf("%.17g %d %d %.17g %.17g %.17g\n", car.turbo_charge, car.turbo_mode,

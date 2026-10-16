@@ -35,6 +35,7 @@ typedef struct {
     int gear_ticks, gear_delay;    /* ctrl+0x10/+0x14: calls choosing a different gear, delay */
     double steer_visual;           /* car+0xb0 */
     IgnBody body;
+    double drive_heading;         /* car+0xf8: normalized copy; body.heading remains accumulated */
     float x, y, z, heading;        /* render pose; heading 0 = +z */
     float kmh;
     int surface_type;
@@ -80,6 +81,7 @@ typedef struct {
     int offroad;                   /* car+0x5c8: ticks with all wheels on types > 0x28 */
     int special_ground;            /* car+0x5fc: some wheel on a type > 0x13 */
     int ai;                        /* [0x1fefd0]+4 == 1: computer car (steering, turbo force and revs of profile 11) */
+    double ai_side;                /* last AI state +0x58, observed by other drivers' avoidance */
     int torque_bonus;              /* car+0x524: computer cars, by model and difficulty */
     int creep, creep_ticks;        /* car+0x51c/+0x520: torque added while the curve gives <= 3 */
     double catchup, catchup_clock; /* car+0x594/+0x59c: human torque bonus by place, renewed every 182 frames */
@@ -188,6 +190,8 @@ void ign_car_wreck_turbo(IgnCar *car);
 void ign_car_respawn_controls(IgnCar *car);
 /* Moves a wrecked car (glide of sub_0003a788). */
 void ign_car_set_pose(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height);
+/* cars_update_all 0x2d9c7..0x2d9e8 / angle_normalize 0x51938; finite body angle, copied into [0, 2pi). */
+void ign_car_sync_heading(IgnCar *car);
 /* sub_00041430: puts a wrecked car back at a respawn point, still and airborne; `layer` is the respawn object's
  * (type bits 12-15, [0x24bff0]). Returns -1 (car untouched) if sub_00032dc8 finds no ground there. */
 int ign_car_respawn(IgnCar *car, const IgnLevel *lv, float x, float z, double heading, double height, int layer);

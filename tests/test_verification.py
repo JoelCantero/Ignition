@@ -20,6 +20,7 @@ import input_original
 import race_time_original
 import respawn_original
 import lap_original
+import ai_stalls
 from trace_compare import compare_rows, load_text
 
 
@@ -87,6 +88,62 @@ class TraceTests(unittest.TestCase):
                         text.replace("t=0.013888888888888888", "t=0.014")):
             with self.subTest(text=invalid), self.assertRaises(ValueError):
                 solo_replay.validate_trace(invalid, 2)
+
+
+class AiStallTests(unittest.TestCase):
+    def row(self, tick, index=1, section=10, kmh=5, out=0):
+        car = [section, 5, 0, 0, tick * 0.1, 0, kmh, kmh / 3.6, -7, 0, 0, 100, 0, 0, 0, 0, 0]
+        return dict(schema=1, tick=tick, index=index,
+                    case=[2, 0, 209, [car, list(car)], 1, [0] * 8, [0] * 9],
+                    native=[100, 0, 0, 0, 0, 100, section, 0, 0, 1, 0, 0, 0],
+                    motion=dict(lap=0, out=out, wall_hit=0),
+                    applied=dict(drive=1000, steer=0, gear=1))
+
+    def test_stalls_measure_duration_not_a_single_slow_snapshot(self):
+        samples = [self.row(tick) for tick in range(2, 222, 4)]
+        self.assertEqual(ai_stalls.intervals(samples[:10], "slow", 216), [])
+        intervals = ai_stalls.intervals(samples, "slow", 216)
+        self.assertEqual(len(intervals), 1)
+        self.assertEqual(intervals[0]["seconds"], 3)
+        self.assertEqual(intervals[0]["path_units"], intervals[0]["net_units"])
+
+    def test_section_dwell_is_not_continuous_low_speed(self):
+        samples = [self.row(tick, kmh=100 if ((tick - 2) // 4) % 2 else 5)
+                   for tick in range(2, 366, 4)]
+        self.assertEqual(ai_stalls.intervals(samples, "slow", 216), [])
+        self.assertEqual(len(ai_stalls.intervals(samples, "section_dwell", 360)), 1)
+
+    def test_finished_cars_gaps_laps_and_section_changes_break_intervals(self):
+        samples = [self.row(tick) for tick in range(2, 222, 4)]
+        for change in ("out", "gap", "lap", "section"):
+            changed = json.loads(json.dumps(samples))
+            if change == "out":
+                changed[25]["motion"]["out"] = 1
+            elif change == "gap":
+                changed = changed[:25] + changed[26:]
+            elif change == "lap":
+                changed[25]["motion"]["lap"] = 1
+            else:
+                changed[25]["case"][3][0][0] = 11
+            with self.subTest(change=change):
+                self.assertEqual(ai_stalls.intervals(changed, "slow", 216), [])
+
+    def test_diagnostic_schema_finiteness_and_per_car_order(self):
+        row = self.row(2)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.log"
+            text = ai_stalls.PREFIX + json.dumps(row) + "\n"
+            path.write_text("AI: unrelated diagnostic\n" + text)
+            self.assertEqual(ai_stalls.load_trace(path, 209), [row])
+            for invalid in ("", text + text, text.replace('"schema": 1', '"schema": 3'),
+                            text.replace('"schema": 1', '"schema": 2'),
+                            text.replace('"drive": 1000', '"drive": NaN'),
+                            text.replace('"drive": 1000', '"drive": 1e999'),
+                            text.replace('"index": 1', '"index": 2'),
+                            text.replace('"native": [100,', '"native": [')):
+                with self.subTest(text=invalid), self.assertRaises(ValueError):
+                    path.write_text(invalid)
+                    ai_stalls.load_trace(path, 209)
 
 
 class CarVerifierTests(unittest.TestCase):
@@ -251,7 +308,8 @@ class CarKernelTests(unittest.TestCase):
                 self.assertTrue(result.stderr.strip())
 
     def test_invalid_fixtures_fail(self):
-        for fixture in ("S 1 12 0 0 0 0 1 0 0", "S 1 0 0 0 0 nan 1 0 0",
+        for fixture in ("N nan", "N inf", "N 10001", "N", "N 0 extra",
+                        "S 1 12 0 0 0 0 1 0 0", "S 1 0 0 0 0 nan 1 0 0",
                         "S 1 0 0 0 0 0 0 0 0", "G 0 0 4 1 0 0 0 0",
                         "G 0 0 0 1 0 0", "V 1 0 5 0 0 nan 0 0",
                         "T 1 12 0 0 1 0 0 0 0 0 0 1 0 0 0",
@@ -492,6 +550,29 @@ class HeadlessTests(unittest.TestCase):
                         self.assertEqual(tick % (2 * ncars), 0)
                 self.assertTrue(changed, "autopilot never produced a control decision")
                 self.assertEqual(changed[0], 2 * ncars)
+
+    def test_ai_diagnostics_preserve_all_car_states_and_image(self):
+        captures = []
+        for mode in (None, "ai"):
+            _, result = regress.run_case(
+                str(self.binary), "AI diagnostic contract",
+                ["USA", "--sim-ticks", "72", "auto", "--rivals", "7"],
+                env=regress.controlled_environment(self.data, mode), trace=True)
+            self.assertEqual(result["rc"], 0, result["output"])
+            captures.append(result)
+        for field in ("states", "image"):
+            self.assertEqual(captures[0][field], captures[1][field])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.log"
+            path.write_text(captures[1]["output"])
+            rows = ai_stalls.load_trace(path, 143)
+        self.assertEqual(len(rows), 36)
+        self.assertEqual({r["index"] for r in rows}, set(range(8)))
+        for row in rows:
+            self.assertEqual(row["tick"] % 16, row["index"] * 2)
+            self.assertEqual(row["schema"], 2)
+            self.assertGreaterEqual(row["case"][3][0][8], 0)
+            self.assertLess(row["case"][3][0][8], 6.2831853071796)
 
     def test_invalid_tick_arguments_fail(self):
         for args in (["--sim-ticks"], ["--sim-ticks", "1"],

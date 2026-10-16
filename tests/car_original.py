@@ -19,14 +19,15 @@ CAR, INFO = 0x410000, 0x420000
 CAR_SIZE = 0x484C
 # Bit-exact under the game's 53-bit x87 control word (no FMA contraction in the port).
 ABS_TOL, REL_TOL = 0.0, 0.0
-FIELDS = {"S": ("steer_visual", "steer"), "G": ("grip_avg", "grip_f", "grip_r"),
+FIELDS = {"N": ("drive_heading", "body_heading"),
+          "S": ("steer_visual", "steer"), "G": ("grip_avg", "grip_f", "grip_r"),
           "V": ("height", "fall_speed", "drop", "airborne", "landed"),
           "T": ("drive", "creep", "creep_ticks", "catchup", "catchup_clock", "skid_timer"),
           "B": ("sliding", "skid_timer"),
           "U": ("charge", "mode", "frames", "drive", "vx", "vz"),
           "R": ("revs",),
           "Q": ("drive", "creep", "creep_ticks", "catchup", "catchup_clock", "skid_timer", "revs", "index")}
-EXACT = {"S": (), "G": (), "V": (3, 4), "T": (1, 2, 5), "B": (0, 1), "U": (1, 2),
+EXACT = {"N": (), "S": (), "G": (), "V": (3, 4), "T": (1, 2, 5), "B": (0, 1), "U": (1, 2),
          "R": (), "Q": (1, 2, 5, 7)}
 
 
@@ -40,7 +41,8 @@ class CarOriginal(Original):
         self.stopped_at_landing = False
 
     def code(self, uc, address, size, _):
-        ranges = {"S": [(0x500F0, 0x502C1)], "G": [(0x3070A, 0x3086E)],
+        ranges = {"N": [(0x2D9C7, 0x2D9E8), (0x5192E, 0x5197C)],
+                  "S": [(0x500F0, 0x502C1)], "G": [(0x3070A, 0x3086E)],
                   "V": [(0x2E234, 0x2E397), (0x2E600, 0x2E65D)],
                   "T": [(0x4DB90, 0x4DFB4), (0x55F9C, 0x55FB8)],
                   "B": [(0x4E1BC, 0x4E2D7)],
@@ -77,7 +79,10 @@ class CarOriginal(Original):
         self.put(0x1FEFE4, "i", 1)
         self.put(CAR + 0x528, "i", 0)
         self.put(INFO, "3i", values.get("spec", 0), values.get("ai", 0), values.get("analog", 0))
-        if mode == "S":
+        if mode == "N":
+            self.put(BODY + 0x28, "d", values["heading"])
+            self.allowed = [(CAR + 0xF8, CAR + 0x100)]
+        elif mode == "S":
             self.put(CAR + 0xA8, "d", 10.0)
             self.put(CAR + 0x118, "d", values["kmh"])
             self.put(CAR + 0x148, "d", values["grip"])
@@ -162,6 +167,9 @@ class CarOriginal(Original):
         self.uc.reg_write(self.reg.UC_X86_REG_FPTAG, 0xFFFF)
         self.uc.reg_write(self.reg.UC_X86_REG_ESP, ESP)
         self.put(ESP, "I", RETURN)
+        if mode == "N":
+            self.uc.reg_write(self.reg.UC_X86_REG_ESI, 0)
+            self.uc.reg_write(self.reg.UC_X86_REG_EDI, 0)
         if mode == "G":
             self.put(ESP + 0x344, "i", 0)
             self.put(CAR + 0x150, "4i", *values["types"])
@@ -180,7 +188,8 @@ class CarOriginal(Original):
             self.uc.reg_write(self.reg.UC_X86_REG_EBX, 0)
             self.uc.reg_write(self.reg.UC_X86_REG_ECX, CAR)
         self.uc.reg_write(self.reg.UC_X86_REG_EAX, values.get("input", 0))
-        entry, end = {"S": (0x500F0, RETURN), "G": (0x3070A, 0x30874), "V": (0x2E234, RETURN),
+        entry, end = {"N": (0x2D9C7, 0x2D9EE),
+                      "S": (0x500F0, RETURN), "G": (0x3070A, 0x30874), "V": (0x2E234, RETURN),
                       "T": (0x4DB90, 0x4DFBE), "B": (0x4E1BC, RETURN), "U": (0x4E3A7, 0x4E656),
                       "R": (0x4DFBE, 0x4E1A7), "Q": (0x4DB90, 0x4E1A7)}[mode]
         try:
@@ -191,12 +200,14 @@ class CarOriginal(Original):
         eip = self.uc.reg_read(self.reg.UC_X86_REG_EIP)
         expected_end = 0x2E397 if self.stopped_at_landing else end
         expected_esp = (ESP - 48 if self.stopped_at_landing else ESP - 56 if mode in ("T", "Q") else
-                        ESP if mode in ("G", "U", "R") else ESP + 4)
+                        ESP if mode in ("G", "U", "R", "N") else ESP + 4)
         if eip != expected_end or self.uc.reg_read(self.reg.UC_X86_REG_ESP) != expected_esp:
             raise ValueError(f"{mode}: unexpected execution boundary EIP=0x{eip:x}")
         if (self.uc.reg_read(self.reg.UC_X86_REG_FPTAG) != 0xFFFF or
                 self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != self.fpcw):
             raise ValueError(f"{mode}: x87 stack/control word changed")
+        if mode == "N":
+            return [self.get(CAR + 0xF8, "d"), self.get(BODY + 0x28, "d")]
         if mode == "S":
             return [self.get(CAR + 0xB0, "d"), self.get(BODY + 0xAC, "d")]
         if mode == "G":
@@ -220,6 +231,15 @@ class CarOriginal(Original):
 
 def fixtures():
     cases = []
+    tau = 6.2831853071796
+    angles = [0.0, -0.0]
+    for turns in (-64, -10, -3, -2, -1, 0, 1, 2, 3, 10, 64):
+        angle = turns * tau
+        angles += [math.nextafter(angle, -math.inf), angle, math.nextafter(angle, math.inf)]
+    heading_rng = random.Random(0x51938)
+    angles += [heading_rng.uniform(-64 * tau, 64 * tau) for _ in range(256)]
+    for i, angle in enumerate(angles):
+        cases.append(("N", f"heading-{i}", 1, dict(heading=angle)))
     for spec in range(12):
         for ai, analog in ((0, 0), (0, 1), (1, 0)):
             for speed in (-40, 0, 20, 40, 130):
@@ -383,7 +403,9 @@ def fixtures():
 
 
 def encode(mode, ticks, v):
-    if mode == "S":
+    if mode == "N":
+        values = [v["heading"]]
+    elif mode == "S":
         values = [ticks, v["spec"], v["ai"], v["analog"], v["input"], v["kmh"], v["grip"], v["visual"], v["steer"]]
     elif mode == "G":
         sequence = v.get("sequence", [v["types"]])
@@ -420,7 +442,7 @@ def compare_output(mode, row, expected):
         error = abs(a - b)
         maximum = max(maximum, error)
         tolerance = 0 if field in EXACT[mode] else ABS_TOL + REL_TOL * abs(b)
-        if error > tolerance:
+        if error > tolerance or (mode == "N" and struct.pack("<d", a) != struct.pack("<d", b)):
             differences.append(dict(field=FIELDS[mode][field], port=a, original=b, tolerance=tolerance))
     return differences, maximum
 
@@ -459,7 +481,8 @@ def verify(executable, runner):
                 control += bool(compare_output(mode, rows[start + tick], control_original.step(mode, values))[0])
     if not control:
         raise ValueError("Extended-precision control word did not change any torque index")
-    required = {"S": {0x5019A, 0x501C1, 0x501DD, 0x5021B, 0x5026A, 0x50296},
+    required = {"N": {0x2D9C7, 0x2D9E8, 0x51938, 0x51944, 0x51972, 0x5192E},
+                "S": {0x5019A, 0x501C1, 0x501DD, 0x5021B, 0x5026A, 0x50296},
                 "G": {0x3077B, 0x307E1, 0x30821, 0x30727, 0x30747},
                 "V": {0x2E28A, 0x2E2B6, 0x2E316, 0x2E340, 0x2E34D, 0x2E370, 0x2E397, 0x2E600},
                 "T": {0x55F9C, 0x4DCF4, 0x4DD41, 0x4DD82, 0x4DDA8, 0x4DE08, 0x4DE3B,
@@ -488,7 +511,9 @@ def verify(executable, runner):
                 absolute_tolerance=ABS_TOL, relative_tolerance=REL_TOL, x87_control_word=hex(FPCW),
                 extended_control_word_differing_steps=control,
                 required_addresses_executed={k: [hex(a) for a in sorted(v)] for k, v in required.items()},
-                scope={"S": "Complete car_steer 0x500f0, input -100..100, car+0xa8=10",
+                scope={"N": "Unmodified cars_update_all 0x2d9c7..0x2d9ee and angle_normalize 0x51938; "
+                            "binary64 car+0xf8 output, unchanged accumulated body+0x28, signed zero and boundaries",
+                       "S": "Complete car_steer 0x500f0, input -100..100, car+0xa8=10",
                        "G": "Unmodified car_update block 0x3070a..0x30874, supplied surface types",
                        "V": "car_vertical arithmetic until 0x2e397 (landing) or return; no sound/fx/landing hazards",
                        "T": "0x4db90..0x4dfbe: drive, creep, catchup, skid; real __CHP; supplied unique torque[i]=i-5+gear",
@@ -500,7 +525,7 @@ def verify(executable, runner):
                 exclusions=["Full car_input, gear/input arbitration and car+0x5a8 activity flag",
                             "Hardware mode 2 shaping and finished-car input override",
                             "Catchup disabled/mode 2 and generation of torque tables",
-                            "Turbo requests, effects, sound and coherence of car/body heading",
+                            "Turbo requests, effects, sound; whole dispatcher beyond tested heading copy",
                             "Original binary64 km/h production/narrowing and arbitrary race clocks/flags",
                             "Ground geometry and probes", "Landing effects and wrecks",
                             "car_update airborne threshold", "Declared level_change upward-following deviation",

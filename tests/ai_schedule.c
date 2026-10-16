@@ -99,7 +99,20 @@ static int test_controls(void) {
     ign_set_race_started(1);
     float gates[4][4] = {{-10, 0, 10, 0}, {-10, 100, 10, 100},
                          {-10, 200, 10, 200}, {-10, 300, 10, 300}};
-    IgnTrack track = {.count = 4, .gate = gates};
+    uint8_t counts[4][2] = {{1, 0}, {1, 0}, {1, 0}, {1, 0}};
+    IgnAiRouteRecord records[4][2][2] = {0};
+    int objects[4] = {0, 1, 2, 3}, branch_objects[4] = {-1, -1, -1, -1};
+    IgnTrack track = {.count = 4, .gate = gates, .section_obj = objects,
+                      .section_obj_b = branch_objects, .ai_records = records,
+                      .ai_record_count = counts};
+    for (int s = 0; s < 4; s++) {
+        IgnAiRouteRecord *record = &records[s][0][0];
+        record->valid = record->geometry_valid = 1;
+        record->point[0] = 25590, record->point[3] = 25610;
+        record->point[2] = record->point[5] = 25600 + s * 100;
+        record->inset[0] = 25595, record->inset[2] = 25605;
+        record->inset[1] = record->inset[3] = 25600 + s * 100;
+    }
     car.section = 2;
     ai.input = (IgnInput){.analog = true, .a_accel = 31, .a_brake = 72, .a_steer = -63, .turbo = true};
     ai.turbo_request = 2;

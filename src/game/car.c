@@ -19,6 +19,14 @@ void ign_set_difficulty(int level) { difficulty = level < 0 ? 0 : level > 3 ? 3 
 static int race_started = 1;
 static double level_clock;
 
+/* 0x2d9c7 / 0x51938: normalize car+0xf8, never the accumulated body+0x28. */
+void ign_car_sync_heading(IgnCar *car) {
+    double heading = car->body.heading;
+    while (heading < 0) heading += 6.2831853071796;
+    while (heading >= 6.2831853071796) heading -= 6.2831853071796;
+    car->drive_heading = heading;
+}
+
 void ign_set_race_started(int started) { race_started = started; }
 void ign_set_level_clock(double frames) { level_clock = frames; }
 
@@ -83,7 +91,7 @@ void ign_car_progress_phase(IgnCar *car, int count) {
  * (0x2fe45). Returns that flag; heights are y down. */
 static int probe_corners(IgnCar *car, const IgnLevel *lv, int types[4], double h[4], int found[4], double *scale) {
     const IgnBody *b = &car->body;
-    double fx = cos(b->heading), fz = sin(b->heading);
+    double fx = cos(car->drive_heading), fz = sin(car->drive_heading);
     double cx = b->px * IGN_WORLD_PER_METRE, cz = b->pz * IGN_WORLD_PER_METRE;
     float hint = (float)-car->height;
     int special = 0;
@@ -249,12 +257,12 @@ void ign_car_wreck(IgnCar *car, int kind) {
     car->wreck_from[0] = car->x;
     car->wreck_from[1] = car->height;
     car->wreck_from[2] = car->z;
-    car->wreck_from[3] = car->body.heading;
+    car->wreck_from[3] = car->drive_heading;
     if (kind == 2) {
         car->wreck_at[0] = car->x, car->wreck_at[2] = car->z;
     } else {
-        car->wreck_at[0] = car->x + cos(car->body.heading) * car->rear;
-        car->wreck_at[2] = car->z + sin(car->body.heading) * car->rear;
+        car->wreck_at[0] = car->x + cos(car->drive_heading) * car->rear;
+        car->wreck_at[2] = car->z + sin(car->drive_heading) * car->rear;
     }
     car->wreck_at[1] = car->height;
     car->airborne = 1;
@@ -332,7 +340,7 @@ int ign_cars_collide(IgnCar *const *cars, int n, IgnCarHit *hits, int max_hits, 
 /* cars_update_all 0x2da32: rear axle car+0x5b0 behind and front axle car+0x5ac ahead of the car along car+0xf8. */
 static void axle_points(const IgnCar *car, double out[2][2]) {
     double x = car->body.px * IGN_WORLD_PER_METRE, z = car->body.pz * IGN_WORLD_PER_METRE;
-    double c = cos(car->body.heading), s = sin(car->body.heading);
+    double c = cos(car->drive_heading), s = sin(car->drive_heading);
     double rear = car->axle_rear, front = car->axle_front;
     out[0][0] = x - c * rear, out[0][1] = z - s * rear;
     out[1][0] = x + front * c, out[1][1] = z + front * s;
@@ -357,7 +365,7 @@ void ign_car_frame_velocity(IgnCar *car) {
 }
 
 void ign_car_contact_box(const IgnCar *car, int engine, float out[4][2]) {
-    double c = cos(car->body.heading), s = sin(car->body.heading);
+    double c = cos(car->drive_heading), s = sin(car->drive_heading);
     double x = car->body.px * IGN_WORLD_PER_METRE, z = car->body.pz * IGN_WORLD_PER_METRE;
     if (engine) x += IGN_SRF_ORIGIN, z += IGN_SRF_ORIGIN;
     for (int i = 0; i < 4; i++) {
@@ -528,6 +536,7 @@ int ign_car_init(IgnCar *car, const IgnLevel *lv, int id, float x, float z, floa
     b->px = x / IGN_WORLD_PER_METRE;
     b->pz = z / IGN_WORLD_PER_METRE;
     b->heading = HALF_PI - heading;
+    ign_car_sync_heading(car);
 
     /* Box corners from the body mesh bounds (front-left, front-right, rear-right, rear-left). */
     const IgnObject *bo = &lv->cars.objs[body];
@@ -575,6 +584,7 @@ void ign_car_set_pose(IgnCar *car, const IgnLevel *lv, float x, float z, double 
     b->px = x / IGN_WORLD_PER_METRE;
     b->pz = z / IGN_WORLD_PER_METRE;
     b->heading = heading;
+    ign_car_sync_heading(car);
     car->x = x;
     car->z = z;
     car->heading = (float)(HALF_PI - heading);
@@ -803,8 +813,8 @@ void ign_car_turbo(IgnCar *car) {
         b->drive += ign_car_turbo_force[car->ai ? COMPUTER_PROFILE : car->spec] * car->turbo_charge + low;
     } else if (car->turbo_mode == 2) {
         b->drive += car->turbo_charge * 20000.0 + low;
-        b->vx += cos(b->heading) * car->turbo_charge * 0.01;
-        b->vz += sin(b->heading) * car->turbo_charge * 0.01;
+        b->vx += cos(car->drive_heading) * car->turbo_charge * 0.01;
+        b->vz += sin(car->drive_heading) * car->turbo_charge * 0.01;
     }
 }
 
@@ -948,6 +958,7 @@ void ign_car_tick(IgnCar *car, const IgnLevel *lv, const IgnInput *in) {
     }
     car->wall_impact = car->wall_hit ? b->impact : 0;
     ign_body_step(b, car->airborne, grip_avg > 0.4 ? 1.0 : 4.0);
+    ign_car_sync_heading(car);
     car->kmh = (float)fabs(b->v_fwd * 3.6);
     car->x = (float)(b->px * IGN_WORLD_PER_METRE);
     car->z = (float)(b->pz * IGN_WORLD_PER_METRE);

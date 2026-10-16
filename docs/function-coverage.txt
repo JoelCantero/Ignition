@@ -1,10 +1,10 @@
-functions: 1112 (unknown=362, identified=84, understood=1, port-pending=0, partial=21, ported=136, verified=21, native=5, library=482)
+functions: 1112 (unknown=361, identified=84, understood=1, port-pending=0, partial=17, ported=140, verified=22, native=5, library=482)
 library (C runtime / DOS4G) unique instructions: 20167, to exclude from game review
 unique instructions: 128832
-game instructions marked ported/verified: 42095/108665 (38.7%)
-game instructions marked partial: 12617 (excluded from ported/verified)
-game functions linked to roadmap tasks: 257/630 (40.8%)
-all functions linked to roadmap tasks (including library): 257/1112
+game instructions marked ported/verified: 46393/108665 (42.7%)
+game instructions marked partial: 8348 (excluded from ported/verified)
+game functions linked to roadmap tasks: 258/630 (41.0%)
+all functions linked to roadmap tasks (including library): 258/1112
 code bytes covered: 474981/482383 (98.5%)
 address  status      instructions  function
 00010010  native      25            main
@@ -70,15 +70,15 @@ address  status      instructions  function
 00019ac8  ported      798           menu_setup
 0001a864  ported      153           settings_defaults
 0001aaf8  ported      242           menu_load_car
-0001aea0  partial     1869          ai_drive
+0001aea0  ported      1869          ai_drive
 0001cc44  unknown     41            sub_0001cc44
 0001ccd0  unknown     48            sub_0001ccd0
 0001cd6c  unknown     39            sub_0001cd6c
 0001cdfa  unknown     24            sub_0001cdfa
-0001ce30  partial     1079          load_tri
+0001ce30  ported      1079          load_tri
 0001dcc4  unknown     12            sub_0001dcc4
 0001dcfc  unknown     146           sub_0001dcfc
-0001decc  partial     94            ai_find_section
+0001decc  ported      94            ai_find_section
 0001dffc  unknown     60            sub_0001dffc
 0001e090  verified    446           body_step
 0001e638  identified  375           body_pair_impulse
@@ -136,7 +136,7 @@ address  status      instructions  function
 00028000  ported      668           hud_build_sprites
 00028a14  partial     28            hud_select_layout
 00028a84  identified  289           hud_rebuild_sprites
-00028f08  partial     1227          build_sections
+00028f08  ported      1227          build_sections
 0002a410  identified  43            reset_race_times
 0002a4ec  ported      306           sound_load
 0002a97c  unknown     143           sub_0002a97c
@@ -253,7 +253,7 @@ address  status      instructions  function
 00051760  unknown     70            sub_00051760
 000517fc  unknown     11            sub_000517fc
 00051818  ported      73            blit_lut_rect
-00051938  unknown     29            sub_00051938
+00051938  verified    29            angle_normalize
 00051980  unknown     27            sub_00051980
 000519c8  unknown     40            sub_000519c8
 00051a38  understood  52            palette_step
