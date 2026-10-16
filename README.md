@@ -50,9 +50,9 @@ integral de una carrera DOS, el sombreado original y el multijugador.
 |---|---|
 | Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 446 clasificadas como runtime) |
 | Instrucciones únicas desensambladas | **128 832** (19 033 de runtime/libc/DOS/4G) |
-| Código del juego marcado como portado/verificado | **49 442 de 109 799 instrucciones (45,0 %)**; **202 de 666 funciones (30,3 %)** |
-| Código del juego marcado como parcial | **13 843 instrucciones en 28 funciones**; excluido del numerador portado |
-| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **666 de 666 (100,0 %)**; 341 documentadas, 295 inferidas y 30 por resolver; no es cobertura de portado |
+| Código del juego marcado como portado/verificado | **50 134 de 109 799 instrucciones (45,7 %)**; **212 de 666 funciones (31,8 %)** |
+| Código del juego marcado como parcial | **14 089 instrucciones en 29 funciones**; excluido del numerador portado |
+| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **666 de 666 (100,0 %)**; 343 documentadas, 293 inferidas y 30 por resolver; no es cobertura de portado |
 | Formatos de datos propios descifrados | 15 de 21 (TRI, POS y TAB solo en parte) |
 | Código del port | ≈ 13 900 líneas de C (`src/`, sin contar las tablas generadas `menu_data.c`) |
 
@@ -647,14 +647,14 @@ Las tablas de este README y el dashboard son vistas derivadas; se edita una sola
 
 | Estado | Funciones | Interpretación |
 |---|---:|---|
-| `unknown` | 344 | Sin identificación fiable; requiere análisis |
-| `identified` | 46 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
-| `understood` | 1 | Comportamiento entendido, todavía no implementado |
+| `unknown` | 333 | Sin identificación fiable; requiere análisis |
+| `identified` | 44 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
+| `understood` | 2 | Comportamiento entendido, todavía no implementado |
 | `port-pending` | 0 | Pendiente explícita y priorizada (ninguna: `car_ground_contact` y `collisions_pass` ya están portadas) |
-| `partial` | 28 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
-| `ported` | 148 | Implementada en el port, sin afirmar verificación completa |
-| `verified` | 54 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
-| `native` | 45 | Bucle/temporizador (`0x10010`–`0x1034c`) → SDL; busy, play y stop de CD → reproducción OGG |
+| `partial` | 29 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
+| `ported` | 150 | Implementada en el port, sin afirmar verificación completa |
+| `verified` | 62 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
+| `native` | 46 | Bucle/temporizador (`0x10010`–`0x1034c`) → SDL; busy, play y stop de CD → reproducción OGG |
 | `library` | 446 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
 
 ### Catálogo único de funciones
@@ -993,7 +993,8 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    el tipo de control y la aceleración automática del menú; el avance entre pistas del campeonato está conectado.
    Faltan la validación integral de esos recorridos y la integración completa de nombres y opciones gráficas.
    Los resultados y diálogos usan composición nativa, no las tiras 320×480 ni todos los sprites/animaciones DOS;
-   la carga presenta hitos discretos y un fondo escalado. Los participantes séptimo/octavo reciben cero puntos.
+   la carga ya compone las cajas, esquinas, fuentes y dos franjas originales a 320×200 y escala el resultado
+   completo a la ventana; presenta hitos discretos 0/33/66/100. Los participantes séptimo/octavo reciben cero puntos.
    Los avisos de desconexión tienen API y pruebas, pero no transporte de red.
    Alcance por función y evidencia: [Frontend, HUD y flujo](docs/formats.md#frontend-hud-y-flujo-lote-phase4-2026-10-16).
 
@@ -1240,9 +1241,11 @@ miden su alcance aislado; las capturas DOS miden integración. No son pruebas in
       `main.c` conecta avance, reintentos y guardado/desbloqueos. Pendiente validar un campeonato completo,
       resultados empatados, eliminación/no clasificación y persistencia tras relanzar. Contrarreloj tiene pruebas propias;
       no se da por acreditado el resto de modos por compartir este flujo.
-- [~] **P2** Pantallas de carga (`0x21d68`): cargador y dibujo nativos en `race_ui.c`; pendiente verificar
-      integración y comparación DOS. Los menús ya tienen seis idiomas; comprobar también carga y resultados
-      en inglés, alemán, francés, italiano, español y sueco.
+- [x] **P2** Pantallas de carga (`0x21d68`, `0x22238`): composición original y progreso en `race_ui.c`,
+      conectados al frontend. Contraste LE de 42 combinaciones de idioma/pista y 4 284 fotogramas
+      (porcentajes 0..100 y vuelta a cero); el host escala el resultado completo, sin emular VESA.
+      Véase [Carga original](docs/formats.md#carga-original-0x21d68-y-0x22238).
+      La equivalencia visual de resultados/pausa sigue pendiente y no se acredita con estas pruebas.
 - [x] **P2** Configuración y récords en **BTZ** (`0x2b430`, `0x2cf60`, `IGN_DOS.BTZ`): formato completo, imagen por
       defecto del menú verificada contra el original, récords, avance del campeonato y persistencia (`save.c`). El HUD lee
       de la misma imagen el idioma y los récords de carrera para «TRACK RECORD».

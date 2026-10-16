@@ -127,8 +127,8 @@ def validate_catalog(catalog, verify_snapshot=True):
                 if (not isinstance(edges, list) or any(not _is_address(e) or e == address for e in edges) or
                         edges != sorted(set(edges))):
                     raise ValueError(f"{address}: {field} must be a sorted list of other function addresses")
-            if type(symbol.get("data_referenced")) is not bool:
-                raise ValueError(f"{address}: data_referenced must be a boolean")
+            if type(symbol.get("indirect_root")) is not bool:
+                raise ValueError(f"{address}: indirect_root must be a boolean")
             plan = symbol.get("plan")
             if plan is not None and (
                     not isinstance(plan, dict) or not set(plan) <= {"treatment", "milestone", "rationale"} or
@@ -137,13 +137,15 @@ def validate_catalog(catalog, verify_snapshot=True):
                     "milestone" in plan and plan["milestone"] not in milestones):
                 raise ValueError(f"{address}: invalid plan override")
         elif any(field in symbol for field in ("status", "instructions", "roadmap", "classification",
-                                               "calls", "pointer_refs", "data_referenced", "plan")):
+                                               "calls", "pointer_refs", "indirect_root", "plan")):
             raise ValueError(f"{address}: data/code labels cannot carry function state")
     if [s["address"] for s in symbols] != sorted(addresses):
         raise ValueError("Catalog symbols must be sorted by address")
     if not any(s["kind"] == "function" for s in symbols):
         raise ValueError("Catalog contains no functions")
     functions = {s["address"] for s in symbols if s["kind"] == "function"}
+    if executable.get("entry") not in functions:
+        raise ValueError("Catalog executable entry must be a catalog function")
     for symbol in symbols:
         if symbol["kind"] == "function" and any(
                 e not in functions for e in symbol["calls"] + symbol["pointer_refs"]):
@@ -208,27 +210,43 @@ def plan_milestones(catalog):
 
     A milestone requires its entry points, the functions of subsystems homed in it and, transitively, their
     direct callees and pointer references. Functions treated as `native`/`not-needed` are required but not
-    expanded; deferred targets are not followed for that milestone. Indirect calls are not resolved, so
-    unreached functions are reported as unplanned rather than declared unnecessary.
+    expanded; deferred targets are not followed for that milestone. Functions not reachable from the executable
+    entry or an indirect root have no static reference at all and are `not-needed`; live functions that no
+    milestone reaches are reported as unplanned (indirect calls are not resolved).
     """
     functions = {s["address"]: s for s in catalog["symbols"] if s["kind"] == "function"}
     subsystems, milestones = catalog["subsystems"], catalog["milestones"]
     order = {key: index for index, key in enumerate(milestones)}
+    live = set()
+    stack = [catalog["executable"]["entry"]] + [a for a, s in functions.items() if s["indirect_root"]]
+    while stack:
+        address = stack.pop()
+        if address not in live:
+            live.add(address)
+            stack.extend(functions[address]["calls"] + functions[address]["pointer_refs"])
     info = {}
     for address, s in functions.items():
         plan = s.get("plan", {})
-        treatment = plan.get("treatment", subsystems[s["roadmap"]]["treatment"])
+        unreferenced = address not in live
+        # A published native state already records a native replacement; explicit plans still take precedence.
+        default = "native" if s["status"] == "native" else subsystems[s["roadmap"]]["treatment"]
+        treatment = "not-needed" if unreferenced else plan.get("treatment", default)
         info[address] = {
             "treatment": treatment, "home": plan.get("milestone", subsystems[s["roadmap"]]["milestone"]),
             "pinned": "milestone" in plan, "done": s["status"] in TREATMENTS[treatment],
-            "milestone": None, "required_by": [],
+            "unreferenced": unreferenced, "milestone": None, "required_by": [],
         }
-    report = {"milestones": {}, "errors": [], "unplanned": []}
+    report = {"milestones": {}, "errors": [], "unplanned": [], "unreferenced": sorted(set(functions) - live)}
+    for address in report["unreferenced"]:
+        if "plan" in functions[address]:
+            report["errors"].append(f"{address}: plan override on a function without static references")
     for key, milestone in milestones.items():
         deferred = {d["target"] for d in milestone["deferred"]}
         used = set()
+        if any(a not in live for a in milestone["entry_points"]):
+            report["errors"].append(f"{key}: entry point without static references")
         roots = sorted(set(milestone["entry_points"]) |
-                       {a for a, i in info.items() if i["home"] == key})
+                       {a for a, i in info.items() if i["home"] == key and not i["unreferenced"]})
         visited, postorder = set(), []
         for root in roots:
             stack = [(root, False)]
@@ -257,7 +275,11 @@ def plan_milestones(catalog):
             "pending": [a for a in new if not info[a]["done"]],
             "unused_deferrals": sorted(deferred - used),
         }
+        for target in sorted(deferred - used):
+            report["errors"].append(f"{key}: deferral {target} is never reached")
     for address, i in sorted(info.items()):
+        if i["unreferenced"]:
+            continue
         if i["milestone"] is None:
             report["unplanned"].append(address)
             if i["pinned"]:

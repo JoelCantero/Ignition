@@ -469,14 +469,26 @@ def owner(funcs, addr):
 
 def call_graph(img, funcs):
     """Static edges between discovered starts: direct `call imm` and function starts used as operands
-    (callback/pointer registration). Indirect calls through registers or tables are not resolved; starts
-    stored in data (dispatch/callback tables) are flagged instead."""
-    in_data = {t for s, t in img.fixups.items() if img.is_code(t) and not img.is_code(s)}
+    (callback/pointer registration). Indirect calls through registers or tables are not resolved; instead a
+    start is an indirect root when it is referenced from outside the decoded instructions: a fixup in data or
+    in an undecoded code table, or an E8/E9 rel32 in undecoded code bytes (conservative: may be noise)."""
+    decoded = set()
+    for f in funcs.values():
+        for a, ins in f["insns"].items():
+            decoded.update(range(a, a + ins.size))
+    roots = {t for s, t in img.fixups.items() if t in funcs and s not in decoded}
+    for base, data, flags in img.objs:
+        if flags & 4:
+            for i in range(len(data) - 4):
+                if data[i] in (0xE8, 0xE9) and base + i not in decoded:
+                    t = (base + i + 5 + struct.unpack_from("<i", data, i + 1)[0]) & 0xFFFFFFFF
+                    if t in funcs:
+                        roots.add(t)
     graph = {}
     for fa, f in funcs.items():
         calls = sorted(c for c in f["calls"] if c in funcs and c != fa)
         refs = sorted(r for r in f["refs"] if r in funcs and r != fa and r not in f["calls"])
-        graph[fa] = (["%08x" % c for c in calls], ["%08x" % r for r in refs], fa in in_data)
+        graph[fa] = (["%08x" % c for c in calls], ["%08x" % r for r in refs], fa in roots)
     return graph
 
 
@@ -587,9 +599,11 @@ def main():
         graph = call_graph(img, funcs)
         metrics = coverage_metrics(img, funcs)
         if args.refresh:
+            CATALOG["executable"]["entry"] = "%08x" % img.entry
             for fa, entry in entries.items():
                 entry["instructions"] = counts[fa]
-                entry["calls"], entry["pointer_refs"], entry["data_referenced"] = graph[fa]
+                entry.pop("data_referenced", None)
+                entry["calls"], entry["pointer_refs"], entry["indirect_root"] = graph[fa]
             CATALOG["coverage"] = {**metrics, "inventory_sha256": inventory_fingerprint(CATALOG)}
             validate_catalog(CATALOG)
             CATALOG_PATH.write_text(json.dumps(CATALOG, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -598,8 +612,8 @@ def main():
             validate_catalog(CATALOG)
             if any(entry["instructions"] != counts[fa] for fa, entry in entries.items()):
                 ap.error("Catalog instruction counts differ; use catalog --refresh")
-            if any((entry.get("calls"), entry.get("pointer_refs"), entry.get("data_referenced")) != graph[fa]
-                   for fa, entry in entries.items()):
+            if any((entry.get("calls"), entry.get("pointer_refs"), entry.get("indirect_root")) != graph[fa]
+                   for fa, entry in entries.items()) or CATALOG["executable"].get("entry") != "%08x" % img.entry:
                 ap.error("Catalog call graph differs; use catalog --refresh")
             if any(CATALOG["coverage"][key] != metrics[key] for key in COVERAGE_FIELDS):
                 ap.error("Catalog unique coverage differs; use catalog --refresh")

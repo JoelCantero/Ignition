@@ -81,8 +81,8 @@ decisión de salida; la simulación headless conserva su comportamiento anterior
 | `0x20d18 game_startup` | `run_game` reinicia carrera, cámaras, rivales y sesión; frontend inicializa recursos compartidos. No existen las variables ni el protocolo de arranque de red DOS. |
 | `0x20d60 game_flow_step` | `run_frontend` enlaza menú/carrera/reinicio/siguiente pista/cierre y propaga fallos de carga. Parcial: no representa la máquina de estados de red ni dos humanos. |
 | `0x21448 network_status_message` | `ign_race_ui_notify`: estados 100/101/102, deduplicación, 80 frames, blink 8, viewport -1; abandonar marca el coche fuera y libera progress_lock. Pruebas nativas; API sin transporte de red conectado. |
-| `0x21d68 loading_screen_build` | `ign_race_loading_init/draw` carga PIC/PAN reales, nombre de pista y LOADING en seis idiomas. `show_loading` presenta hitos 0/33/66/100 al entrar desde el menú. Parcial: fondo escalado y texto, no las esquinas/sprite y cajas originales. |
-| `0x22238 loading_screen_progress` | Ancho `trunc((text_width + 20) * percent * .01 * 1.19)`; acepta 0..100, restaura el fondo y muestra progreso. Parcial: no reproduce el doble blit por tiras del original. Se prueba en siete pistas. |
+| `0x21d68 loading_screen_build` | Composición original 320x200: cuatro esquinas, cajas MENUBKG sobre capa 320x480, fuentes RED_LITE/BLUELITE, nombre localizado y sprite 61x58 en (44,1). Contraste de los búferes en seis idiomas y siete pistas; véase «Carga original» más abajo. |
+| `0x22238 loading_screen_progress` | Restaura PIC x=104..294, y=0..26 y compone las franjas originales de filas 50..74 y 100..124 sobre y=4. Ancho `trunc((text_width + 20) * percent * .01 * 1.19)`. Contraste LE de los 101 porcentajes y vuelta a cero en las 42 pantallas. |
 | `0x2b734 frame_time` | `ign_frame_time_sample`: `sample=now*.036`, `delta=sample-previous`; si delta<1 no confirma; en otro caso FPS trunc(36/delta), origen de pausa `trunc(origin + delta*27.77777777777778)` y elapsed por resta i32 a segundos. Cap 10.8 después del commit. 516 casos LE exactos; el driver SDL mantiene su acumulador nativo, sin sustituir el reloj determinista headless. |
 | `0x2b850 race_clock` | Se conserva el reloj determinista a 72 Hz y la salida a 200 unidades/36 Hz. La pausa congela su avance; parcial respecto a la negociación/salida anticipada y cambio de video de dos jugadores del LE. |
 | `0x2b430 shutdown_save` | Música/audio, textura, HUD, animación de texturas y nivel se liberan al salir; los resultados finales se guardan antes. El logger DOS y algunos caminos de fallo anteriores al arranque siguen fuera del alcance. |
@@ -100,8 +100,50 @@ primeros, no cuatro. Se corrige la adaptación cero-basada de `save.c` a `<3`, y
 
 `tools/gen_race_ui_data.py` genera exclusivamente las cadenas localizadas de las tablas originales; no guarda
 imágenes ni dumps del ejecutable. `tests/race_ui.c` cubre transiciones, repetición, puntos/empates, notificaciones,
-seis idiomas y tres resoluciones con recursos reales. Sus comprobaciones de dibujo no prueban equivalencia
-visual con DOS. Las ejecuciones headless de 200 segundos con siete rivales en las siete pistas no muestran NaN.
+seis idiomas y tres resoluciones con recursos reales. Sus comprobaciones de resultados/pausa no prueban
+equivalencia visual con DOS; la carga tiene el contraste específico siguiente. Las ejecuciones headless
+de 200 segundos con siete rivales en las siete pistas no muestran NaN.
+
+### Carga original: 0x21d68 y 0x22238
+
+`ign_race_loading_init` conserva PIC/PAN de la pista, N_SYSGFX, MENUBKG, las dos fuentes y dos búferes
+propios. No reinicializa ni libera la cadena global de cajas del frontend. `show_loading` mantiene
+un solo propietario entre los hitos 0/33/66/100 y lo destruye tanto al terminar como al fallar la
+preparación. Los porcentajes son hitos nativos de carga, no estimaciones de tiempo restante.
+
+`loading_build` reproduce la composición de `0x21d68`:
+
+- PIC de 320x200 y esquinas 20x20 de N_SYSGFX, con la PAN de la pista.
+- Caja del nombre en x=106, fila 0, desplazamiento vertical 18, estilo 0; texto RED_LITE en (119,30).
+  La capa se compone mediante `PAN[src*256+dst]` sobre la pantalla.
+- Dos cajas en filas 0/1 y desplazamiento 45, estilo 1, con anchos del texto LOADING y del nombre de pista;
+  otra pareja en desplazamiento 95, estilo 0. Textos BLUELITE y RED_LITE en (119,57) y (119,107).
+- Sprite 61x58 en (44,1), desde N_SYSGFX +0xc1e7 (coordenadas de píxeles 153,190), también mediante PAN.
+
+`0x22238` restaura **191** píxeles por fila desde x=104 durante **27** filas. El incremento previo al
+acceso y las bases `PIC+0x34d` / `framebuffer-1` no desplazan el inicio a 105. Con
+`split=106+trunc((text_width+20)*percent*.01*1.19)`, compone `[0,split)×[50,75)` y
+`[split,320)×[100,125)` sobre el mismo destino y=4. No dibuja un porcentaje numérico ni vuelve a
+pintar toda la pantalla: conserva los efectos de actualizaciones anteriores.
+
+`ign_menubox_draw_list` comparte el dibujo de `0x5430c`/`0x54330`, las líneas de `0x54838` y los tiles
+de `0x54864`, pero recibe una lista y un banco prestados. Conserva el direccionamiento lineal DOS:
+un borde que sobrepasa x=319 continúa en la fila siguiente. Solo permite escrituras dentro del búfer
+asignado. El API anterior `ign_menubox_draw` mantiene su recorte rectangular, sin cambiar las pantallas
+de menú existentes. El remapeo de ocho colores de `0x541c0` se comparte entre ambas rutas.
+
+`tests/loading_original.py` ejecuta las dos funciones originales completas, el código original de cajas,
+el ancho/posicionamiento de fuentes y el doble blit PAN. Compara hashes FNV-1a de ambos búferes
+construidos en **42** combinaciones (seis idiomas × siete pistas), y de **4 284** pantallas de progreso:
+todos los enteros 0..100 y vuelta a 0 en cada combinación. Intercepta explícitamente asignador/liberador,
+stack probe, `strlen`, `sprintf("%s")`, paleta/presentación, selección de destino y dispositivo de sprites;
+este último usa los texeles PIC/LFT reales. No ejecuta VESA ni acredita el hardware DOS.
+
+`tests/race_ui.c` comprueba además los límites -1/101 sin mutación de la pantalla, cierre repetido,
+fallo de recursos, canarios alrededor del búfer de cajas y conservación de una cadena de menú viva.
+Desviación deliberada: el host escala por vecino más próximo el resultado indexado 320x200 completo
+a 640x480/800x600; no recompone los elementos a esas resoluciones. La prueba verifica cada píxel de
+ese escalado. Resultados, podio, red y dos humanos siguen fuera de este contraste.
 
 ## Ejecutable `MAINDOS.EXE`
 
