@@ -6,8 +6,24 @@ argument-hint: 'Address (e.g. 1aea0), system or data format to reverse engineer 
 
 # Ignition reverse engineering and port
 
-Workflow for turning `MAINDOS.EXE` code into faithful C in `src/`. The repository `README.md` holds the status,
-coverage, binary map and roadmap; `docs/formats.md` holds formulas, offsets and verified formats.
+Workflow for turning `MAINDOS.EXE` code into faithful C in `src/`. `docs/functions.json` is the single editable
+function catalog; `README.md` and `docs/port-dashboard.html` are derived summaries. `docs/formats.md` holds
+formulas, offsets and verified formats.
+
+## Required documentation for every port
+
+A function port is not complete until all three surfaces are updated, even if its status or instruction count
+does not change. This also applies to partial ports, corrections and native equivalents:
+
+- **Single catalog (`docs/functions.json`)**: update the function's status, implementation, tests, notes and
+  technical references to reflect the actual verified scope and remaining work. Do not mark unverified work complete.
+- **Technical documentation (`docs/formats.md`)**: record the original address, behavior/formulas, verification
+  evidence, limitations and deliberate deviations; link this documentation from the catalog entry.
+- **Dashboard (`docs/port-dashboard.html`)**: regenerate it from the catalog with the commands in step 6.
+  Never edit its function data manually or create a separate inventory.
+
+For a batch, document every affected function individually in the catalog before regenerating the shared views.
+Do not report the port or batch as complete while any of these updates is missing or the dashboard is stale.
 
 ## Facts to rely on
 
@@ -63,7 +79,8 @@ base minus/plus a small offset.
    (`/* sub_0004e2d8: … */`). Keep the original constants. Any intentional difference is a *deviation*: comment it
    in code and list it in `README.md`.
 5. **Verify headless** (see below) on all 7 tracks; the build must stay warning-free.
-6. **Update derived views**: after status/count changes run `.venv/bin/python tools/disasm.py catalog --refresh`,
+6. **Update derived views**: after every port or port correction, even without status/count changes, run
+   `.venv/bin/python tools/disasm.py catalog --refresh`,
    then `python3 tools/function_catalog.py sync-readme` and `python3 tools/port_dashboard.py`.
    Update the README binary map/roadmap prose if needed. Never recreate the removed TSV, coverage or symbols files;
    the JSON is the only editable function inventory. `python3 tools/function_catalog.py check` works without game data.

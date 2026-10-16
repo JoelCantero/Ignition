@@ -67,6 +67,10 @@ void ign_font_free(IgnFont *font) {
     memset(font, 0, sizeof *font);
 }
 
+void ign_font_free_all(IgnFont *fonts, size_t count) {
+    for (size_t i = 0; i < count; i++) ign_font_free(&fonts[i]);
+}
+
 static int glyph_index(unsigned char ch) {
     return ch >= 32 ? ch - 32 : -1;
 }

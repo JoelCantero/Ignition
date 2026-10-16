@@ -1,4 +1,5 @@
 #include "save.h"
+#include "../platform/runtime.h"
 
 #include <errno.h>
 #include <float.h>
@@ -342,7 +343,7 @@ int ign_session_finish(IgnSession *s, const IgnCar *player) {
 }
 
 static double random01(void) {
-    return rand() / (RAND_MAX + 1.0);
+    return ign_random14(ign_random_state());
 }
 
 int ign_session_race_end(IgnSession *s, int mode, const int *place, int ncars) {

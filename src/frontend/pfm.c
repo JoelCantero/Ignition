@@ -42,6 +42,7 @@ struct IgnPfm {
     int nsprites;
     int32_t *verts; /* x, y pairs of the frame being drawn */
     int maxverts;
+    IgnPfmWorkspace workspace;
     /* raster state of 0x60e3d */
     uint8_t *fb;
     int pitch, minx, miny, maxx, maxy;
@@ -66,6 +67,26 @@ static int32_t rd32(const uint8_t *p) {
     return (int32_t)((uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24);
 }
 
+void ign_pfm_workspace_include(IgnPfmWorkspace *workspace, const uint8_t header[8]) {
+    uint32_t n = (uint32_t)rd32(header + 4);
+    int32_t *maximum;
+    int32_t candidate;
+    if (!memcmp(header, "li00", 4)) {
+        maximum = &workspace->primitives;
+        candidate = S32((uint64_t)n * 6);
+    } else if (!memcmp(header, "li01", 4)) {
+        maximum = &workspace->vertices;
+        candidate = S32((uint64_t)n * 2);
+    } else {
+        return;
+    }
+    if (candidate > *maximum) *maximum = candidate;
+}
+
+IgnPfmWorkspace ign_pfm_workspace(const IgnPfm *p) {
+    return p ? p->workspace : (IgnPfmWorkspace){0, 0};
+}
+
 IgnPfm *ign_pfm_load(const uint8_t *data, size_t size, uint8_t *const *pages, const uint8_t *const *shades) {
     if (!data) return NULL;
     IgnPfm *p = calloc(1, sizeof *p);
@@ -81,6 +102,7 @@ IgnPfm *ign_pfm_load(const uint8_t *data, size_t size, uint8_t *const *pages, co
         int32_t n = rd32(data + o + 4);
         size_t d = o + 8;
         if (n < 0 || d + (size_t)n > size) break;
+        ign_pfm_workspace_include(&p->workspace, data + o);
         if (!memcmp(data + o, "li01", 4)) {
             vblk = d;
             vcount = n / 4;

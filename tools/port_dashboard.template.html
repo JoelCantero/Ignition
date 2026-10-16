@@ -312,20 +312,21 @@ function renderSystems() {
     panel.open = Boolean(query) || openPhases.has(phase) || (initial && phase === "phase1");
     const summary = element("summary", systemLabels[phase]);
     const phaseRows = scope.filter(row => tasks.includes(row.roadmap));
-    summary.append(element("small", `${tasks.length} subsistemas \u00b7 ${phaseRows.filter(completed).length}/${phaseRows.length} funciones portadas/verificadas`));
+    summary.append(element("small", `${tasks.length} subsistemas \u00b7 ${phaseRows.filter(completed).length}/${phaseRows.length} funciones portadas/verificadas \u00b7 ${phaseRows.filter(row => row.status === "native").length} nativas`));
     panel.append(summary);
     for (const task of tasks) {
       visible++;
       const rows = scope.filter(row => row.roadmap === task);
       const done = rows.filter(completed).length;
+      const native = rows.filter(row => row.status === "native").length;
       const uncertain = rows.filter(row => row.classification.confidence !== "documented").length;
       const button = element("button", undefined, "system");
       button.type = "button"; button.dataset.task = task;
       button.title = data.subsystems[task].description;
       const line = element("div", undefined, "system-line");
-      line.append(element("strong", data.subsystems[task].title), element("span", `${done}/${rows.length} \u00b7 ${percent(done, rows.length)}`));
+      line.append(element("strong", data.subsystems[task].title), element("span", `${done}/${rows.length} \u00b7 ${percent(done, rows.length)} \u00b7 ${native} nativas`));
       const track = element("div", undefined, "bar");
-      bar(track, [[done, "ported"], [rows.filter(row => row.status === "partial").length, "partial"]], rows.length);
+      bar(track, [[done, "ported"], [native, "native"], [rows.filter(row => row.status === "partial").length, "partial"]], rows.length);
       button.append(line, element("code", task), track,
         element("small", `${uncertain} asignaciones inferidas/por resolver`));
       button.addEventListener("click", () => inspectTask(task));

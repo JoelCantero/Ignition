@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define TWO_PI 6.283185307179586
+#define TWO_PI 6.2831853071796
 
 /* Track ids of the level switch; the delete list at 0x1705c is in another order. */
 static const char *const LEVELS[] = {"CANADA", "USA", "CARIB", "BRAZIL", "AUSTRIA", "ICELAND", "JAPAN"};
@@ -87,16 +87,14 @@ void ign_ghost_begin(IgnGhost *g, int car, int track, const char *name) {
 
 /* sub_00051938 + x1024: angle wrapped to [0, 2pi), truncated. */
 static int16_t angle(double a) {
-    a = fmod(a, TWO_PI);
-    if (a < 0) a += TWO_PI;
-    return (int16_t)(a * 1024.0);
+    return (int16_t)(ign_angle_normalize(a) * 1024.0);
 }
 
 void ign_ghost_record(IgnGhost *g, const IgnCar *car, int sections) {
     if (g->overflow) return;
     IgnGhostSample *s = &g->s[g->count];
     s->x = (int16_t)trunc(car->x);
-    s->y = (int16_t)trunc(car->height + (car->wrecked ? 5000.0 : 0.0));
+    s->y = (int16_t)trunc(car->height + (car->wreck_kind == 1 ? 5000.0 : 0.0));
     s->z = (int16_t)trunc(car->z);
     s->roll = angle(car->body.roll);
     s->heading = angle(car->body.heading);

@@ -38,7 +38,7 @@ typedef struct {
 typedef struct {
     int32_t r[IGN_FX_SLOTS][IGN_FX_WORDS];
     int32_t piece[IGN_FX_SLOTS][9]; /* type 5 mesh vertices (0x1aebd8) */
-    unsigned seed;
+    uint32_t seed;
     int wreck_frame_done[16];      /* last wreck frame handled per car */
     int wreck_seen[16];            /* IgnCar.wrecks when it was handled */
     int tint[3];                   /* sub_00051508: the palette is drawn tint_frac of the way to tint[] */

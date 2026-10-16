@@ -1,4 +1,5 @@
 #include "camera.h"
+#include "../platform/runtime.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -57,7 +58,8 @@ void ign_chase_update(IgnChaseCam *c, const IgnCar *car, const IgnLevel *lv, con
     if (car->wrecked) c->wreck += (150.0 - c->wreck) / 30.0;
     else c->wreck *= 0.98;
     /* sub_0003a788 0x3aec1: for the first 20 frames of a wreck the camera height shakes (+0x38). */
-    if (car->wrecked && car->wreck_kind != 3 && car->wreck_frame <= 20.0) c->shake = (20.0 - (int)car->wreck_frame) * (rand() / (double)RAND_MAX) * 25.0;
+    if (car->wrecked && car->wreck_kind != 3 && car->wreck_frame <= 20.0)
+        c->shake = (20.0 - (int)car->wreck_frame) * ign_random14(ign_random_state()) * 25.0;
 
     c->yaw = follow_yaw(c->yaw, c->target_yaw);
     c->rear_yaw = follow_yaw(c->rear_yaw, c->target_rear);

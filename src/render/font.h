@@ -30,6 +30,9 @@ int ign_font_parse_lft(IgnFont *font, uint8_t *data, size_t size);
 /* sub_000615eb: load_file + sub_00061399. */
 int ign_font_load_lft(IgnFont *font, const char *path);
 void ign_font_free(IgnFont *font);
+/* 0x61319's occupied-slot sweep over caller-owned records. No DOS global registry or shutdown callback;
+ * each owner passes its own bank. Glyphs borrow LFT bytes, so free 0x61653 releases the backing file once. */
+void ign_font_free_all(IgnFont *fonts, size_t count);
 
 /* sub_000616db: advance of the text in pixels (fixed cells: width + spacing per glyph or space; proportional:
  * glyph width + spacing, spaces trunc(width * 0.35)). Characters without a glyph are skipped. */

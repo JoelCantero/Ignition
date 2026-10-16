@@ -21,10 +21,7 @@ static double level_clock;
 
 /* 0x2d9c7 / 0x51938: normalize car+0xf8, never the accumulated body+0x28. */
 void ign_car_sync_heading(IgnCar *car) {
-    double heading = car->body.heading;
-    while (heading < 0) heading += 6.2831853071796;
-    while (heading >= 6.2831853071796) heading -= 6.2831853071796;
-    car->drive_heading = heading;
+    car->drive_heading = ign_angle_normalize(car->body.heading);
 }
 
 void ign_set_race_started(int started) { race_started = started; }
@@ -246,6 +243,14 @@ int ign_car_vertical_step(IgnCar *car, double *raw_drop) {
     return landed;
 }
 
+/* sub_0002e660: an independent legacy landing-state probe, strict ground + 5 > height. */
+void ign_car_grounded_probe(IgnCar *car) {
+    if (car->ground + 5.0 > car->height && car->airborne == 1) {
+        car->airborne = 0;
+        car->landed = 1;
+    }
+}
+
 void ign_car_wreck(IgnCar *car, int kind) {
     if (car->wrecked) return;
     car->wrecked = 1;
@@ -375,9 +380,9 @@ void ign_car_contact_box(const IgnCar *car, int engine, float out[4][2]) {
     }
 }
 
-/* Sign of an x87 comparison against 0 (NaN would give -2 in the original). */
+/* sub_000350cc: the float collision helper shares sub_0001feb0's comparison order. */
 static int sign0(double v) {
-    return v > 0 ? 1 : v < 0 ? -1 : 0;
+    return ign_physics_sign(v);
 }
 
 int ign_contact_polygons(const float (*a)[2], int na, const float (*b)[2], int nb, float *cx, float *cz,
@@ -845,9 +850,8 @@ IgnTurboRequestEvent ign_car_turbo_request(IgnCar *car, int request) {
     return event;
 }
 
-/* sub_0002e6f8 + sub_00040ec8: body lean from per-tick acceleration, smoothed towards ground tilt. */
-static void body_pose(IgnCar *car, double dx, double dz) {
-    const IgnBody *b = &car->body;
+/* sub_0002e6f8, through 0x2e8fa: the remaining model-7 branch animates suspension objects. */
+void ign_car_body_lean(IgnCar *car, double dx, double dz) {
     double ax = dx - car->step_x, az = dz - car->step_z;
     car->step_x = dx;
     car->step_z = dz;
@@ -855,18 +859,41 @@ static void body_pose(IgnCar *car, double dx, double dz) {
     if (ax < -0.5) ax = -0.5;
     if (az > 0.5) az = 0.5;
     if (az < -0.5) az = -0.5;
-    double ch = cos(b->heading), sh = sin(b->heading);
-    double lat = -sh * ax + ch * az, lon = ch * ax + sh * az;
+    double angle = 6.2831853071796 - car->drive_heading;
+    double ch = cos(angle), sh = sin(angle);
+    double lat = sh * ax + ch * az, lon = ch * ax - sh * az;
     car->lean_roll = (car->lean_roll - 3.0 * lat) * 0.97;
     car->lean_pitch = (car->lean_pitch - 3.0 * lon) * 0.97;
     if (car->lean_roll > 35) car->lean_roll = 35;
     if (car->lean_roll < -35) car->lean_roll = -35;
     if (car->lean_pitch > 20) car->lean_pitch = 20;
     if (car->lean_pitch < -20) car->lean_pitch = -20;
-    double target_roll = b->roll + car->lean_roll * (PI / 180.0);
-    double target_pitch = b->pitch + car->lean_pitch * (PI / 180.0);
-    car->body_roll += (target_roll - car->body_roll) * 0.25;
-    car->body_pitch += (target_pitch - car->body_pitch) * 0.25;
+}
+
+/* sub_00040ec8 0x40f08..0x41014: engine tenths of degrees, converted back to native radians. */
+void ign_car_body_sway(IgnCar *car) {
+    const double radians = PI / 1800.0;
+    double roll = car->body.roll * 180.0 * 0.31830988618379;
+    double pitch = car->body.pitch * 180.0 * 0.31830988618379;
+    if (car->launch) {
+        car->body_roll = roll * 10.0 * radians;
+        car->body_pitch = pitch * 10.0 * radians;
+        return;
+    }
+    roll = (roll + car->lean_roll) * 10.0;
+    pitch = (pitch + car->lean_pitch) * 10.0;
+    double previous_roll = car->body_roll / radians;
+    double previous_pitch = car->body_pitch / radians;
+    double delta = fmod(pitch - previous_pitch, 3600.0);
+    while (delta > 1800.0) delta -= 3600.0;
+    if (delta < -1800.0) delta += 3600.0;
+    car->body_roll = (previous_roll + (roll - previous_roll) * 0.25) * radians;
+    car->body_pitch = (previous_pitch + delta * 0.25) * radians;
+}
+
+static void body_pose(IgnCar *car, double dx, double dz) {
+    ign_car_body_lean(car, dx, dz);
+    ign_car_body_sway(car);
 }
 
 void ign_car_auto_gearbox(IgnCar *car) {

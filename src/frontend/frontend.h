@@ -8,6 +8,8 @@
  * through IgnFrontendHost. */
 
 #include <stdint.h>
+#include "../game/assets.h"
+#include "gfx2d.h"
 
 #define IGN_FRONTEND_W 320
 #define IGN_FRONTEND_H 200
@@ -42,9 +44,14 @@ typedef struct {
 extern uint8_t g_key_latch[256]; /* 0x20aab0 */
 void ign_frontend_key_down(int scancode);
 
-/* game_init 0x215d0: identity LUT, fonts, N_SYSGFX sprites, MenuBkg.dat, iris table. */
+/* game_init 0x215d0 / load_system_gfx 0x21860: system pictures/palette, eight fonts, corner/loading sprites,
+ * identity LUT, MenuBkg.dat and iris table. Call outside an active menu; failure releases partial resources. */
 int ign_frontend_init(const char *data_dir, const IgnFrontendHost *host);
 void ign_frontend_destroy(void);
+/* Borrowed system resources, valid until destroy; NULL before init or after a failed init. */
+const IgnMenuSprite *ign_frontend_loading_sprite(void);
+const IgnPic *ign_frontend_system_picture(void); /* N_SYSG_2.PIC */
+const IgnPalette *ign_frontend_system_palette(void); /* SYS.COL, not installed by this resource loader */
 int ign_frontend_load(void);     /* menu_load_gfx 0x11504 */
 int ign_frontend_frame(void);    /* menu_frame 0x12bb8: IGN_FRONTEND_STAY / RACE / QUIT */
 int ign_frontend_shutdown(void); /* menu_shutdown 0x13a5c */
@@ -52,5 +59,15 @@ int ign_frontend_shutdown(void); /* menu_shutdown 0x13a5c */
 int ign_frontend_cheat(int i);
 /* Level directory of menu track t (0 MOOSEJAW FALLS .. 6 TOKYO BULLET). */
 const char *ign_frontend_level(int track);
+
+#define IGN_FRONTEND_MESSAGES 10
+typedef struct {
+    double time[IGN_FRONTEND_MESSAGES];
+    char text[IGN_FRONTEND_MESSAGES][256];
+} IgnFrontendMessages;
+/* menu_msg_post 0x15254: first zero-duration slot, overwriting slot nine when full. Negative durations remain
+ * occupied (but are not drawn). Native strings are truncated to 255 bytes rather than overflowing the slot. */
+int ign_frontend_messages_post(IgnFrontendMessages *messages, const char *text, double duration);
+int ign_frontend_message(const char *text, double duration);
 
 #endif

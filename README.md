@@ -150,6 +150,25 @@ cada una `ms` después de la anterior). Con esta última se comprobó el ciclo c
 → menú (idioma confirmado solo, iris) → salida, por ejemplo
 `IGN_SAVE_DIR=/tmp/s/ IGN_KEYS="1500:Return,1500:Space,2500:Space,1500:Return,1000:Return,1000:Return,8000:Escape,5000:quit" ./build/ignition`.
 
+### Biblioteca C y DOS/4G
+
+El port usa servicios C11/libm en lugar de reconstruir el runtime Watcom. El catálogo documenta
+**33 correspondencias** de esta categoría: 4 rutinas de estado/azar verificadas y 29 sustituciones
+nativas de memoria, archivos, errores, cadenas y matemáticas. No se declara completada la categoría
+de 306 entradas: quedan 273 sin resolver (dos rellenos ya comprendidos y 271 sin promover).
+El dashboard muestra las sustituciones nativas separadas de las funciones portadas/verificadas,
+también en las barras de subsistemas. Su estado no añade instrucciones al numerador portado.
+
+El generador compatible se centraliza en `src/platform/runtime.c`; ya no depende de `rand()`/`RAND_MAX`
+del host. Se preserva la secuencia de efectos/IA y se corrigen los sorteos de HUD, cámara, menú y parrilla.
+`runtime_native` prueba los contratos C11; `runtime_original` (con `IGN_VERIFY_ORIGINAL=ON`) compara
+**19 729 casos** contra bytes LE sin parchear: azar y cadenas exactos, matemáticas con tolerancia explícita.
+Véanse las [correspondencias individuales, evidencia y límites](docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos).
+
+```sh
+ctest --test-dir build -R '^runtime_(native|original)$' --output-on-failure
+```
+
 ### Verificación diferencial de la física original
 
 Prueba opcional, sin ventana ni DOSBox: ejecuta los bytes originales de `body_step` (`0x1e090`) en Unicorn x86-32
@@ -877,6 +896,12 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 ---
 
 ## Desviaciones conocidas respecto al original
+
+- **Runtime nativo**: simulación/efectos y HUD conservan semillas privadas; menú, cámara y parrilla
+  comparten una semilla compatible. El original usa una sola para todos; no se afirma igualdad del
+  orden global de sorteos. C11/libm conserva sus errores, tamaños de tipos y semántica de texto,
+  no los de DOS/Watcom. `fmod` conserva el signo del dividendo incluso en cero (cuatro diferencias
+  de signo frente a `FPREM` emulado en los fixtures). No se reproducen handlers FPU/errno de Watcom.
 
 1. **IA**: controlador, cargador TRI, selector y topología portados y contrastados con bytes LE.
    El original puede consultar altura/extremos fuera de placeholders TRI de un byte: el port conserva

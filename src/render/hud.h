@@ -11,8 +11,11 @@
 #define IGN_HUD_MESSAGES 5 /* [0x1fefb8]: 5 slots of 0x78 bytes */
 #define IGN_HUD_MAX_CARS 8
 
-/* [0x1feeac]: HUD layout picked by sub_00028a14 from the video mode. */
-enum { IGN_HUD_LOW, IGN_HUD_MEDIUM, IGN_HUD_HIGH }; /* 320x200 S_*, 640x480 N_*, 800x600 H_* */
+/* Sprite/text banks [0x1feeac]; not a direct mapping from output resolution. */
+enum { IGN_HUD_LOW, IGN_HUD_MEDIUM, IGN_HUD_HIGH }; /* S_*, N_*, H_* */
+/* 0x28a14 and the runtime table initialised at 0x249de: mode 0..2, view size 0..3, split flag 0..1.
+ * Returns -1 for invalid settings. Message font is MINI only in mode zero, independent of this layout. */
+int ign_hud_select_layout(int video_mode, int view_size, int split);
 
 /* Message slot of sub_0004c7c0 (0x78 bytes). */
 typedef struct {
@@ -85,12 +88,20 @@ typedef struct {
     double best_lap;      /* last [0x1fb390] seen */
     double track_record[7]; /* 0x1ff32b + track * 0x78 from IGN_DOS.BTZ (race time, seconds); 0 when missing */
     int started;
-    uint32_t rng;         /* private stand-in for sub_00051714 in the shake jitter */
+    uint32_t rng;         /* private stream for sub_00051714 in the shake jitter */
 } IgnHud;
 
 /* load_fonts 0x240f4, load_panel_gfx 0x243e0 and sub_00028000 for the layout of a w x h frame. `level` names the
  * LEVELS directory whose PAN table blends the sprites. Language from IGN_LANG (0-5 or en/de/it/es/sv/fr). */
 int ign_hud_init(IgnHud *hud, const char *data_dir, const char *level, int w, int h);
+/* Exact original settings-based selection; unlike init's legacy width-based convenience policy.
+ * video_mode 0..2, view_size 0..3, players 1..2. Reinitialise rather than changing layout on a live HUD. */
+int ign_hud_init_view(IgnHud *hud, const char *data_dir, const char *level, int video_mode, int view_size,
+                      int players);
+/* 0x28a84: replace the current layout's panel/gear/turbo/countdown/sign sprite views over loaded pictures.
+ * Other sprite families and race state are unchanged. Rebinding borrowed views needs no handle release.
+ * Does not load another layout's sign/font banks; use init_view after destroy to change settings. */
+int ign_hud_rebuild_sprites(IgnHud *hud);
 void ign_hud_destroy(IgnHud *hud);
 /* Advances the per-frame HUD state (counters, animations, messages) one 1/36 s frame at a time up to
  * state->total. Safe to call every physics tick. */

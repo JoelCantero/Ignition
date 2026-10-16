@@ -110,8 +110,7 @@ int ign_menubox_init(const char *path) {
     /* Highlight remap 0x541c0: identity except c1->f5 c3->bd c4->be d5->b4 d6->bb fd->bc c0->bd c2->f4. */
     static const uint8_t pairs[] = {0xc1, 0xf5, 0xc3, 0xbd, 0xc4, 0xbe, 0xd5, 0xb4,
                                     0xd6, 0xbb, 0xfd, 0xbc, 0xc0, 0xbd, 0xc2, 0xf4};
-    g_boxes = NULL;
-    g_box_tail = &g_boxes;
+    ign_menubox_clear();
     for (int i = 0; i < 256; i++) g_remap[i] = (uint8_t)i;
     for (size_t i = 0; i < sizeof pairs; i += 2) g_remap[pairs[i]] = pairs[i + 1];
     size_t size;

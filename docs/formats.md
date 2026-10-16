@@ -14,6 +14,109 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 - Entrada `0x00055fbc`, pila `0x0026f640`. 41233 fixups 32-bit + 71 relativos.
 - Rutas que usa: `LEVELS\%s%s.{TRI,SRF,COL,PIC,POS,MSH,TEX}`, `baltazar\data\*`, `fonts\*.lft`.
 
+## Biblioteca C y DOS/4G: equivalentes nativos
+
+Se conserva C11/libm para los contratos publicos ya usados por el port; no se enlaza el heap Watcom,
+sus estructuras `FILE`, selectores, interrupciones DOS ni el emulador FPU. Esto no convierte automaticamente
+los 306 candidatos de `runtime.*` en funciones portadas: este lote resuelve **33 entradas** (4 verificadas,
+29 nativas), identifica dos rellenos pendientes y deja las otras 271 sin promover.
+Cada entrada tiene su propia correspondencia en `functions.json`. `native` indica sustitucion de servicio,
+no igualdad de instrucciones, ABI, errores numericos o direcciones del host.
+
+### Generador Watcom
+
+| Direccion | Contrato original | Implementacion y verificacion |
+|---|---|---|
+| `0x6476e` | Devuelve `&[0xd7d94]`, inicialmente 1. | `ign_random_state`: singleton nativo inicializado a 1; identidad estable. |
+| `0x64798` | Guarda EAX como semilla de 32 bits. | `ign_random_seed`; se ejecuta el original antes de cada secuencia. |
+| `0x64774` | `s = (s * 1103515245 + 12345) mod 2^32`; devuelve `(s >> 16) & 32767`. | `ign_random15`, estado `uint32_t`; resultado y estado exactos en cada paso. |
+| `0x51714` | `(rand() & 16383) / 16384`, almacena binary32 y devuelve en ST0. | `ign_random14`; los 16 384 resultados posibles son exactos en binary32 y binary64. |
+
+`src/platform/runtime.c` centraliza estos contratos. Efectos e IA mantienen el estado de `IgnFx`;
+el HUD mantiene su estado privado. Menu, camara y barajado de parrilla comparten el singleton nativo.
+Se eliminan todas las llamadas a `rand` de la libc: no se debe sustituir el LCG por el algoritmo del host.
+Se corrige el HUD, que extraia bits 8..23, y camara/barajado, que escalaban con `RAND_MAX` en vez
+de usar el contrato de 14 bits. La seleccion aleatoria de CD conserva sus 15 bits.
+**Desviacion deliberada conservada:** el DOS comparte una sola semilla entre todos esos consumidores;
+el port aisla simulacion y HUD para que dibujar no cambie la IA. La igualdad del kernel no demuestra
+igualdad del orden global de sorteos ni de una carrera DOS completa.
+
+### Matematicas y cadenas
+
+| Direccion | Contrato original | Sustitucion nativa / limites |
+|---|---|---|
+| `0x647b2` | `atan2(x, sqrt(1-x*x))` en x87. | `asin(x)` para `-1 <= x <= 1`. |
+| `0x647cd` | Carga un double de pila y llama a `0x647b2`. | `asin`; desaparece la adaptacion de ABI Watcom. |
+| `0x647da` | `fld1; fpatan`: arco tangente de ST0. | `atan(x)`. |
+| `0x64804` | Adaptador de pila a `0x647da`. | `atan`. |
+| `0x647ef` | `fxch; fpatan`, o ruta software segun `[0xe68c8]`. | `atan2(y,x)`; no invertir los argumentos del port. |
+| `0x64810` | Carga los dos doubles de pila y llama a `0x647ef`. | `atan2(y,x)`. |
+| `0x65782` | Repite `fprem` hasta limpiar C2 y elimina el divisor de la pila x87. | `fmod(x,y)`, no `remainder`. |
+| `0x6579c` | Adaptador de pila a `0x65782`. | `fmod`. |
+| `0x64c2a` | Potencia: exponente entero por productos; ruta general mediante log/exp. | `pow`; contrato nativo probado con exponentes enteros positivos/negativos, sin oracle de esta rutina. |
+| `0x70078` | Busca NUL en destino, concatena origen, devuelve destino. | `strcat`, capacidad suficiente y sin solapamiento. |
+| `0x770d0` | Compara bytes sin signo hasta NUL, devuelve -1/0/1. | `strcmp`; solo importa el signo del resultado C11. |
+| `0x77171` | Cuenta bytes hasta NUL mediante `repne scasb`. | `strlen`; `size_t` del host en vez de EAX de 32 bits. |
+| `0x7d338` | Convierte exclusivamente ASCII A..Z a a..z. | `tolower((unsigned char)c)` en locale C, como el HUD; no equivalencia de locales arbitrarios. |
+
+El oracle `tests/runtime_original.py` ejecuta sin parchear las 15 entradas de RNG/cadenas/matematicas
+listadas en su tabla `ENTRIES`, incluidos sus callees originales. Usa segmentos planos validos,
+palabra x87 `0x127f`, pila de retorno propia y una instruccion `fstp` de captura fuera del ejecutable.
+Rechaza callees inesperados, escrituras a globals distintos de la semilla y danos a guardas de cadenas.
+**19 729 casos**: 17 358 sorteos con 42 semillas, 675 operaciones de cadenas (vacias, largas y bytes altos),
+1 696 casos matematicos finitos en dominio. RNG y cadenas son exactos; libm admite error absoluto
+`4e-15`, observado maximo `2.220446049250313e-16`.
+En cuatro casos `FPREM` emulado devuelve `+0` donde C11 `fmod` devuelve `-0`: se registra la diferencia
+y se exige el signo del dividendo nativo. No se afirma que esa diferencia sea evidencia de una CPU DOS real.
+No se verifican NaN, infinitos, fuera de dominio, handlers Watcom, precision x87 distinta ni FPU software.
+El informe guarda hashes de original, runner, fuentes y entradas, version de Unicorn y visitas por direccion.
+
+### Memoria, streams y errores
+
+| Direccion | Contrato original | Sustitucion nativa / evidencia |
+|---|---|---|
+| `0x5629e` | Libera un bloque del heap; acepta NULL. | `free` en los destructores del port; contrato nativo. |
+| `0x56320` | Reserva EAX bytes del heap, devuelve puntero o NULL. | `malloc` en assets/Lisa; contrato de tamanos positivos y liberacion. |
+| `0x647a8` | Retorna si NULL, si no salta a `0x5629e`. | `free`; no se reconstruyen cabeceras del heap DOS. |
+| `0x6482c` | Multiplica cantidad por tamano, reserva y rellena con cero mediante `0x7d320`. | `calloc`; se comprueban los 257 bytes de una reserva. |
+| `0x62775` | `sprintf(dest,fmt,...)` cdecl, anade NUL y devuelve longitud. | `snprintf` con capacidad en el port; prueba `%s`, `%d`, `%08x`, `%.2f`. |
+| `0x64a12` | `fopen(path,mode)` sin flags de comparticion adicionales. | `fopen`; cargas reales y prueba de error de apertura. |
+| `0x64ac6` | `fprintf(stream,fmt,...)` cdecl. | `fprintf`; prueba retorno, contenido y lectura posterior. |
+| `0x64ae7` | Valida stream, vacia buffers, cierra y devuelve estado. | `fclose`; liberacion del `FILE` administrada por libc. |
+| `0x657ac` | Lee `size*count` bytes; devuelve elementos completos, soporta texto/binario. | `fread`; bytes 0/10/13/26/128/255, elemento parcial y EOF. |
+| `0x70135` | Escribe `size*count` bytes; devuelve elementos completos. | `fwrite`; el port abre los assets/BTZ binarios con `b`. |
+| `0x76ee2` | Posicion del descriptor corregida por bytes pendientes del buffer. | `ftell`; posicion antes/despues de lectura y escritura. |
+| `0x76f54` | Busca desde inicio/posicion/fin y ajusta buffers y EOF. | `fseek`; prueba SEEK_SET/CUR/END y borrado de EOF. |
+| `0x77050` | Salto al borrado DOS `int 21h/AH=41h`. | `remove` en persistencia; `save_btz` verifica guardado y limpieza. |
+| `0x77055` | Renombrado DOS `int 21h/AH=56h`. | `rename` en persistencia; se conserva su reemplazo portable ya existente. |
+| `0x64820` | Devuelve puntero al entero de error `[0x25ae44]`. | `&errno` de C11; puede ser local a hilo. |
+| `0x7d34b` | Guarda EAX en el entero devuelto por `0x64820`. | Asignacion de `errno` y errores propagados por libc; codigos del host. |
+
+`tests/runtime.c` comprueba estos contratos nativos; las cargas de las siete pistas y `tests/save_btz.c`
+ejercitan sus consumidores reales. **Limites:** no se ejecutan servicios DOS en el oracle ni se verifican
+OOM, todos los modos de apertura, errores de dispositivo o formatos varargs arbitrarios. El host puede
+usar punteros/long/size_t de 64 bits. `malloc(0)` y overflow de `calloc` siguen C11, no el heap Watcom;
+se conserva el rechazo de errores del consumidor. Texto usa los finales de linea del host, no traduccion
+CRLF/EOF Ctrl-Z de DOS; los formatos del juego usan streams binarios. Los codigos `errno` no son
+intercambiables numericamente con los Watcom. Las sustituciones nativas no se suman al numerador
+de instrucciones portadas. El denominador historico sigue excluyendo solo el estado `library`,
+por lo que reclasificar entradas a `native` puede ampliarlo sin anadir codigo del juego.
+
+### Rellenos identificados, no sustituidos
+
+- **`0x65367`**: rellena **ECX palabras de 32 bits** con EDX; EAX avanza `4*ECX`.
+  No es `memset(dest,byte,count)`. Con EDX de bytes iguales se puede usar `memset(dest,EDX&255,4*ECX)`,
+  pero esa equivalencia parcial no justifica marcar el contrato general como nativo.
+- **`0x65330`**: relleno de **ECX bytes** con patron EDX y alineacion; rota el patron al avanzar
+  hasta alinear y delega los dwords a `0x65367`. Su cola escribe DL/DH/DL, no necesariamente
+  los tres primeros bytes de un patron general. La entrada `0x7d320` replica un byte en EDX antes
+  de llamarla y conserva el destino original: esa si forma la interfaz de `memset`.
+
+Estas dos entradas quedan `understood`, sin implementacion ni prueba diferencial atribuida.
+No se considera resuelto el resto de arranque, DOS, parsing, heap interno o emulador por pertenecer
+a una categoria cuyo servicio publico usa libc. Pendientes concretos: adaptadores de directorios DOS,
+control/conversion x87 y reconciliacion del resto de funciones no identificadas del runtime.
+
 ## Verificados
 
 - **COL** (776 B): `u32 0x308`, `u32 0xb123` (tipo), 256×RGB. Valores de 6 bits (VGA) o de 8 bits según el archivo.

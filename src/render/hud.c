@@ -1,4 +1,5 @@
 #include "hud.h"
+#include "../platform/runtime.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -109,8 +110,19 @@ static int rect_sprite(IgnSprite *s, const IgnPic *pic, const int16_t r[4]) {
     return ign_sprite_from_pic(s, pic, r[0], r[1], r[2], r[3]);
 }
 
-/* sub_00028000 for the current layout. */
-static int build_sprites(IgnHud *hud) {
+int ign_hud_select_layout(int video_mode, int view_size, int split) {
+    static const uint8_t layouts[3][8] = {
+        {1, 0, 0, 0, 0, 0, 0, 0},
+        {2, 1, 1, 1, 1, 1, 1, 0},
+        {2, 1, 1, 1, 1, 1, 1, 0},
+    };
+    if (video_mode < 0 || video_mode > 2 || view_size < 0 || view_size > 3 || split < 0 || split > 1)
+        return -1;
+    return layouts[video_mode][view_size * 2 + split];
+}
+
+int ign_hud_rebuild_sprites(IgnHud *hud) {
+    if (hud->layout < IGN_HUD_LOW || hud->layout > IGN_HUD_HIGH) return -1;
     const int16_t(*r)[4] = RECTS[hud->layout];
     const IgnPic *pic1 = hud->layout == IGN_HUD_LOW ? &hud->pangfx_s
                          : hud->layout == IGN_HUD_MEDIUM ? &hud->pangfx_n : &hud->pan1;
@@ -133,6 +145,12 @@ static int build_sprites(IgnHud *hud) {
         for (int col = 0; col < 4; col++)
             fail |= ign_sprite_from_pic(&hud->sign[row * 4 + col], &hud->signs, r[34][0] + r[34][2] * col,
                                         r[34][1] + r[34][3] * row, r[34][2], r[34][3]);
+    return fail ? -1 : 0;
+}
+
+/* sub_00028000 also builds the layout-independent sprite families. */
+static int build_sprites(IgnHud *hud) {
+    int fail = ign_hud_rebuild_sprites(hud);
     /* 0x28577: car markers 12 x 17 at (9 + 12 r, 139 + 17 c), index 4 r + c. */
     for (int row = 0; row < 3; row++)
         for (int col = 0; col < 4; col++)
@@ -163,11 +181,9 @@ static int parse_language(const char *s) {
     return 0;
 }
 
-int ign_hud_init(IgnHud *hud, const char *data_dir, const char *level, int w, int h) {
+static int init_layout(IgnHud *hud, const char *data_dir, const char *level, int layout, int small_message) {
     memset(hud, 0, sizeof *hud);
-    (void)h;
-    /* race_setup_video: 320x200 -> S_*, 640x480 -> N_*, 800x600 -> H_*. Other sizes use the next larger layout. */
-    hud->layout = w <= 320 ? IGN_HUD_LOW : w <= 640 ? IGN_HUD_MEDIUM : IGN_HUD_HIGH;
+    hud->layout = layout;
     hud->language = parse_language(getenv("IGN_LANG"));
     hud->rng = 0x1fb4e8u;
     static const char *const SIGNS[3] = {"S_SIGNS.PIC", "N_SIGNS.PIC", "H_SIGNS.PIC"};
@@ -188,7 +204,7 @@ int ign_hud_init(IgnHud *hud, const char *data_dir, const char *level, int w, in
     snprintf(name, sizeof name, "SPEED%s.LFT", SUFFIX[hud->layout]);
     if (load_font(&hud->speed_font, data_dir, name)) goto fail;
     /* load_system_gfx 0x21985: the menu and message fonts are proportional with one pixel of spacing. */
-    if (load_font(&hud->message_font, data_dir, hud->layout == IGN_HUD_LOW ? "MINI.LFT" : "SMALL.LFT")) goto fail;
+    if (load_font(&hud->message_font, data_dir, small_message ? "SMALL.LFT" : "MINI.LFT")) goto fail;
     hud->message_font.proportional = 1;
     hud->message_font.spacing = 1;
     if (snprintf(path, sizeof path, "%s/FONTS/IGNITION.FNT", data_dir) >= (int)sizeof path ||
@@ -208,6 +224,20 @@ int ign_hud_init(IgnHud *hud, const char *data_dir, const char *level, int w, in
 fail:
     ign_hud_destroy(hud);
     return -1;
+}
+
+int ign_hud_init(IgnHud *hud, const char *data_dir, const char *level, int w, int h) {
+    (void)h;
+    int layout = w <= 320 ? IGN_HUD_LOW : w <= 640 ? IGN_HUD_MEDIUM : IGN_HUD_HIGH;
+    return init_layout(hud, data_dir, level, layout, layout != IGN_HUD_LOW);
+}
+
+int ign_hud_init_view(IgnHud *hud, const char *data_dir, const char *level, int video_mode, int view_size,
+                      int players) {
+    if (players < 1 || players > 2) return -1;
+    int layout = ign_hud_select_layout(video_mode, view_size, players - 1);
+    if (layout < 0) return -1;
+    return init_layout(hud, data_dir, level, layout, video_mode != 0);
 }
 
 void ign_hud_destroy(IgnHud *hud) {
@@ -416,8 +446,7 @@ void ign_hud_update(IgnHud *hud, const IgnHudState *st) {
 }
 
 static double hud_random(IgnHud *hud) {
-    hud->rng = hud->rng * 1103515245u + 12345u;
-    return (hud->rng >> 8 & 0xffff) / 65536.0;
+    return ign_random14(&hud->rng);
 }
 
 /* race_hud 0x4a37c / sub_0004be7c 0x4be9b: while the camera shakes (+0x38) the panel moves by shake * 0.04, the

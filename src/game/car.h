@@ -182,6 +182,11 @@ typedef enum {
 IgnTurboRequestEvent ign_car_turbo_request(IgnCar *car, int request);
 /* Vertical arithmetic only; caller handles landing effects and the car_update airborne threshold. */
 int ign_car_vertical_step(IgnCar *car, double *raw_drop);
+void ign_car_grounded_probe(IgnCar *car);
+/* sub_0002e6f8 core: current displacement in world units; retains it as the next frame's history. */
+void ign_car_body_lean(IgnCar *car, double dx, double dz);
+/* sub_00040ec8 core: tilt, shortest pitch interpolation, launch pose and elimination fade. */
+void ign_car_body_sway(IgnCar *car);
 /* Starts a wreck (kind 1 explosion, 2 sinking): the car is hidden and no longer driven. */
 void ign_car_wreck(IgnCar *car, int kind);
 /* cars_init turbo fields; preserves the request latch. */

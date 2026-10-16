@@ -21,6 +21,7 @@
 #include "../frontend/frontend.h"
 #include "../frontend/settings.h"
 #include "audio.h"
+#include "input.h"
 #include "music.h"
 #include "sound.h"
 
@@ -30,6 +31,7 @@
 
 static IgnFrame frame;
 static IgnHud hud;
+static IgnPlatformInput platform_input;
 
 static void to_rgb(const IgnFrame *fb, const IgnPalette *pal, uint32_t *out) {
     uint32_t lut[256];
@@ -868,6 +870,18 @@ static int run_game(int argc, char **argv) {
         return 1;
     }
     SDL_SetRenderVSync(ren, 1);
+    if (own_window && !ign_input_init(&platform_input, SDL_GetWindowID(win)))
+        fprintf(stderr, "input devices unavailable (keyboard remains active): %s\n", SDL_GetError());
+    ign_input_reset(&platform_input);
+    IgnInputConfig input_config;
+    ign_input_config_defaults(&input_config);
+    if (!own_window) {
+        memcpy(input_config.keys, g_cfg + CFG_P1_KEYS, sizeof input_config.keys);
+        input_config.controls = ign_cfg_get(CFG_P1_CONTROLS);
+        input_config.auto_accel = ign_cfg_get(CFG_P1_AUTOACC) != 0;
+    } else {
+        input_config.controls = 1; /* Standalone race: accept a controller without opening the frontend first. */
+    }
     /* The original modes are all shown at 4:3, so 320x200 gets tall pixels as on a CRT. */
     SDL_SetRenderLogicalPresentation(ren, frame.w, frame.w * 3 / 4, SDL_LOGICAL_PRESENTATION_LETTERBOX);
     SDL_Texture *tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_XRGB8888,
@@ -885,7 +899,6 @@ static int run_game(int argc, char **argv) {
 
     bool free_cam = false;
     bool manual_gear = manual_start;
-    int pending_gear_shift = 0;
     char typed[16] = {0};
     SDL_StartTextInput(win);
     float accumulator = 0.0f;
@@ -894,15 +907,17 @@ static int run_game(int argc, char **argv) {
     for (bool running = true; running;) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
+            int input_key = ign_input_event(&platform_input, &ev);
+            if (ev.type == SDL_EVENT_WINDOW_FOCUS_LOST) memset(typed, 0, sizeof typed);
             if (ev.type == SDL_EVENT_QUIT) quit_requested = true;
             if (ev.type == SDL_EVENT_QUIT ||
-                (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE))
+                (input_key == 1 && ev.type == SDL_EVENT_KEY_DOWN) ||
+                (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && platform_input.focused &&
+                 ev.gbutton.button == SDL_GAMEPAD_BUTTON_BACK))
                 running = false;
-            if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) {
+            if (ev.type == SDL_EVENT_KEY_DOWN && input_key) {
                 if (ev.key.key == SDLK_F1) free_cam = !free_cam, hud_debug = free_cam;
                 else if (ev.key.key == SDLK_M) manual_gear = !manual_gear;
-                else if (!free_cam && ev.key.key == SDLK_Q) pending_gear_shift = -1;
-                else if (!free_cam && ev.key.key == SDLK_E) pending_gear_shift = 1;
                 /* sub_0002b9e4 0x2c017: TAB (scancode 0x0f) steps the post-race camera 0, 1, 2, 3. */
                 else if (ev.key.key == SDLK_TAB) tv_index = (tv_index + 1) % 4;
                 /* sub_0002b9e4 0x2c1cb/0x2c29a: left/right on the pause menu's music line; F5/F6 here (deviation). */
@@ -910,7 +925,7 @@ static int run_game(int argc, char **argv) {
                 else if (ev.key.key == SDLK_F6) ign_music_step(1);
             }
             /* Cheat words are typed during play (0x160c4); BANARNE toggles 3x tall bodies. */
-            if (ev.type == SDL_EVENT_TEXT_INPUT) {
+            if (ev.type == SDL_EVENT_TEXT_INPUT && platform_input.focused) {
                 for (const char *c = ev.text.text; *c; c++) {
                     memmove(typed, typed + 1, sizeof typed - 2);
                     typed[sizeof typed - 2] = (char)SDL_toupper((unsigned char)*c);
@@ -927,23 +942,16 @@ static int run_game(int argc, char **argv) {
         Uint64 now = SDL_GetTicks();
         float dt = fminf((now - last) / 1000.0f, 0.25f);
         last = now;
-        const bool *keys = SDL_GetKeyboardState(NULL);
+        const bool *keys = platform_input.keys;
 
         if (free_cam) {
             free_camera(&cam, keys, dt);
+            ign_input_clear_edges(&platform_input); /* Do not defer camera-mode shifts into the race. */
         } else {
-            IgnInput in = {
-                .accel = keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W],
-                .brake = keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S],
-                .left = keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A],
-                .right = keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D],
-                .turbo = keys[SDL_SCANCODE_SPACE],
-                .manual_gear = manual_gear,
-            };
+            input_config.manual_gear = manual_gear;
+            bool rear = false;
             for (accumulator += dt; accumulator >= SIM_DT; accumulator -= SIM_DT) {
-                IgnInput tick_input = in;
-                tick_input.gear_shift = pending_gear_shift;
-                pending_gear_shift = 0;
+                IgnInput tick_input = ign_input_sample(&platform_input, &input_config, true, &rear);
                 special_tick(&car, &lv, &track);
                 if (!car.wrecked) {
                     if (car.progress_lock != 1) player_ai.input = tick_input;
@@ -957,7 +965,8 @@ static int run_game(int argc, char **argv) {
                 }
             }
             /* human_input 0x2c9df: the rear view (car+0x5a4) lasts while its key is held. */
-            race_view(&car, keys[SDL_SCANCODE_R], &cam);
+            ign_input_sample(&platform_input, &input_config, false, &rear);
+            race_view(&car, rear, &cam);
             static const char *const COUNT[] = {" - GO!", " - 1", " - 2", " - 3"};
             int count = ign_race_countdown(&race);
             char title[160];
@@ -986,6 +995,7 @@ static int run_game(int argc, char **argv) {
     SDL_StopTextInput(win);
     ign_texanim_free(&texanims); /* the menu may start another race */
     if (own_window) {
+        ign_input_shutdown(&platform_input);
         SDL_DestroyRenderer(ren);
         SDL_DestroyWindow(win);
         SDL_Quit();
@@ -1038,45 +1048,6 @@ static void host_sound_stop_voice(int handle) {
     if (handle > 0) ign_audio_set(handle, 0, 0);
 }
 static void host_sound_free(int sample) { ign_audio_free(IGN_SND_MENU, 0, sample); }
-
-/* SDL scancode -> DOS set-1 scancode as delivered by the keyboard ISR 0x55e04 (0xE0-prefixed keys + 0x80). */
-static int dos_scancode(SDL_Scancode sc) {
-    static const struct { SDL_Scancode sdl; uint8_t dos; } map[] = {
-        {SDL_SCANCODE_ESCAPE, 0x01}, {SDL_SCANCODE_1, 0x02}, {SDL_SCANCODE_2, 0x03}, {SDL_SCANCODE_3, 0x04},
-        {SDL_SCANCODE_4, 0x05}, {SDL_SCANCODE_5, 0x06}, {SDL_SCANCODE_6, 0x07}, {SDL_SCANCODE_7, 0x08},
-        {SDL_SCANCODE_8, 0x09}, {SDL_SCANCODE_9, 0x0a}, {SDL_SCANCODE_0, 0x0b}, {SDL_SCANCODE_MINUS, 0x0c},
-        {SDL_SCANCODE_EQUALS, 0x0d}, {SDL_SCANCODE_BACKSPACE, 0x0e}, {SDL_SCANCODE_TAB, 0x0f},
-        {SDL_SCANCODE_Q, 0x10}, {SDL_SCANCODE_W, 0x11}, {SDL_SCANCODE_E, 0x12}, {SDL_SCANCODE_R, 0x13},
-        {SDL_SCANCODE_T, 0x14}, {SDL_SCANCODE_Y, 0x15}, {SDL_SCANCODE_U, 0x16}, {SDL_SCANCODE_I, 0x17},
-        {SDL_SCANCODE_O, 0x18}, {SDL_SCANCODE_P, 0x19}, {SDL_SCANCODE_LEFTBRACKET, 0x1a},
-        {SDL_SCANCODE_RIGHTBRACKET, 0x1b}, {SDL_SCANCODE_RETURN, 0x1c}, {SDL_SCANCODE_LCTRL, 0x1d},
-        {SDL_SCANCODE_A, 0x1e}, {SDL_SCANCODE_S, 0x1f}, {SDL_SCANCODE_D, 0x20}, {SDL_SCANCODE_F, 0x21},
-        {SDL_SCANCODE_G, 0x22}, {SDL_SCANCODE_H, 0x23}, {SDL_SCANCODE_J, 0x24}, {SDL_SCANCODE_K, 0x25},
-        {SDL_SCANCODE_L, 0x26}, {SDL_SCANCODE_SEMICOLON, 0x27}, {SDL_SCANCODE_APOSTROPHE, 0x28},
-        {SDL_SCANCODE_GRAVE, 0x29}, {SDL_SCANCODE_LSHIFT, 0x2a}, {SDL_SCANCODE_BACKSLASH, 0x2b},
-        {SDL_SCANCODE_Z, 0x2c}, {SDL_SCANCODE_X, 0x2d}, {SDL_SCANCODE_C, 0x2e}, {SDL_SCANCODE_V, 0x2f},
-        {SDL_SCANCODE_B, 0x30}, {SDL_SCANCODE_N, 0x31}, {SDL_SCANCODE_M, 0x32}, {SDL_SCANCODE_COMMA, 0x33},
-        {SDL_SCANCODE_PERIOD, 0x34}, {SDL_SCANCODE_SLASH, 0x35}, {SDL_SCANCODE_RSHIFT, 0x36},
-        {SDL_SCANCODE_KP_MULTIPLY, 0x37}, {SDL_SCANCODE_LALT, 0x38}, {SDL_SCANCODE_SPACE, 0x39},
-        {SDL_SCANCODE_CAPSLOCK, 0x3a}, {SDL_SCANCODE_F1, 0x3b}, {SDL_SCANCODE_F2, 0x3c}, {SDL_SCANCODE_F3, 0x3d},
-        {SDL_SCANCODE_F4, 0x3e}, {SDL_SCANCODE_F5, 0x3f}, {SDL_SCANCODE_F6, 0x40}, {SDL_SCANCODE_F7, 0x41},
-        {SDL_SCANCODE_F8, 0x42}, {SDL_SCANCODE_F9, 0x43}, {SDL_SCANCODE_F10, 0x44},
-        {SDL_SCANCODE_NUMLOCKCLEAR, 0x45}, {SDL_SCANCODE_SCROLLLOCK, 0x46}, {SDL_SCANCODE_KP_7, 0x47},
-        {SDL_SCANCODE_KP_8, 0x48}, {SDL_SCANCODE_KP_9, 0x49}, {SDL_SCANCODE_KP_MINUS, 0x4a},
-        {SDL_SCANCODE_KP_4, 0x4b}, {SDL_SCANCODE_KP_5, 0x4c}, {SDL_SCANCODE_KP_6, 0x4d},
-        {SDL_SCANCODE_KP_PLUS, 0x4e}, {SDL_SCANCODE_KP_1, 0x4f}, {SDL_SCANCODE_KP_2, 0x50},
-        {SDL_SCANCODE_KP_3, 0x51}, {SDL_SCANCODE_KP_0, 0x52}, {SDL_SCANCODE_KP_PERIOD, 0x53},
-        {SDL_SCANCODE_F11, 0x57}, {SDL_SCANCODE_F12, 0x58}, {SDL_SCANCODE_KP_ENTER, 0x9c},
-        {SDL_SCANCODE_RCTRL, 0x9d}, {SDL_SCANCODE_KP_DIVIDE, 0xb5}, {SDL_SCANCODE_RALT, 0xb8},
-        {SDL_SCANCODE_HOME, 0xc7}, {SDL_SCANCODE_UP, 0xc8}, {SDL_SCANCODE_PAGEUP, 0xc9},
-        {SDL_SCANCODE_LEFT, 0xcb}, {SDL_SCANCODE_RIGHT, 0xcd}, {SDL_SCANCODE_END, 0xcf},
-        {SDL_SCANCODE_DOWN, 0xd0}, {SDL_SCANCODE_PAGEDOWN, 0xd1}, {SDL_SCANCODE_INSERT, 0xd2},
-        {SDL_SCANCODE_DELETE, 0xd3},
-    };
-    for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
-        if (map[i].sdl == sc) return map[i].dos;
-    return 0;
-}
 
 /* IGN_KEYS="ms:Key,ms:Key,...": scripted key presses (SDL key names, or "quit"), each `ms` after the previous one,
  * pushed as SDL events so the menu and the race windows react as to the keyboard. For automated end-to-end runs. */
@@ -1140,6 +1111,8 @@ static int run_frontend(const char *data_dir) {
         return 1;
     }
     SDL_SetRenderVSync(shared_ren, 1);
+    if (!ign_input_init(&platform_input, SDL_GetWindowID(shared_win)))
+        fprintf(stderr, "input devices unavailable (keyboard remains active): %s\n", SDL_GetError());
     start_scripted_keys();
     IgnFrontendHost host = {
         .timer_ms = host_timer,
@@ -1172,13 +1145,16 @@ static int run_frontend(const char *data_dir) {
         SDL_SetRenderLogicalPresentation(shared_ren, IGN_FRONTEND_W, IGN_FRONTEND_W * 3 / 4,
                                          SDL_LOGICAL_PRESENTATION_LETTERBOX);
         memset(g_key_latch, 0, sizeof g_key_latch);
+        ign_input_reset(&platform_input);
         ign_frontend_load();
         int result = IGN_FRONTEND_STAY;
         while (result == IGN_FRONTEND_STAY) {
             SDL_Event ev;
             while (SDL_PollEvent(&ev)) {
                 if (ev.type == SDL_EVENT_QUIT) quit_requested = true;
-                if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) ign_frontend_key_down(dos_scancode(ev.key.scancode));
+                int key = ign_input_event(&platform_input, &ev);
+                if (key) ign_frontend_key_down(key);
+                if (ev.type == SDL_EVENT_WINDOW_FOCUS_LOST) memset(g_key_latch, 0, sizeof g_key_latch);
             }
             if (quit_requested) break;
             result = ign_frontend_frame();
@@ -1225,6 +1201,7 @@ static int run_frontend(const char *data_dir) {
         if (!quit_requested) printf("menu: back from the race\n");
     }
     ign_frontend_destroy();
+    ign_input_shutdown(&platform_input);
     SDL_DestroyRenderer(shared_ren);
     SDL_DestroyWindow(shared_win);
     SDL_Quit();

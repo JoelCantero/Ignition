@@ -8,6 +8,17 @@
 #define IGN_WORLD_PER_METRE 21.76
 #define IGN_TORQUE_POINTS 200
 
+/* sub_0001feb0 / sub_000350cc: unordered x87 comparisons return +1. */
+int ign_physics_sign(double value);
+/* sub_00051760: unlike the collision helpers, unordered returns -2. */
+double ign_control_sign(double value);
+/* sub_000517fc. */
+int ign_integer_sign(int value);
+/* sub_00051980 / sub_00051938: repeated binary64 additions/subtractions.
+ * Finite value and finite positive period; the original has the same domain. */
+double ign_wrap_positive(double value, double period);
+double ign_angle_normalize(double value);
+
 typedef struct {
     double mass;        /* +0x00 */
     double inertia;     /* +0x08 */
@@ -51,6 +62,8 @@ int ign_body_collide(IgnBody *b, const double (*walls)[4], int nwalls);
 
 /* One integration step; slope_k is 1.0 on grippy surfaces and 4.0 on slippery ones. */
 void ign_body_step(IgnBody *b, int airborne, double slope_k);
+/* sub_0002e6a4: legacy planar integration, without slope projection; paused cars do not move. */
+void ign_body_move_planar(IgnBody *b, int paused);
 
 /* sub_00053e70: Hermite torque curve through 4 points, start slope 1.2, end slope 0. */
 void ign_torque_curve(const int32_t p[8], int16_t out[IGN_TORQUE_POINTS]);

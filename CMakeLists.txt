@@ -14,6 +14,7 @@ endif()
 find_package(SDL3 REQUIRED CONFIG)
 
 add_library(ignition_core STATIC
+  src/platform/runtime.c
   src/game/assets.c
   src/game/pos.c
   src/game/ai.c
@@ -40,6 +41,7 @@ add_library(ignition_core STATIC
   src/frontend/gui.c
   src/frontend/menu_data.c
   src/frontend/pfm.c
+  src/frontend/race_ui.c
   src/frontend/settings.c
 )
 target_include_directories(ignition_core PUBLIC src)
@@ -49,6 +51,7 @@ if(NOT MSVC)
 endif()
 
 add_executable(ignition src/platform/main.c src/platform/audio.c src/platform/sound.c)
+target_sources(ignition PRIVATE src/platform/input.c)
 target_link_libraries(ignition PRIVATE ignition_core SDL3::SDL3)
 if(NOT MSVC)
   target_compile_options(ignition PRIVATE -Wall -Wextra)
@@ -80,6 +83,19 @@ add_custom_target(elf
 
 # Deterministic headless regression (needs the game data); run with `ctest --test-dir build`.
 enable_testing()
+add_executable(runtime_test tests/runtime.c)
+target_link_libraries(runtime_test PRIVATE ignition_core)
+if(NOT MSVC)
+  target_compile_options(runtime_test PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME runtime_native COMMAND runtime_test)
+add_executable(input_backend_test tests/input_backend.c src/platform/input.c)
+target_include_directories(input_backend_test PRIVATE src)
+target_link_libraries(input_backend_test PRIVATE SDL3::SDL3)
+if(NOT MSVC)
+  target_compile_options(input_backend_test PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME input_backend COMMAND input_backend_test)
 add_test(NAME music_native COMMAND music_test "${GAME_DIR}")
 add_test(NAME regress COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/regress.py
   --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}"
@@ -95,6 +111,9 @@ add_test(NAME solo_replay COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/solo_replay.
 add_executable(gearbox_test tests/gearbox.c)
 target_link_libraries(gearbox_test PRIVATE ignition_core)
 add_test(NAME gearbox COMMAND gearbox_test)
+add_executable(race_management_test tests/race_management.c)
+target_link_libraries(race_management_test PRIVATE ignition_core)
+add_test(NAME race_management COMMAND race_management_test)
 add_executable(track_gates_test tests/track_gates.c)
 target_link_libraries(track_gates_test PRIVATE ignition_core)
 add_test(NAME track_gates COMMAND track_gates_test)
@@ -237,6 +256,10 @@ if(IGN_VERIFY_ORIGINAL)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/physics_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:body_step_test>
             --report ${CMAKE_BINARY_DIR}/physics-original-report.json)
+  add_test(NAME runtime_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/runtime_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:runtime_test>
+            --report ${CMAKE_BINARY_DIR}/runtime-original-report.json)
   add_test(NAME body_pair_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/body_pair_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:body_pair_test>
@@ -256,6 +279,10 @@ if(IGN_VERIFY_ORIGINAL)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/race_time_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
             --report ${CMAKE_BINARY_DIR}/race-time-original-report.json)
+  add_test(NAME race_management_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/race_management_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:race_management_test>
+            --report ${CMAKE_BINARY_DIR}/race-management-original-report.json)
   add_test(NAME respawn_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/respawn_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>

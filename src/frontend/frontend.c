@@ -1,4 +1,5 @@
 #include "frontend.h"
+#include "../platform/runtime.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -43,7 +44,10 @@ static IgnFrontendHost g_host;
 static IgnFont g_font_rec[8];          /* 0x24c214 records, slots 0x1ac4a8 */
 static IgnFont *g_font_slot[8];
 static uint8_t *g_sysgfx;              /* N_SYSGFX.PIC pixels, 256 x 412 */
+static IgnPic g_sysg2;                 /* N_SYSG_2.PIC */
+static IgnPalette g_system_palette;    /* SYS.COL */
 static IgnMenuSprite g_corner[4];      /* 0x1ac478: TL, TR, BL, BR, 20 x 20 */
+static IgnMenuSprite g_loading;        /* 0x1fed98: 61 x 58 at N_SYSGFX + 0xc1e7 */
 /* Draw targets: the menu back buffer [0xea400] and the text layer [0xea408] (320 x 200, pitch 320). */
 static IgnFrame g_back_frame, g_text_frame;
 static uint8_t *g_iris_tab;            /* [0x1fef4c]: 405 x 800 */
@@ -90,8 +94,7 @@ static struct {
     int page7_autosel;                         /* 0xea434 */
     int p8_frames;                             /* 0xea430 */
     int frames;                                /* 0xea40c */
-    double msg_time[10];                       /* 0xea77c */
-    char msg_text[10][256];                    /* 0xea7cc */
+    IgnFrontendMessages messages;             /* 0xea77c durations, 0xea7cc text */
     /* background animation (menu_load_car 0x1aaf8) */
     uint8_t *psq;                              /* 0xea314 */
     size_t psq_size;                           /* 0xea318 */
@@ -196,6 +199,18 @@ static IgnFont *font(int slot) { return g_font_slot[slot]; }
 
 int ign_frontend_cheat(int i) { return i >= 0 && i < 7 ? (int)(g_cheat[i] & 0xff) : 0; }
 
+int ign_frontend_messages_post(IgnFrontendMessages *messages, const char *text, double duration) {
+    int slot = 0;
+    while (slot < IGN_FRONTEND_MESSAGES - 1 && messages->time[slot] != 0.0) slot++;
+    messages->time[slot] = duration;
+    snprintf(messages->text[slot], sizeof messages->text[slot], "%s", text);
+    return slot;
+}
+
+int ign_frontend_message(const char *text, double duration) {
+    return ign_frontend_messages_post(&M.messages, text, duration);
+}
+
 const char *ign_frontend_level(int track) {
     static const char *const levels[7] = {"CANADA", "USA", "CARIB", "BRAZIL", "AUSTRIA", "ICELAND", "JAPAN"};
     return track >= 0 && track < 7 ? levels[track] : levels[0];
@@ -240,13 +255,14 @@ int ign_frontend_init(const char *data_dir, const IgnFrontendHost *host) {
                                          "baltazar\\data\\bluedark.lft", "baltazar\\data\\bluelite.lft",
                                          "baltazar\\data\\red_grey.lft", "baltazar\\data\\bluegrey.lft",
                                          "fonts\\mini.lft",              "fonts\\small.lft"};
+    ign_frontend_destroy();
     snprintf(g_data_dir, sizeof g_data_dir, "%s", data_dir);
     g_host = *host;
     ign_gfx_set_lut(ign_gfx_identity_lut());
     for (int i = 0; i < 8; i++) {
         if (ign_font_load_lft(&g_font_rec[i], data_path(fonts[i]))) {
             fprintf(stderr, "Could not get a font handle (%s).\n", data_path(fonts[i]));
-            return -1;
+            goto fail;
         }
         g_font_rec[i].proportional = 1; /* load_system_gfx 0x21860 after each load */
         g_font_rec[i].spacing = 1;
@@ -254,25 +270,45 @@ int ign_frontend_init(const char *data_dir, const IgnFrontendHost *host) {
     }
     /* load_system_gfx 0x21860: N_SYSGFX.PIC, 0x34e-byte header then 256 x 412 pixels. */
     long size = file_size(data_path("n_sysgfx.pic"));
-    if (size < 0x34e + 256 * 412) return -1;
+    if (size < 0x34e + 256 * 412) goto fail;
     g_sysgfx = xcalloc((size_t)size);
-    read_file_into(data_path("n_sysgfx.pic"), g_sysgfx, (size_t)size, 0);
+    if (read_file_into(data_path("n_sysgfx.pic"), g_sysgfx, (size_t)size, 0) != 1 ||
+        ign_load_pic(data_path("n_sysg_2.pic"), &g_sysg2))
+        goto fail;
+    uint8_t col[0x308];
+    if (read_file_into(data_path("sys.col"), col, sizeof col, 0) != 1 ||
+        ign_parse_col(col, sizeof col, &g_system_palette))
+        goto fail;
     for (int i = 0; i < 4; i++) /* rect 0xc3cd8 = {236, 0, 20, 20}, tiles stacked down */
-        ign_menu_sprite_set(&g_corner[i], g_sysgfx + 0x34e + (20 * i) * 256 + 236, 20, 20, 256, 0, 0);
-    if (ign_menubox_init(data_path("menubkg.dat"))) return -1;
+        if (ign_menu_sprite_set(&g_corner[i], g_sysgfx + 0x34e + (20 * i) * 256 + 236, 20, 20, 256, 0, 0))
+            goto fail;
+    if (ign_menu_sprite_set(&g_loading, g_sysgfx + 0xc1e7, 61, 58, 256, 0, 0) ||
+        ign_menubox_init(data_path("menubkg.dat")))
+        goto fail;
     iris_table_build();
     memset(g_cheat, 0, sizeof g_cheat);
     return 0;
+fail:
+    ign_frontend_destroy();
+    return -1;
 }
 
 void ign_frontend_destroy(void) {
-    for (int i = 0; i < 8; i++) ign_font_free(&g_font_rec[i]);
+    ign_font_free_all(g_font_rec, 8);
+    memset(g_font_slot, 0, sizeof g_font_slot);
     for (int i = 0; i < 4; i++) ign_menu_sprite_free(&g_corner[i]);
+    ign_menu_sprite_free(&g_loading);
     ign_menubox_free();
+    ign_free_pic(&g_sysg2);
+    memset(&g_system_palette, 0, sizeof g_system_palette);
     free(g_sysgfx);
     free(g_iris_tab);
     g_sysgfx = g_iris_tab = NULL;
 }
+
+const IgnMenuSprite *ign_frontend_loading_sprite(void) { return g_loading.px ? &g_loading : NULL; }
+const IgnPic *ign_frontend_system_picture(void) { return g_sysg2.pixels ? &g_sysg2 : NULL; }
+const IgnPalette *ign_frontend_system_palette(void) { return g_sysgfx ? &g_system_palette : NULL; }
 
 /* ---- settings (0x198bc) ----------------------------------------------------------------------------------------- */
 
@@ -1134,7 +1170,7 @@ int ign_frontend_shutdown(void) {
 /* ---- 0x12bb8 menu_frame ----------------------------------------------------------------------------------------- */
 
 static int pick_cd_track(int sel) {
-    if (sel == -1) return (rand() & 0x7fff) * M.cd_tracks / 32768 + 1;
+    if (sel == -1) return (int)ign_random15(ign_random_state()) * M.cd_tracks / 32768 + 1;
     return sel == 0 ? 7 : sel;
 }
 
@@ -1323,10 +1359,10 @@ int ign_frontend_frame(void) {
         menu_iris(r < 0 ? 0 : r);
     }
     for (int k = 0; k < 10; k++) {
-        if (!(M.msg_time[k] > 0.0)) continue;
-        M.msg_time[k] -= M.dt;
-        if (M.msg_time[k] < 0.0) M.msg_time[k] = 0.0;
-        ign_gfx_text(font(F_RED_DARK), M.msg_text[k], 0, k * 16);
+        if (!(M.messages.time[k] > 0.0)) continue;
+        M.messages.time[k] -= M.dt;
+        if (M.messages.time[k] < 0.0) M.messages.time[k] = 0.0;
+        ign_gfx_text(font(F_RED_DARK), M.messages.text[k], 0, k * 16);
     }
     present();
     M.frames++;

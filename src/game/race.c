@@ -1,11 +1,99 @@
 #include "race.h"
+#include "save.h"
 #include <float.h>
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define PI 3.14159265358979323846
+
+/* 0xc45b4 and 0xc3fd8; track IDs are GST IDs, not menu display order. */
+static const int CHAMP_TRACKS[4][7] = {
+    {0, 1, 2, 3, 4, 0, 0}, {3, 2, 0, 4, 1, 5, 0},
+    {4, 3, 5, 1, 0, 2, 6}, {5, 0, 4, 6, 2, 1, 3}
+};
+static const int TRACK_MUSIC[7] = {2, 3, 4, 5, 6, 6, 7};
+
+int ign_race_config_decode(IgnRaceConfig *out, const unsigned char *image, size_t size,
+                           int cd_tracks, double (*random01)(void)) {
+    if (!out || !image || size != IGN_BTZ_SIZE) return -1;
+    IgnBtz b;
+    memcpy(b.raw, image, sizeof b.raw);
+    IgnRaceConfig c = {0};
+#define CFG(off) ign_btz_i32(&b, (off))
+    c.mode = CFG(IGN_BTZ_MODE);
+    c.difficulty = CFG(IGN_BTZ_CLASS);
+    c.round = CFG(IGN_BTZ_TRACK);
+    c.ncars = CFG(IGN_BTZ_NCARS);
+    c.players_minus_one = CFG(IGN_BTZ_PLAYERS);
+    /* Original trusts these indices; reject them rather than reading outside fixed tables. */
+    if (c.mode < 0 || c.mode > 3 || c.difficulty < 0 || c.difficulty > 3 ||
+        c.round < 0 || c.round >= 7 || c.ncars < 1 || c.ncars > IGN_RACE_MAX_CARS ||
+        c.players_minus_one < 0 || c.players_minus_one > 1 ||
+        c.players_minus_one >= c.ncars) return -1;
+    c.track = c.mode == 0 ? CHAMP_TRACKS[c.difficulty][c.round] : c.round;
+    c.human_count = c.players_minus_one + 1;
+    c.ghost = CFG(IGN_BTZ_GHOST);
+    if (c.ghost == 1 && c.mode != 2) c.ghost = 0;
+    c.value_107 = CFG(0x107);
+    c.value_10b = CFG(0x10b);
+    c.value_197 = CFG(0x197);
+    c.value_15b = CFG(0x15b);
+    c.value_10f = CFG(0x10f);
+    c.value_113 = CFG(0x113);
+    c.value_117 = CFG(0x117);
+    c.value_014 = c.mode == 0 ? 1 : CFG(0x014);
+    c.music_track = CFG(0x0f7);
+    if (c.music_track == 0) {
+        c.music_track = TRACK_MUSIC[c.track];
+        if (c.music_track > cd_tracks) c.music_track = cd_tracks;
+    } else if (c.music_track == -1) {
+        if (!random01) return -1;
+        double random = random01();
+        double track = random * cd_tracks + 1.0;
+        if (!isfinite(track) || track < INT32_MIN || track > INT32_MAX) return -1;
+        c.music_track = (int)track;
+    }
+    int music = CFG(0x0fb), effects = CFG(0x0ff);
+    if (music > INT32_MAX / 10 || music < INT32_MIN / 10 ||
+        effects > INT32_MAX / 10 || effects < INT32_MIN / 10) return -1;
+    c.music_volume = music * 10;
+    c.effects_volume = effects * 10;
+    c.effects_enabled = c.effects_volume != 0;
+    int noncomputer = 0;
+    for (int i = 0; i < c.ncars; i++) {
+        IgnRaceParticipant *p = &c.participants[i];
+        c.grid[i] = CFG(IGN_BTZ_GRID + i * 4);
+        p->model = CFG(IGN_BTZ_CAR + i * 4);
+        p->automatic = CFG(0x048 + i * 4);
+        p->computer = CFG(IGN_BTZ_HUMAN + i * 4);
+        p->gear_delay = 30;
+        ign_btz_name(&b, i, p->name);
+        if (i == 0 || (i == 1 && c.players_minus_one == 1)) {
+            memcpy(p->keys, b.raw + 0x17f + i * 8, sizeof p->keys);
+            if (c.difficulty >= 3) {
+                unsigned char key = p->keys[0];
+                p->keys[0] = p->keys[1];
+                p->keys[1] = key;
+            }
+            p->input_device = CFG(0x123 + i * 4);
+            p->joystick = CFG(0x12b + i * 4);
+        }
+        noncomputer += p->computer != 1;
+    }
+    if (noncomputer > 1) c.ghost = 0;
+#undef CFG
+    *out = c;
+    return 0;
+}
+
+int ign_race_config_load(IgnRaceConfig *out, const char *path, int cd_tracks, double (*random01)(void)) {
+    IgnBtz b;
+    if (ign_btz_load(path, &b)) return -1;
+    return ign_race_config_decode(out, b.raw, sizeof b.raw, cd_tracks, random01);
+}
 
 /* 0xc0678: ease-in-out curve read by sub_000413fc (index = f * 200, value * 0.005). */
 static const unsigned char EASE[201] = {
@@ -129,16 +217,43 @@ void ign_race_wrecks(IgnCar *const *cars, int n, const IgnLevel *lv, const IgnTr
 }
 
 void ign_race_init(IgnRace *r, int mode, int ncars) {
-    r->mode = mode;
-    r->tick = 0;
-    r->finished = 0;
-    r->remaining = ncars;
-    r->clock = 0;
-    r->total = 0;
-    r->timer_ticks = r->origin_ms = 0;
-    r->elapsed = 0;
+    memset(r, 0, sizeof *r);
+    ign_race_reset(r, mode, ncars, 0);
     r->best_lap = DBL_MAX;
-    r->ai_parity = r->ai_car = 0;
+    for (int i = 0; i < IGN_RACE_MAX_CARS; i++) r->grid[i] = i;
+}
+
+void ign_race_reset(IgnRace *r, int mode, int ncars, int round) {
+    if (mode == 0 && round == 0)
+        for (int i = 0; i < ncars && i < IGN_RACE_MAX_CARS; i++) r->points[i] = 0;
+    r->mode = mode;
+    r->tick = r->finished = r->ai_parity = r->ai_car = 0;
+    r->total = 0;
+    memset(r->result_order, 0, sizeof r->result_order);
+    memset(r->result_aux, 0, sizeof r->result_aux);
+    r->remaining = ncars;
+    r->finish_clock = -1;
+    r->last_eliminated = -1;
+    r->elimination_limit = mode == IGN_MODE_ELIMINATION ? ncars - 1 : 0;
+    r->elimination_count = 0;
+    for (int i = 0; i < IGN_RACE_MAX_CARS; i++) {
+        r->human_finish[i] = -1;
+    }
+    for (int i = 0; i < 10; i++) r->hud_slots[0][i] = r->hud_slots[1][i] = 100;
+}
+
+void ign_race_configure(IgnRace *r, const IgnRaceConfig *config, int section_count) {
+    ign_race_reset(r, config->mode, config->ncars, config->round);
+    r->players_minus_one = config->players_minus_one;
+    r->section_count = section_count;
+    r->ghost_enabled = config->ghost;
+    memcpy(r->grid, config->grid, sizeof r->grid);
+}
+
+void ign_race_reset_times(IgnRace *r, IgnCar *const *cars, int n, int32_t now, double saved_best_lap) {
+    for (int i = 0; i < n; i++) ign_race_reset_car_clock(cars[i]);
+    if (n > 0) r->best_lap = saved_best_lap;
+    r->origin_ms = now;
 }
 
 IgnAiControlAction ign_race_ai_action(const IgnRace *r, const IgnCar *car, int index, int computer) {
@@ -260,6 +375,7 @@ void ign_race_progress(IgnRace *r, IgnCar *car, const IgnTrack *t) {
 
 int ign_race_step(IgnRace *r, IgnCar *const *cars, int n) {
     r->tick++;
+    r->last_eliminated = -1;
 
     if (r->mode == IGN_MODE_ELIMINATION) {
         /* sub_0002de30: with exactly one racing car a lap behind the leader, it is out. */
@@ -271,11 +387,35 @@ int ign_race_step(IgnRace *r, IgnCar *const *cars, int n) {
         if (behind == 1 && cars[last]->blow == 0.0) {
             IgnCar *c = cars[last];
             c->wrecked = 1;
+            c->wreck_kind = 1;
             c->blow = 1.0;
             finish(r, c);
-            if (--r->remaining == 1)
+            r->last_eliminated = last;
+            if (cars[0]->out == 1 && (r->players_minus_one == 0 || (n > 1 && cars[1]->out == 1)) &&
+                r->finish_clock < 0) {
+                r->finish_clock = 0;
+                r->human_finish[0] = r->human_finish[1] = 0;
+            }
+            if (--r->remaining == 1) {
                 for (int i = 0; i < n; i++)
-                    if (!cars[i]->out) finish(r, cars[i]);
+                    if (!cars[i]->out) {
+                        cars[i]->out = 1;
+                        cars[i]->finish_position = cars[i]->position;
+                        cars[i]->finish_tick = r->tick;
+                        cars[i]->place = n;
+                        if (r->finish_clock < 0) {
+                            r->finish_clock = 0;
+                            r->human_finish[i] = 0;
+                        }
+                        r->finished = n;
+                    }
+            }
+            if (last == 0 || (last == 1 && r->players_minus_one == 1)) {
+                r->finish_clock = 0;
+                r->tv_camera = 3;
+                r->camera_hold = 100;
+                r->human_finish[last] = 0;
+            }
         }
     }
     int racing = 0;
@@ -283,21 +423,64 @@ int ign_race_step(IgnRace *r, IgnCar *const *cars, int n) {
     return racing;
 }
 
-int ign_race_position(const IgnCar *const *cars, int n, int index) {
-    const IgnCar *me = cars[index];
-    int pos = 1;
-    for (int i = 0; i < n; i++) {
-        if (i == index) continue;
-        const IgnCar *o = cars[i];
-        int ahead;
-        /* Finishers rank first, eliminated cars last (the earliest eliminated is the lowest). */
-        int ro = o->wrecked ? -1 : o->out, rm = me->wrecked ? -1 : me->out;
-        if (ro != rm) ahead = ro > rm;
-        else if (o->out) ahead = o->wrecked ? o->place > me->place : o->place < me->place;
-        else if (o->lap != me->lap) ahead = o->lap > me->lap;
-        else if (o->phase != me->phase) ahead = o->phase > me->phase;
-        else ahead = abs(o->section) > abs(me->section);
-        pos += ahead;
+int32_t ign_race_rank_score(const IgnRace *r, const IgnCar *car, int n, int bias) {
+    uint32_t span = (uint32_t)r->section_count + 10;
+    uint32_t progress = (uint32_t)car->lap * span;
+    if (!car->out) {
+        uint32_t section = car->section < 0 ? 0u - (uint32_t)car->section : (uint32_t)car->section;
+        if (signed_timer(section) < r->section_count / 4 || car->phase != 0) progress += section;
+    } else if (r->mode == IGN_MODE_ELIMINATION) {
+        progress -= (uint32_t)car->finish_position * 10;
+    } else {
+        progress += ((uint32_t)n - (uint32_t)car->finish_position) * 10;
     }
-    return pos;
+    uint32_t score = progress * 30 + (uint32_t)bias;
+    if (car->out && r->mode != IGN_MODE_ELIMINATION && !(r->total >= 250.0)) score -= 11;
+    return signed_timer(score);
+}
+
+void ign_race_rank(IgnRace *r, IgnCar *const *cars, int n) {
+    if (n <= 0 || n > IGN_RACE_MAX_CARS) return;
+    int order[IGN_RACE_MAX_CARS];
+    int32_t score[IGN_RACE_MAX_CARS];
+    for (int i = 0; i < n; i++) {
+        order[i] = i;
+        score[i] = ign_race_rank_score(r, cars[i], n, r->rank_bias[i]);
+    }
+    for (int end = n - 1; end > 0; end--)
+        for (int i = 1; i <= end; i++)
+            if (score[i] > score[i - 1]) {
+                int32_t s = score[i]; score[i] = score[i - 1]; score[i - 1] = s;
+                int o = order[i]; order[i] = order[i - 1]; order[i - 1] = o;
+            }
+    for (int i = 0; i < n; i++) cars[order[i]]->position = i + 1;
+    /* 0x4c4c2..0x4c671: a duplicate FINISH place sorts every car by elapsed time,
+     * overwriting even running cars' finish snapshots, without recomputing positions this call. */
+    for (int i = 0; i < n; i++)
+        if (cars[i]->out == 1)
+            for (int j = i + 1; j < n; j++)
+                if (cars[j]->out == 1 && cars[i]->finish_position == cars[j]->finish_position) {
+                    for (int k = 0; k < n; k++) order[k] = k;
+                    for (int end = n - 1; end > 0; end--)
+                        for (int k = 0; k < end; k++)
+                            if (cars[order[k]]->race_elapsed > cars[order[k + 1]]->race_elapsed) {
+                                int o = order[k]; order[k] = order[k + 1]; order[k + 1] = o;
+                            }
+                    for (int k = 0; k < n; k++) cars[order[k]]->finish_position = k + 1;
+                }
+    if (!(r->total >= 250.0) && cars[0]->out == 0)
+        for (int i = 0; i < n; i++) cars[i]->position = r->grid[i] + 1;
+    if (r->ghost_enabled == 1 && cars[0]->out == 0) {
+        if (r->ghost_progress > score[0]) {
+            r->ghost_position = 1;
+            cars[0]->position = 2;
+        } else {
+            r->ghost_position = 2;
+            cars[0]->position = 1;
+        }
+    }
+}
+
+int ign_race_position(const IgnCar *const *cars, int n, int index) {
+    return index >= 0 && index < n ? cars[index]->position : 0;
 }

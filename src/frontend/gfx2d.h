@@ -45,7 +45,7 @@ void ign_blend_rect(const uint8_t *src, int x0, int y0, int x1, int y1, uint8_t 
 /* MenuBkg.dat boxes. */
 int ign_menubox_init(const char *path);             /* sub_000541d4 */
 void ign_menubox_free(void);
-void ign_menubox_clear(void);                       /* sub_00054278 */
+void ign_menubox_clear(void); /* 0x54278 + recursive node release 0x542ac; native iteration avoids stack growth */
 void ign_menubox_add(int x, int row, int w, int yoff, int style); /* sub_000542c4 */
 void ign_menubox_draw(uint8_t *buf, int pitch, int buf_w, int buf_h); /* sub_0005430c */
 

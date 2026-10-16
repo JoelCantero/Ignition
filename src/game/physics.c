@@ -67,8 +67,41 @@ void ign_torque_curve(const int32_t p[8], int16_t out[IGN_TORQUE_POINTS]) {
     if (i < IGN_TORQUE_POINTS) out[i] = (int16_t)y3;
 }
 
+int ign_physics_sign(double v) {
+    return v < 0 ? -1 : v == 0 ? 0 : 1;
+}
+
+double ign_control_sign(double v) {
+    return v > 0 ? 1.0 : v == 0 ? 0.0 : v < 0 ? -1.0 : -2.0;
+}
+
+int ign_integer_sign(int v) {
+    return v > 0 ? 1 : v < 0 ? -1 : 0;
+}
+
+double ign_wrap_positive(double value, double period) {
+    if (value < 0) {
+        while (value < 0) value += period;
+    } else {
+        while (value >= period) value -= period;
+    }
+    return value;
+}
+
+double ign_angle_normalize(double value) {
+    value = ign_wrap_positive(value, 6.2831853071796);
+    while (value >= 6.2831853071796) value -= 6.2831853071796;
+    return value;
+}
+
+void ign_body_move_planar(IgnBody *b, int paused) {
+    if (paused) return;
+    b->px += IGN_PHYS_DT * b->vx;
+    b->pz += IGN_PHYS_DT * b->vz;
+}
+
 static int sign(double v) {
-    return v < 0 ? -1 : v > 0 ? 1 : 0;
+    return ign_physics_sign(v);
 }
 
 /* sub_0001f3fc: impulse against a wall through point (cx, cz) with direction theta. */
