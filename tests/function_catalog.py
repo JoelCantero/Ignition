@@ -185,5 +185,116 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual(path.read_text(), "Not a README metric table\n")
 
 
+def function(catalog, address):
+    return next(s for s in catalog["symbols"] if s["address"] == address)
+
+
+class MilestonePlanTests(unittest.TestCase):
+    def setUp(self):
+        self.catalog = catalog_tools.load_catalog()
+        self.report = catalog_tools.check_plan(self.catalog)
+        self.info = self.report["functions"]
+
+    def test_published_plan_is_consistent_and_covers_every_function(self):
+        self.assertEqual(list(self.catalog["milestones"]), [f"H{i}" for i in range(7)])
+        self.assertEqual(self.catalog["executable"]["entry"], "00055fbc")
+        new = [a for m in self.report["milestones"].values() for a in m["new"]]
+        self.assertEqual(len(new), len(set(new)))
+        self.assertEqual(len(new) + len(self.report["unplanned"]) + len(self.report["unreferenced"]),
+                         len(self.info))
+        for address in self.report["unplanned"]:
+            # Live code outside every milestone may only be infrastructure covered by a native caller.
+            self.assertIn(self.info[address]["treatment"], ("native", "not-needed"), address)
+        for milestone in self.report["milestones"].values():
+            self.assertFalse(milestone["unused_deferrals"])
+
+    def test_reviewed_dependencies_are_planned_where_the_simulation_needs_them(self):
+        for address, milestone in (("0004c2d8", "H2"), ("0004f874", "H2"), ("00056d24", "H2"),
+                                   ("0002e6f8", "H2"), ("000564d8", "H3"), ("0003fd04", "H3"),
+                                   ("00051204", "H4")):
+            self.assertEqual(self.info[address]["milestone"], milestone, address)
+            self.assertTrue(function(self.catalog, address)["plan"]["rationale"].strip())
+        self.assertEqual(self.info["00056d24"]["treatment"], "equivalent")
+        self.assertEqual(self.info["000541c0"]["treatment"], "not-needed")
+
+    def test_callees_precede_callers_within_a_milestone(self):
+        order = {a: i for i, a in enumerate(self.report["milestones"]["H2"]["new"])}
+        self.assertLess(order["0004db90"], order["0004d5f4"])  # car_throttle before car_input
+        self.assertLess(order["0004d5f4"], order["0002ed00"])  # car_input before car_update
+        self.assertLess(order["0002ed00"], order["0002d008"])  # car_update before cars_update_all
+
+    def test_unreferenced_code_is_not_needed_and_native_state_implies_native_treatment(self):
+        for address in ("00014000", "00019ac8", "00010e04"):
+            self.assertIn(address, self.report["unreferenced"])
+            self.assertEqual(self.info[address]["treatment"], "not-needed")
+            self.assertTrue(self.info[address]["done"])
+        self.assertEqual(self.info["0001034c"]["treatment"], "native")
+        self.assertTrue(self.info["0001034c"]["done"])
+
+    def test_plan_never_changes_published_state_or_coverage(self):
+        before = copy.deepcopy(self.catalog)
+        catalog_tools.plan_milestones(self.catalog)
+        self.assertEqual(self.catalog, before)
+
+    def test_dependency_inversion_requires_review(self):
+        self.catalog["subsystems"]["phase1.controls.throttle"]["milestone"] = "H5"
+        with self.assertRaisesRegex(ValueError, "0004db90 car_throttle: homed in H5 but required by H2"):
+            catalog_tools.check_plan(self.catalog)
+
+    def test_deferral_removes_a_dependency_and_invalid_deferrals_fail(self):
+        h2 = self.catalog["milestones"]["H2"]
+        self.assertIn("00058c1c", self.report["milestones"]["H2"]["new"])
+        h2["deferred"].append({"target": "00058c1c", "reason": "test"})
+        report = catalog_tools.plan_milestones(self.catalog)
+        self.assertNotIn("00058c1c", report["milestones"]["H2"]["new"])
+        self.assertFalse(report["errors"])
+        for target, message in (("00014000", "deferral 00014000 is never reached"),
+                                ("phase1.controls.throttle", "belongs to the milestone itself")):
+            with self.subTest(target=target):
+                data = copy.deepcopy(self.catalog)
+                data["milestones"]["H2"]["deferred"].append({"target": target, "reason": "test"})
+                with self.assertRaisesRegex(ValueError, message):
+                    catalog_tools.check_plan(data)
+
+    def test_pins_must_match_the_first_requiring_milestone(self):
+        function(self.catalog, "0004c2d8")["plan"]["milestone"] = "H4"
+        with self.assertRaisesRegex(ValueError, "0004c2d8 sub_0004c2d8: homed in H4 but required by H2"):
+            catalog_tools.check_plan(self.catalog)
+        catalog = catalog_tools.load_catalog()
+        self.assertTrue(self.info["00058c1c"]["done"])
+        function(catalog, "00058c1c")["plan"] = {"milestone": "H3", "rationale": "test"}
+        with self.assertRaisesRegex(ValueError, "00058c1c: pinned to H3 but first required by H2"):
+            catalog_tools.check_plan(catalog)
+        catalog = catalog_tools.load_catalog()
+        function(catalog, "00014000")["plan"] = {"treatment": "port", "rationale": "test"}
+        with self.assertRaisesRegex(ValueError, "without static references"):
+            catalog_tools.check_plan(catalog)
+
+    def test_invalid_plan_schema_is_rejected(self):
+        mutations = (
+            lambda c: function(c, "0004c2d8")["plan"].update(treatment="rewrite"),
+            lambda c: function(c, "0004c2d8")["plan"].pop("rationale"),
+            lambda c: c["subsystems"]["phase1.controls.throttle"].update(treatment="maybe"),
+            lambda c: c["subsystems"]["phase1.controls.throttle"].update(milestone="H9"),
+            lambda c: c["milestones"]["H2"]["deferred"].append({"target": "nowhere", "reason": "x"}),
+            lambda c: c["milestones"]["H2"]["depends_on"].append("H3"),
+            lambda c: function(c, "0004c2d8")["calls"].append("deadbeef"),
+            lambda c: function(c, "0004c2d8").update(indirect_root="yes"),
+            lambda c: next(s for s in c["symbols"] if s["kind"] == "data").update(calls=[]),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(index=index):
+                data = copy.deepcopy(self.catalog)
+                mutate(data)
+                with self.assertRaises(ValueError):
+                    catalog_tools.validate_catalog(data)
+
+    def test_readme_milestone_table_matches_the_catalog(self):
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        table = catalog_tools.readme_milestone_table(self.catalog, self.report)
+        self.assertIn(f"{catalog_tools.MILESTONE_BEGIN}\n{table}\n{catalog_tools.MILESTONE_END}", text,
+                      "Run python3 tools/function_catalog.py sync-readme")
+
+
 if __name__ == "__main__":
     unittest.main()

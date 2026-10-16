@@ -243,6 +243,10 @@ def plan_milestones(catalog):
     for key, milestone in milestones.items():
         deferred = {d["target"] for d in milestone["deferred"]}
         used = set()
+        for target in sorted(deferred):
+            if (subsystems.get(target, {}).get("milestone") == key or
+                    target in info and info[target]["home"] == key):
+                report["errors"].append(f"{key}: deferral {target} belongs to the milestone itself")
         if any(a not in live for a in milestone["entry_points"]):
             report["errors"].append(f"{key}: entry point without static references")
         roots = sorted(set(milestone["entry_points"]) |
@@ -294,6 +298,48 @@ def plan_milestones(catalog):
     return report
 
 
+def milestone_rows(catalog, report=None):
+    """Per-milestone counts of the functions it is the first to require."""
+    report = report or plan_milestones(catalog)
+    functions = {s["address"]: s for s in catalog["symbols"] if s["kind"] == "function"}
+    rows = []
+    for key, milestone in catalog["milestones"].items():
+        planned = report["milestones"][key]
+        pending = planned["pending"]
+        rows.append({
+            "id": key, "title": milestone["title"], "required": planned["required"], "new": len(planned["new"]),
+            "done": len(planned["new"]) - len(pending), "pending": len(pending),
+            "pending_by_treatment": dict(Counter(report["functions"][a]["treatment"] for a in pending)),
+            "pending_instructions": sum(functions[a]["instructions"] for a in pending),
+            "next": [functions[a]["name"] for a in pending[:3]],
+        })
+    return rows
+
+
+def check_plan(catalog):
+    report = plan_milestones(catalog)
+    if report["errors"]:
+        raise ValueError("Milestone plan is inconsistent:\n  " + "\n  ".join(report["errors"]))
+    return report
+
+
+def readme_milestone_table(catalog, report=None):
+    lines = ["| Hito | Requeridas (primera vez) | Hechas | Pendientes: port / equiv. / nativo | "
+             "Instr. pendientes (suma por función) | Siguientes en orden de dependencias |",
+             "|---|---|---|---|---|---|"]
+    for row in milestone_rows(catalog, report):
+        t = row["pending_by_treatment"]
+        lines.append(
+            f'| **{row["id"]}** {row["title"]} | {row["required"]} ({row["new"]}) | {row["done"]} | '
+            f'{row["pending"]}: {t.get("port", 0)} / {t.get("equivalent", 0)} / {t.get("native", 0)} | '
+            f'{row["pending_instructions"]:,}'.replace(",", " ") + " | " +
+            (", ".join(f"`{name}`" for name in row["next"]) or "—") + " |")
+    return "\n".join(lines)
+
+
+MILESTONE_BEGIN, MILESTONE_END = "<!-- milestones:begin -->", "<!-- milestones:end -->"
+
+
 def sync_readme(catalog, path):
     metrics = summarize(catalog)
 
@@ -332,6 +378,11 @@ def sync_readme(catalog, path):
                              text, flags=re.MULTILINE)
         if count != 1:
             raise ValueError(f"README must have exactly one status row: {status}")
+    pattern = rf"{re.escape(MILESTONE_BEGIN)}.*?{re.escape(MILESTONE_END)}"
+    table = readme_milestone_table(catalog, check_plan(catalog))
+    text, count = re.subn(pattern, lambda _: f"{MILESTONE_BEGIN}\n{table}\n{MILESTONE_END}", text, flags=re.DOTALL)
+    if count != 1:
+        raise ValueError("README must have exactly one generated milestone table")
     Path(path).write_text(text, encoding="utf-8")
 
 
@@ -347,6 +398,9 @@ def main():
     query.add_argument("--roadmap", help="roadmap prefix, e.g. phase1")
     query.add_argument("--confidence", choices=CLASSIFICATION_CONFIDENCES)
     sub.add_parser("show").add_argument("address")
+    plan = sub.add_parser("plan", help="functions first required by each milestone, callees first")
+    plan.add_argument("milestone", nargs="?", help="milestone id, e.g. H2 (default: all)")
+    plan.add_argument("--all", action="store_true", help="include functions already satisfied")
     args = parser.parse_args()
     try:
         catalog = load_catalog(args.catalog, verify_snapshot=args.command not in ("list", "show"))
@@ -354,7 +408,23 @@ def main():
             sync_readme(catalog, ROOT / "README.md")
             print("Updated README function summary from docs/functions.json")
         elif args.command in ("check", "summary"):
-            print(json.dumps(summarize(catalog), indent=2, sort_keys=True))
+            report = check_plan(catalog) if args.command == "check" else plan_milestones(catalog)
+            print(json.dumps({**summarize(catalog), "milestones": milestone_rows(catalog, report),
+                              "unreferenced_functions": len(report["unreferenced"]),
+                              "unplanned_functions": len(report["unplanned"])}, indent=2, sort_keys=True))
+        elif args.command == "plan":
+            report = check_plan(catalog)
+            if args.milestone and args.milestone not in catalog["milestones"]:
+                raise ValueError(f"Unknown milestone {args.milestone}")
+            functions = {s["address"]: s for s in catalog["symbols"] if s["kind"] == "function"}
+            for row in milestone_rows(catalog, report):
+                if args.milestone and row["id"] != args.milestone:
+                    continue
+                print(f'{row["id"]} {row["title"]}: {row["pending"]} pending of {row["new"]} first required')
+                for address in report["milestones"][row["id"]]["new" if args.all else "pending"]:
+                    s, i = functions[address], report["functions"][address]
+                    print(f'  {address}  {"done   " if i["done"] else "pending"} {i["treatment"]:10} '
+                          f'{s["status"]:10} {s["instructions"]:5}  {s["name"]}  {s["roadmap"]}')
         elif args.command == "show":
             address = f"{int(args.address, 16):08x}"
             symbol = next((s for s in catalog["symbols"] if s["address"] == address), None)

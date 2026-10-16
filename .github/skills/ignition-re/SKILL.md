@@ -70,11 +70,18 @@ base minus/plus a small offset.
 
 1. **Locate**: start from a string (`xref`), a global (`refs`), a `double` constant, a caller, or a field offset grep.
    Check the single catalog `docs/functions.json` and `docs/formats.md` first; do not re-derive known facts.
+   To choose what to port next, use `python3 tools/function_catalog.py plan H2` (pending functions of a milestone,
+   callees first); work on the earliest open milestone unless the user asks otherwise.
 2. **Read**: disassemble, resolve constants and tables with `mem`, follow the FPU stack carefully (write the stack
    state after each `fxch`/`fsubp`/`fsubrp`). Prefer quoting the exact formula with its addresses.
 3. **Record**: update the function/data record in `docs/functions.json` (name, status, roadmap, notes, implementation,
    tests and references); put extended formulas, offsets and verification in `docs/formats.md` and link them.
    Preserve unresolved `review` annotations until individually reconciled. Mark guesses with `¿?`.
+   Milestone plan: each subsystem has a `milestone` and a `treatment` (`port`, `equivalent`, `native`,
+   `not-needed`); a reviewed per-function `plan` (with `rationale`) overrides them. If `check` reports that a
+   function is "homed in Hx but required by Hy", decide from the disassembly whether the dependency is real (pin it
+   with a `plan`) or a side effect the earlier milestone does not need (add a justified `deferred` entry to that
+   milestone). Never edit the measured graph (`calls`, `pointer_refs`, `indirect_root`) by hand.
 4. **Port**: implement in the matching `src/` module, referencing the original address in a short comment
    (`/* sub_0004e2d8: … */`). Keep the original constants. Any intentional difference is a *deviation*: comment it
    in code and list it in `README.md`.
@@ -83,7 +90,8 @@ base minus/plus a small offset.
    `.venv/bin/python tools/disasm.py catalog --refresh`,
    then `python3 tools/function_catalog.py sync-readme` and `python3 tools/port_dashboard.py`.
    Update the README binary map/roadmap prose if needed. Never recreate the removed TSV, coverage or symbols files;
-   the JSON is the only editable function inventory. `python3 tools/function_catalog.py check` works without game data.
+   the JSON is the only editable function inventory. `python3 tools/function_catalog.py check` works without game data
+   and also fails on an inconsistent milestone plan; `sync-readme` regenerates the README milestone table.
 
 ## Build and verification
 

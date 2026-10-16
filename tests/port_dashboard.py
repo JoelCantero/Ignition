@@ -38,6 +38,21 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(sum(data["metrics"]["classificationAll"].values()), 1112)
         self.assertGreater(data["metrics"]["classificationAll"]["unresolved"], 0)
 
+    def test_milestone_plan_is_published_per_function(self):
+        data = dashboard.build_data()
+        self.assertEqual([m["id"] for m in data["milestones"]], [f"H{i}" for i in range(7)])
+        planned = sum(m["new"] for m in data["milestones"])
+        self.assertEqual(planned + data["planSummary"]["unplanned"] + data["planSummary"]["unreferenced"],
+                         len(data["functions"]))
+        for row in data["functions"]:
+            self.assertIn(row["plan"]["treatment"], ("port", "equivalent", "native", "not-needed"))
+            self.assertEqual(row["plan"]["order"] is None, row["plan"]["milestone"] is None)
+        for milestone in data["milestones"]:
+            self.assertEqual(milestone["done"] + milestone["pending"], milestone["new"])
+        html = dashboard.render(data)
+        for marker in ('id="milestones"', 'id="milestone"', 'id="treatment"', 'id="pending-only"'):
+            self.assertIn(marker, html)
+
     def test_render_is_self_contained_and_embeds_exact_data(self):
         data = dashboard.build_data()
         html = dashboard.render(data)

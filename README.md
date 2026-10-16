@@ -663,6 +663,12 @@ Las tablas de este README y el dashboard son vistas derivadas; se edita una sola
 Contiene las **1 112 funciones y 62 símbolos de datos/etiquetas** sin perder ninguna de las 252 anotaciones originales.
 Cada ficha tiene dirección, nombre/alias, tipo, notas, implementación, pruebas y referencias; las funciones añaden
 estado, instrucciones y tarea `roadmap`. Los enlaces vacíos significan «no documentado», no «sin implementación».
+La versión 3 añade el plan de ejecución: `milestones` (hitos H0–H6 con entradas y aplazamientos), `milestone` y
+`treatment` por subsistema, el campo opcional `plan` por función (excepción revisada con su justificación) y el
+grafo medido por `disasm.py catalog --refresh`: `calls`, `pointer_refs`, `indirect_root` y la entrada
+`executable.entry`. `catalog` sin `--refresh` falla si el grafo ya no coincide con el ejecutable, y `check` falla si
+el plan tiene dependencias invertidas sin resolver o aplazamientos sin uso (véase [Funciones por hito](#funciones-por-hito)).
+`phase3.car-update.*` pasó a `phase1.car-update.*`, porque es simulación y no render.
 La versión 2 del catálogo asigna **las 1 112 funciones**, incluidas las 482 con estado heurístico `library`,
 a **162 subsistemas específicos**. Se revisaron individualmente nombres/notas, llamadas/llamadores directos,
 referencias a datos/cadenas y, en los casos seleccionados, instrucciones del ejecutable.
@@ -697,6 +703,7 @@ Consultar el catálogo no requiere el juego ni Capstone:
 
 ```sh
 python3 tools/function_catalog.py check
+python3 tools/function_catalog.py plan H2
 python3 tools/function_catalog.py list --status identified
 python3 tools/function_catalog.py list --status partial --roadmap phase1
 python3 tools/function_catalog.py list --roadmap phase1.ai-route
@@ -1020,6 +1027,57 @@ fidelidad visual y ampliar plataformas y modos. No se prioriza por número de fu
 | **H4 — Ciclo completo de un jugador (P1)** | H3 para cierre; pruebas de UI/configuración pueden avanzar tras H0 | Validar menú → carrera → pausa/continuar/reinicio/salida → resultados → siguiente pista → fin del campeonato → menú. Cubrir puntos, empates, reintentos, desbloqueos, récords y fantasma; comprobar persistencia tras relanzar usando una carpeta de usuario aislada. Verificar las opciones del menú realmente aplicadas; completar las restantes o declarar su limitación. |
 | **H5 — Fidelidad visual (P2)** | H3 para comparación de escenas estables; creación y transformaciones de objetos antes de comparar escenas que las usan | Completar correspondencia de objetos y rotaciones POS; después orden de dibujo, recorte y primitivas Lisa 2. Resolver TAB/PAN/SHD en sus consumidores, reutilizando los kernels ya verificados. Comparar escenas con cámara, tick, resolución y configuración fijos; igualdad de píxel donde se afirme equivalencia exacta y desviaciones explícitas en el resto. |
 | **H6 — Entrega y ampliaciones (P1/P2/P3)** | H4 para entrega funcional macOS; H5 para afirmar fidelidad visual; dependencias propias para cada ampliación | Bundle macOS con selección de datos, probado fuera de la ruta de desarrollo y sin modificar la copia del juego. Windows requiere build y pruebas en CI; pantalla partida requiere dos entradas/cámaras/viewports; iOS requiere importación de datos y controles táctiles; red requiere decidir protocolo y sincronización. No son un único bloqueo secuencial. |
+
+### Funciones por hito
+
+Cada hito tiene en `docs/functions.json` sus puntos de entrada, los subsistemas que le pertenecen y los aplazamientos
+justificados. `tools/function_catalog.py` asigna cada función al **primer hito que la necesita** siguiendo el grafo
+de llamadas medido en el ejecutable, y la ordena **de las hojas a las llamadoras**, en orden de dependencias. Cada
+función tiene un **tratamiento**:
+`port` (porte fiel), `equivalent` (mismo resultado observable sin porte línea a línea; motor Lisa 2, rasterizador
+y cargadores de formatos), `native` (sustituida por SDL3/libc: DOS/4G, VESA, drivers de audio, MSCDEX) o
+`not-needed`. Una función está hecha cuando su estado publicado satisface su tratamiento; el plan nunca promueve
+estados. Tabla generada por `python3 tools/function_catalog.py sync-readme`:
+
+<!-- milestones:begin -->
+| Hito | Requeridas (primera vez) | Hechas | Pendientes: port / equiv. / nativo | Instr. pendientes (suma por función) | Siguientes en orden de dependencias |
+|---|---|---|---|---|---|
+| **H0** Estado y referencias reproducibles | 0 (0) | 0 | 0: 0 / 0 / 0 | 0 | — |
+| **H1** Referencia integrada DOS | 0 (0) | 0 | 0: 0 / 0 / 0 | 0 | — |
+| **H2** Cadena de simulación fiel | 90 (90) | 56 | 34: 14 / 5 / 15 | 8 175 | `sub_00055f9c`, `car_throttle`, `car_turbo` |
+| **H3** Carreras completas en siete pistas | 104 (56) | 37 | 19: 11 / 7 / 1 | 3 482 | `load_msh`, `load_level`, `sub_00064db8` |
+| **H4** Ciclo completo de un jugador | 346 (205) | 98 | 107: 49 / 0 / 58 | 12 436 | `gfx_create_sprite`, `sub_00060dbc`, `sub_000558a0` |
+| **H5** Fidelidad visual | 259 (162) | 13 | 149: 6 / 141 / 2 | 151 473 | `alloc_ea3c4`, `sub_000825b8`, `sub_000739d3` |
+| **H6** Entrega y ampliaciones | 8 (1) | 0 | 1: 1 / 0 / 0 | 86 | `sub_000515f8` |
+<!-- milestones:end -->
+
+```sh
+python3 tools/function_catalog.py plan H2        # pendientes de H2, de las hojas a las llamadoras
+python3 tools/function_catalog.py plan H2 --all  # incluye las ya satisfechas
+```
+
+H0 y H1 son trabajo de verificación, no de porte. Hallazgos de la revisión manual, registrados como `plan` o
+aplazamiento con su justificación en el catálogo:
+
+- **La clasificación es parte de la simulación:** `0x4c2d8` escribe `car+0x39c` (posición), que leen `car_throttle`
+  y `car_update`. Pertenece a H2; el port usa hoy una clasificación propia (desviación 6).
+- **`rand` es compartido:** IA, efectos de turbo, `0x4f874` en `car_input`, derrapes, clima, HUD y el calentamiento
+  de mipmaps de `render_scene` (`0x58864`) consumen la misma secuencia. Comparar la IA de H2 contra DOS exige
+  reproducir o registrar el estado de `rand` por tick, aunque esos consumidores pertenezcan a otros hitos.
+- **`LI_MOVEOBJECT` de objetos de colisión** (`0x56d24` desde `car_ground_contact`) reenlaza la rejilla que recorren
+  las consultas de suelo: entra en H2 como `equivalent`. La creación del mundo y el pool de objetos del motor
+  (`0x564d8`, `0x569ec`, `0x56b28`, `0x56c74`, `0x56e9c`, `0x56f8c`) entran en H3 por el mismo motivo.
+- Sonido, HUD, vídeo, fantasma y carga de recursos se aplazan en H2/H3 porque no escriben estado de carrera ni
+  consumen `rand`; los supuestos sin confirmar (objetos gráficos del coche en `0x32dc8`) quedan marcados con `¿?`.
+- **285 funciones no tienen ninguna referencia estática** en `MAINDOS.EXE`: ni llamadas directas o relativas
+  (incluidos los bytes sin decodificar), ni operandos, ni fixups desde datos o tablas. Se tratan como `not-needed`;
+  entre ellas hay funciones ya portadas, como `menu_init`, `menu_setup` y los kernels de tablas de color
+  `0x10d34`–`0x11410`. El candidato `0x541c0` no es una función, sino datos que usa `menubox_init`.
+- Las demás funciones vivas sin hito son infraestructura (runtime, drivers DOS, VESA, audio y emulador x87),
+  cubierta por la sustitución nativa de sus llamadoras.
+
+El grafo no resuelve llamadas por registro: una función alcanzable solo por esa vía figuraría sin hito. Las tablas
+de punteros sí se tratan como raíces (`indirect_root`), de forma conservadora.
 
 **Siguiente objetivo operativo:** cerrar H0 y obtener la captura corta de H1; usar su primera divergencia para elegir
 el siguiente bloque de H2, no empezar un porte monolítico del rasterizador ni de `car_update`.

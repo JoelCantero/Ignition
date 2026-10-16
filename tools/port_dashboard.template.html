@@ -184,6 +184,13 @@ main > section + section { margin-top: 16px; }
       <small>La opci&oacute;n &laquo;Incluir library&raquo; del explorador ampl&iacute;a tambi&eacute;n estas barras a todo el inventario. Las asignaciones provisionales siguen en el denominador.</small>
     </section>
   </div>
+  <section id="milestones-section">
+    <h2>Plan por hitos</h2>
+    <p class="muted">Cada funci&oacute;n se asigna al primer hito que la necesita seg&uacute;n el grafo de llamadas medido y los aplazamientos revisados del cat&aacute;logo. Hecha = su estado satisface su tratamiento (port, equivalente, nativo o no necesaria). El orden va de las hojas a las llamadoras.</p>
+    <div class="legend"><span><i class="dot verified"></i>Hechas</span><span><i class="dot partial"></i>Pendientes: port</span><span><i class="dot native"></i>Pendientes: equivalente</span><span><i class="dot pending"></i>Pendientes: nativo</span></div>
+    <div id="milestones" class="roadmap"></div>
+    <p class="muted" id="plan-summary"></p>
+  </section>
   <section>
     <h2>Roadmap del proyecto</h2>
     <p class="muted">Casillas del README: hechas / parciales / pendientes. Las tareas tienen tama&ntilde;os distintos y no se convierten en un porcentaje funcional.</p>
@@ -197,12 +204,15 @@ main > section + section { margin-top: 16px; }
       <label>Estado<select id="status"><option value="">Todos</option></select></label>
       <label>Certeza del &aacute;rea<select id="confidence"><option value="">Todas</option><option value="documented">Documentada</option><option value="inferred">Inferida</option><option value="unresolved">Por resolver</option></select></label>
       <label>Sistema<select id="system"><option value="">Todos</option></select></label>
-      <label>Orden<select id="sort"><option value="address">Direcci&oacute;n</option><option value="size">M&aacute;s instrucciones</option><option value="name">Nombre</option></select></label>
+      <label>Hito<select id="milestone"><option value="">Todos</option><option value="none">Sin hito (infraestructura)</option><option value="unreferenced">Sin referencias</option></select></label>
+      <label>Tratamiento<select id="treatment"><option value="">Todos</option><option value="port">Port</option><option value="equivalent">Equivalente</option><option value="native">Nativo</option><option value="not-needed">No necesaria</option></select></label>
+      <label class="check"><input id="pending-only" type="checkbox">Solo pendientes del plan</label>
+      <label>Orden<select id="sort"><option value="address">Direcci&oacute;n</option><option value="plan">Orden del plan</option><option value="size">M&aacute;s instrucciones</option><option value="name">Nombre</option></select></label>
       <label class="check"><input id="library" type="checkbox">Incluir library (heur&iacute;stica)</label>
       <button id="reset" type="button">Limpiar</button>
     </div>
     <div class="table-wrap">
-      <table><caption id="result-count" class="muted" aria-live="polite"></caption><thead><tr><th>Direcci&oacute;n</th><th>Funci&oacute;n / ficha desplegable</th><th>Estado del port</th><th>Certeza del &aacute;rea</th><th>Instr. por funci&oacute;n</th><th>Subsistema espec&iacute;fico</th></tr></thead><tbody id="functions"></tbody></table>
+      <table><caption id="result-count" class="muted" aria-live="polite"></caption><thead><tr><th>Direcci&oacute;n</th><th>Funci&oacute;n / ficha desplegable</th><th>Estado del port</th><th>Certeza del &aacute;rea</th><th>Instr. por funci&oacute;n</th><th>Hito / tratamiento</th><th>Subsistema espec&iacute;fico</th></tr></thead><tbody id="functions"></tbody></table>
     </div>
     <div class="pagination"><small>Los recuentos por funci&oacute;n se solapan: no deben sumarse para obtener cobertura &uacute;nica.</small><div><button id="prev" type="button">Anterior</button><button id="next" type="button">Siguiente</button></div></div>
   </section>
@@ -230,7 +240,7 @@ const $ = id => document.getElementById(id);
 const number = value => new Intl.NumberFormat("es-ES").format(value);
 const percent = (value, total) => new Intl.NumberFormat("es-ES", {style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1}).format(total ? value / total : 0);
 const labels = {ported: "Portada", verified: "Verificada", partial: "Parcial", identified: "Identificada", unknown: "Desconocida", understood: "Comprendida", "port-pending": "Por portar", native: "Nativa", library: "Runtime"};
-const systemLabels = {"phase0": "Infraestructura y servicios", "phase1": "Conducci\u00f3n y carrera", "phase2": "Mundo, superficies y efectos", "phase3": "Render y simulaci\u00f3n", "phase4": "Frontend, HUD y flujo", "phase5": "Audio y CD", "phase6": "Fantasmas y persistencia", "phase9": "Revisi\u00f3n de candidatos", "runtime": "Biblioteca C y DOS/4G"};
+const systemLabels = {"phase0": "Infraestructura y servicios", "phase1": "Conducci\u00f3n y carrera", "phase2": "Mundo, superficies y efectos", "phase3": "Render y motor gr\u00e1fico", "phase4": "Frontend, HUD y flujo", "phase5": "Audio y CD", "phase6": "Fantasmas y persistencia", "phase9": "Revisi\u00f3n de candidatos", "runtime": "Biblioteca C y DOS/4G"};
 const confidenceLabels = {documented: "Documentada", inferred: "Inferida", unresolved: "Por resolver"};
 const byAddress = new Map(data.functions.map(row => [row.address, row]));
 const game = data.functions.filter(row => row.status !== "library");
@@ -345,6 +355,42 @@ for (const phase of data.phases) {
   card.append(track, element("small", `${phase.done} hechas \u00b7 ${phase.partial} parciales \u00b7 ${phase.pending} pendientes`));
   $("roadmap").append(card);
 }
+const treatmentLabels = {port: "Port", equivalent: "Equivalente", native: "Nativo", "not-needed": "No necesaria"};
+for (const milestone of data.milestones) {
+  const option = element("option", `${milestone.id} \u2014 ${milestone.title}`);
+  option.value = milestone.id;
+  $("milestone").insertBefore(option, $("milestone").querySelector('option[value="none"]'));
+  const card = element("article", undefined, "phase");
+  card.append(element("h3", `${milestone.id} / ${milestone.title}`), element("p", milestone.goal));
+  const t = milestone.pending_by_treatment;
+  const track = element("div", undefined, "bar");
+  bar(track, [[milestone.done, "verified"], [t.port || 0, "partial"], [t.equivalent || 0, "native"], [t.native || 0, "pending"]], milestone.new);
+  card.append(track, element("small", `${milestone.new} funciones nuevas (${milestone.required} requeridas) \u00b7 ${milestone.done} hechas \u00b7 ${milestone.pending} pendientes: ${t.port || 0} port, ${t.equivalent || 0} equivalentes, ${t.native || 0} nativas`));
+  card.append(element("p", `Cierre: ${milestone.criteria}`, "muted"));
+  if (milestone.deferred.length) {
+    const deferred = element("details");
+    deferred.append(element("summary", `Aplazamientos revisados (${milestone.deferred.length})`));
+    const list = element("ul");
+    for (const item of milestone.deferred) {
+      const target = byAddress.get(item.target);
+      list.append(element("li", `${target ? "0x" + item.target + " " + target.function : item.target}: ${item.reason}`));
+    }
+    deferred.append(list); card.append(deferred);
+  }
+  if (milestone.pending) {
+    const button = element("button", "Ver pendientes en orden");
+    button.type = "button";
+    button.addEventListener("click", () => {
+      for (const id of ["search", "status", "confidence", "system", "treatment"]) $(id).value = "";
+      $("milestone").value = milestone.id; $("pending-only").checked = true; $("library").checked = true;
+      $("sort").value = "plan"; page = 0; renderSystems(); update();
+      $("explorer").scrollIntoView();
+    });
+    card.append(button);
+  }
+  $("milestones").append(card);
+}
+text("plan-summary", `${number(data.planSummary.unreferenced)} funciones sin ninguna referencia est\u00e1tica en el ejecutable (no necesarias) \u00b7 ${number(data.planSummary.unplanned)} funciones vivas sin hito: infraestructura cubierta por la sustituci\u00f3n nativa de sus llamadoras. El grafo no resuelve llamadas por registro.`);
 let page = 0;
 const pageSize = 25;
 function functionDetails(row) {
@@ -352,7 +398,8 @@ function functionDetails(row) {
   details.append(element("summary", row.function));
   const body = element("div", undefined, "function-detail");
   body.append(element("p", row.classification.rationale),
-    element("p", `Certeza del \u00e1rea: ${confidenceLabels[row.classification.confidence]}. Tarea anterior: ${row.classification.previous_roadmap}.`));
+    element("p", `Certeza del \u00e1rea: ${confidenceLabels[row.classification.confidence]}. Tarea anterior: ${row.classification.previous_roadmap}.`),
+    element("p", `Plan: ${planLabel(row)} \u00b7 tratamiento ${treatmentLabels[row.plan.treatment]} \u00b7 ${row.plan.done ? "satisfecha" : "pendiente"}.${row.plan.rationale ? " Revisi\u00f3n: " + row.plan.rationale : ""}`));
   if (row.aliases.length) body.append(element("p", `Alias: ${row.aliases.join(", ")}`));
   for (const note of row.notes) body.append(element("p", note));
   for (const [key, title] of [["implementation", "Implementaci\u00f3n"], ["tests", "Pruebas"], ["references", "Referencias"]]) {
@@ -388,19 +435,27 @@ function functionDetails(row) {
   proof.append(list); body.append(proof); details.append(body);
   return details;
 }
+function planLabel(row) {
+  return row.plan.unreferenced ? "sin referencias" : row.plan.milestone ? `${row.plan.milestone} #${row.plan.order + 1}` : "sin hito";
+}
 function update() {
   const query = $("search").value.trim().toLowerCase();
   const addressQuery = query.replace(/^0x/, "").replace(/^0+(?=[0-9a-f])/, "");
   const task = $("system").value;
+  const milestone = $("milestone").value;
   const rows = data.functions.filter(row =>
     ($("library").checked || row.status !== "library") &&
     (!$("status").value || row.status === $("status").value) &&
     (!$("confidence").value || row.classification.confidence === $("confidence").value) &&
+    (!milestone || (milestone === "unreferenced" ? row.plan.unreferenced : milestone === "none" ? !row.plan.milestone && !row.plan.unreferenced : row.plan.milestone === milestone)) &&
+    (!$("treatment").value || row.plan.treatment === $("treatment").value) &&
+    (!$("pending-only").checked || !row.plan.done) &&
     (!task || (task.endsWith(".*") ? row.roadmap.startsWith(task.slice(0, -1)) : row.roadmap === task)) &&
     (!query || `${row.function} ${row.aliases.join(" ")} ${row.roadmap} ${data.subsystems[row.roadmap].title}`.toLowerCase().includes(query) ||
       (/^(?:0x)?[0-9a-f]+$/.test(query) && row.address.replace(/^0+/, "").startsWith(addressQuery)))
   );
-  rows.sort((a, b) => $("sort").value === "size" ? b.instructions - a.instructions || a.address.localeCompare(b.address) : $("sort").value === "name" ? a.function.localeCompare(b.function) : a.address.localeCompare(b.address));
+  const planKey = row => row.plan.milestone ? `${row.plan.milestone}:${String(row.plan.order).padStart(5, "0")}` : `~${row.address}`;
+  rows.sort((a, b) => $("sort").value === "size" ? b.instructions - a.instructions || a.address.localeCompare(b.address) : $("sort").value === "name" ? a.function.localeCompare(b.function) : $("sort").value === "plan" ? planKey(a).localeCompare(planKey(b)) : a.address.localeCompare(b.address));
   page = Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1));
   $("functions").replaceChildren();
   for (const row of rows.slice(page * pageSize, (page + 1) * pageSize)) {
@@ -412,18 +467,20 @@ function update() {
     const certainty = element("td", confidenceLabels[row.classification.confidence], "confidence-" + row.classification.confidence);
     const taskCell = element("td", data.subsystems[row.roadmap].title, "task-cell");
     taskCell.append(element("code", row.roadmap));
-    tr.append(status, certainty, element("td", number(row.instructions)), taskCell);
+    const planCell = element("td", planLabel(row));
+    planCell.append(element("small", ` \u00b7 ${treatmentLabels[row.plan.treatment]}${row.plan.done ? "" : " \u00b7 pendiente"}`));
+    tr.append(status, certainty, element("td", number(row.instructions)), planCell, taskCell);
     $("functions").append(tr);
   }
   if (!rows.length) {
     const cell = element("td", "Sin resultados. Prueba otros filtros.");
-    cell.colSpan = 6; const row = element("tr"); row.append(cell); $("functions").append(row);
+    cell.colSpan = 7; const row = element("tr"); row.append(cell); $("functions").append(row);
   }
   text("result-count", `${number(rows.length)} resultados \u00b7 ${rows.length ? page * pageSize + 1 : 0}\u2013${Math.min((page + 1) * pageSize, rows.length)}`);
   $("prev").disabled = page === 0;
   $("next").disabled = (page + 1) * pageSize >= rows.length;
 }
-for (const id of ["search", "status", "confidence", "system", "library", "sort"]) $(id).addEventListener(id === "search" ? "input" : "change", () => {
+for (const id of ["search", "status", "confidence", "system", "milestone", "treatment", "pending-only", "library", "sort"]) $(id).addEventListener(id === "search" ? "input" : "change", () => {
   if (id === "status" && $("status").value === "library") $("library").checked = true;
   if (id === "library" || id === "status") renderSystems();
   page = 0; update();
@@ -431,7 +488,7 @@ for (const id of ["search", "status", "confidence", "system", "library", "sort"]
 $("system-search").addEventListener("input", renderSystems);
 $("prev").addEventListener("click", () => { page--; update(); });
 $("next").addEventListener("click", () => { page++; update(); });
-$("reset").addEventListener("click", () => { for (const id of ["search", "status", "system", "confidence", "system-search"]) $(id).value = ""; $("library").checked = false; $("sort").value = "address"; page = 0; renderSystems(); update(); });
+$("reset").addEventListener("click", () => { for (const id of ["search", "status", "system", "confidence", "milestone", "treatment", "system-search"]) $(id).value = ""; $("library").checked = false; $("pending-only").checked = false; $("sort").value = "address"; page = 0; renderSystems(); update(); });
 $("show-unresolved").addEventListener("click", () => {
   for (const id of ["search", "status", "system"]) $(id).value = "";
   $("library").checked = true; $("confidence").value = "unresolved";

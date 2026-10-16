@@ -145,6 +145,12 @@ Desviación deliberada: el host escala por vecino más próximo el resultado ind
 a 640x480/800x600; no recompone los elementos a esas resoluciones. La prueba verifica cada píxel de
 ese escalado. Resultados, podio, red y dos humanos siguen fuera de este contraste.
 
+Validación del lote de carga: diez regresiones de UI/HUD/flujo y dos de catálogo/dashboard pasan;
+compilación sin warnings y ASan/UBSan sobre los fuentes modificados y los vectores nativos, sin errores.
+LeakSanitizer se desactiva por la limitación del host macOS. Las siete simulaciones de 200 s con ocho coches
+terminan sin NaN. Un smoke SDL dummy completa menú → carga → carrera → menú, salida 0; no acredita
+VESA ni un campeonato completo y conserva el aviso previo de MUSIC/Track01.ogg no disponible.
+
 ## Ejecutable `MAINDOS.EXE`
 
 - MZ + LE (DOS/4GW), Watcom C/C++32 (runtime 1988-1995). "Copyright (c) UDS, 1995-1996".

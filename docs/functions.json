@@ -23,11 +23,11 @@
     "classification": "Per-function area assignment, not a port-state promotion. confidence=documented (existing symbol/notes/task), inferred (static calls/data/instructions), unresolved (work queue, not a resolved semantic identification). Evidence references linear LE addresses; previous_roadmap preserves the superseded coarse task.",
     "subsystems": "Leaf subsystem titles and scope used by catalog queries and dashboard; no inferred percentages of whole-system fidelity.",
     "milestones": "Ordered execution milestones H0..Hn; entry points and deferrals drive the static dependency closure computed by tools/function_catalog.py plan.",
-    "treatment": "Subsystem default of how a function is satisfied: port (faithful C port), equivalent (observable behavior/output reproduced without a line-by-line port), native (replaced by host/platform code), not-needed (no counterpart in the port).",
+    "treatment": "Subsystem default of how a function is satisfied: port (faithful C port), equivalent (observable behavior/output reproduced without a line-by-line port), native (replaced by host/platform code), not-needed (no counterpart in the port). A published native status implies native unless a plan overrides it.",
     "calls": "Measured direct `call imm` targets that are catalog functions; refreshed by disasm.py catalog --refresh.",
     "pointer_refs": "Measured function starts used as instruction operands (callbacks/pointer registration); indirect calls are not resolved.",
-    "data_referenced": "Measured: the function start is stored in data (dispatch or callback table).",
-    "plan": "Optional reviewed per-function override of treatment and/or milestone, with its rationale."
+    "plan": "Optional reviewed per-function override of treatment and/or milestone, with its rationale.",
+    "indirect_root": "Measured: the start is referenced from outside decoded instructions (fixup in data or an undecoded code table, or rel32 in undecoded bytes); with executable.entry, a root of the static reachability. Unreachable functions are not-needed."
   },
   "migration": {
     "policy": "Preserve every published function state/name/task and every legacy annotation; do not silently promote or downgrade functions.",
@@ -109,6 +109,10 @@
           "reason": "Cola de avisos del HUD: interfaz sin efecto en la simulación (H4)."
         },
         {
+          "target": "phase5.audio.mixer-api",
+          "reason": "Voces del mezclador llamadas directamente desde car_input/car_turbo: audio sin estado de simulación ni rand; sustituido por SDL3 (H4)."
+        },
+        {
           "target": "000492fc",
           "reason": "race_clock reconfigura vídeo y viewports al arrancar la cuenta atrás; no escribe estado de coches ni de pista."
         },
@@ -178,6 +182,26 @@
         {
           "target": "phase6.ghost.files",
           "reason": "Fantasma de contrarreloj: persistencia y modo de juego (H4)."
+        },
+        {
+          "target": "phase5.audio.mixer-api",
+          "reason": "Voces del mezclador desde efectos y carga: audio sustituido por SDL3, sin estado de carrera (H4)."
+        },
+        {
+          "target": "phase5.cd.media",
+          "reason": "Comprobación de CD y TOC para la música: sustituida por OGG (H4)."
+        },
+        {
+          "target": "phase3.backend.driver-api",
+          "reason": "Modo de vídeo y API del backend gráfico: sustituidos por SDL3 (H4)."
+        },
+        {
+          "target": "phase3.backend.present",
+          "reason": "Presentación de pantalla: sustituida por SDL3 (H4)."
+        },
+        {
+          "target": "phase3.backend.palette",
+          "reason": "Escritura de paleta VGA: sustituida por SDL3 (H4)."
         }
       ]
     },
@@ -4833,10 +4857,12 @@
       "status": "partial",
       "instructions": 237,
       "roadmap": "phase1.race.configuration",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "ign_race_config_decode/load: original BTZ projection and validation; frontend BTZ feeds run_game/configure and saved grid drives spawning. Included in 2056 race-management original cases. Partial: native I/O, participant/input adaptation, two humans and presentation remain outside proof; headless CLI keeps explicit defaults/overrides."
+      ],
+      "implementation": ["src/game/race.c", "src/game/race.h", "src/platform/main.c"],
+      "tests": ["tests/race_management.c", "tests/race_management_original.py"],
+      "references": ["docs/formats.md#conduccion-y-carrera-kernels-auxiliares"],
       "review": [],
       "classification": {
         "confidence": "documented",
@@ -5820,14 +5846,15 @@
       "kind": "function",
       "name": "reset_race_times",
       "aliases": [],
-      "status": "identified",
+      "status": "verified",
       "instructions": 43,
       "roadmap": "phase1.race.configuration",
       "notes": [
-        "full function executed by timing oracle; clears car+3a4, retains +3ac/+3d4; other statistics excluded"
+        "full function executed by timing oracle; clears car+3a4, retains +3ac/+3d4; other statistics excluded",
+        "ign_race_reset_times now implements full saved-record/statistics reset as well as per-car clock reset, wired at session initialization and countdown completion. Race-management oracle executes the full entry; historical timing note above describes the earlier bounded proof."
       ],
-      "implementation": [],
-      "tests": [],
+      "implementation": ["src/game/race.c", "src/platform/main.c"],
+      "tests": ["tests/race_management.c", "tests/race_management_original.py", "tests/race_time_original.py"],
       "references": [],
       "review": [],
       "classification": {
@@ -5925,12 +5952,14 @@
       "kind": "function",
       "name": "sub_0002a97c",
       "aliases": [],
-      "status": "unknown",
+      "status": "partial",
       "instructions": 143,
       "roadmap": "phase1.race.configuration",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
+      "notes": [
+        "ign_race_reset/configure: management fields and selective resets, configured grid and original ranking mode. Wired through ign_race_init and frontend run_game configuration. Race-management original oracle verifies management writes; original allocation, audio, weather, renderer and input scratch are excluded."
+      ],
+      "implementation": ["src/game/race.c", "src/game/race.h", "src/platform/main.c"],
+      "tests": ["tests/race_management.c", "tests/race_management_original.py"],
       "references": [],
       "review": [],
       "classification": {
@@ -6362,13 +6391,15 @@
       "kind": "function",
       "name": "sub_0002b998",
       "aliases": [],
-      "status": "unknown",
+      "status": "partial",
       "instructions": 28,
       "roadmap": "phase1.controls.dispatch",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "Native distributed human/AI dispatch: ign_input_sample in run_game, tick_rivals and ai_control_tick; original disabled-input branch is not independently verified instruction-equivalent."
+      ],
+      "implementation": ["src/platform/input.c", "src/platform/main.c", "src/game/ai.c"],
+      "tests": ["tests/input_backend.c", "tests/ai_schedule.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -6673,14 +6704,15 @@
       "kind": "function",
       "name": "race_elimination",
       "aliases": [],
-      "status": "identified",
+      "status": "partial",
       "instructions": 274,
       "roadmap": "phase1.race.elimination",
       "notes": [
-        "mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), \"%s IS OUT\"; [0x1fed78]-- ; at 1 left, all finish"
+        "mode 3 ([0x1feefc]): if exactly 1 racing car (+0x528==0) is a lap behind the leader and +0x60c==0 -> explode (+0x354=1, +0x60c=1.0, +0x528=1, +0x3a0=+0x39c), \"%s IS OUT\"; [0x1fed78]-- ; at 1 left, all finish",
+        "ign_race_step management, end and camera transitions now checked in race-management original oracle and wired after progress in main. FX/audio/HUD deliveries remain excluded from full-routine equivalence; wrecks alone do not imply elimination."
       ],
-      "implementation": [],
-      "tests": [],
+      "implementation": ["src/game/race.c", "src/platform/main.c"],
+      "tests": ["tests/race_management.c", "tests/race_management_original.py"],
       "references": [],
       "review": [],
       "classification": {
@@ -9913,14 +9945,16 @@
     {
       "address": "0004c2d8",
       "kind": "function",
-      "name": "sub_0004c2d8",
+      "name": "race_ranking",
       "aliases": [],
-      "status": "unknown",
+      "status": "verified",
       "instructions": 292,
       "roadmap": "phase1.race.ranking",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
+      "notes": [
+        "ign_race_rank/rank_score/position: original signed stable ranking, finish ties, starting grid and ghost overrides. Main ranks once per tick with configured section count; wreck/blow variation across all modes verified in 2056-case management oracle. Supplied rank bias is compared exactly; its upstream producer remains unresolved."
+      ],
+      "implementation": ["src/game/race.c", "src/game/race.h", "src/platform/main.c"],
+      "tests": ["tests/race_management.c", "tests/race_management_original.py"],
       "references": [],
       "review": [],
       "classification": {
@@ -9941,7 +9975,7 @@
       "indirect_root": false,
       "plan": {
         "milestone": "H2",
-        "rationale": "Calcula car+0x39c (posición), que leen car_throttle y car_update. Revisado: la clasificación alimenta la simulación; hoy el port usa una propia (desviación 6)."
+        "rationale": "Calcula car+0x39c (posición), que leen car_throttle y car_update. Kernel original contrastado e integrado; pendiente el productor de rank bias, no la ordenación estable."
       }
     },
     {
@@ -10148,13 +10182,15 @@
       "kind": "function",
       "name": "sub_0004c9b4",
       "aliases": [],
-      "status": "unknown",
+      "status": "partial",
       "instructions": 736,
       "roadmap": "phase1.controls.joystick",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": [
+        "ign_input_sample + run_game: saved bindings, analog steering/pedals, buttons, turbo/rear/manual gears, hotplug and focus reset. SDL native adapter, not a proof of the complete 736-instruction dispatcher; original calibration dialogs, arbitrary remapping UI and two-player execution remain unsupported."
+      ],
+      "implementation": ["src/platform/input.c", "src/platform/input.h", "src/platform/main.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -11807,7 +11843,11 @@
       },
       "calls": [],
       "pointer_refs": [],
-      "indirect_root": false
+      "indirect_root": false,
+      "plan": {
+        "treatment": "not-needed",
+        "rationale": "No es una función: bytes de una tabla en el objeto de código (decodificación implausible) que menubox_init usa como operando. Revisado."
+      }
     },
     {
       "address": "000541d4",
@@ -13362,13 +13402,13 @@
       "kind": "function",
       "name": "sub_000559d0",
       "aliases": [],
-      "status": "unknown",
+      "status": "partial",
       "instructions": 6,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["SDL direct event dispatch replaces callback use; original callback registration/reset API is not implemented."],
+      "implementation": ["src/platform/input.c", "src/platform/main.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13388,13 +13428,13 @@
       "kind": "function",
       "name": "sub_000559e4",
       "aliases": [],
-      "status": "unknown",
+      "status": "native",
       "instructions": 47,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["ign_input_init/reset: lifecycle and input tables; SDL/OS repeat timing replaces DOS delay arguments."],
+      "implementation": ["src/platform/input.c", "src/platform/main.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13421,13 +13461,13 @@
       "kind": "function",
       "name": "sub_00055ae4",
       "aliases": [],
-      "status": "unknown",
+      "status": "partial",
       "instructions": 92,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["ign_input_event/key_pressed/key_repeat: held, edge, repeat and text delivery; original timer arithmetic and callbacks excluded."],
+      "implementation": ["src/platform/input.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13452,13 +13492,13 @@
       "kind": "function",
       "name": "sub_00055c28",
       "aliases": [],
-      "status": "unknown",
+      "status": "native",
       "instructions": 4,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["ign_input_key_down: held-state lookup populated by SDL make/break events."],
+      "implementation": ["src/platform/input.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13482,13 +13522,13 @@
       "kind": "function",
       "name": "sub_00055c3c",
       "aliases": [],
-      "status": "unknown",
+      "status": "native",
       "instructions": 12,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["ign_input_key_pressed: consumable initial-press latch."],
+      "implementation": ["src/platform/input.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "unresolved",
@@ -13508,13 +13548,13 @@
       "kind": "function",
       "name": "sub_00055c60",
       "aliases": [],
-      "status": "unknown",
+      "status": "native",
       "instructions": 12,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["ign_input_key_repeat: consumable repeat latch; timing comes from SDL/OS, not the DOS timer."],
+      "implementation": ["src/platform/input.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "unresolved",
@@ -13534,13 +13574,13 @@
       "kind": "function",
       "name": "sub_00055c84",
       "aliases": [],
-      "status": "unknown",
+      "status": "partial",
       "instructions": 10,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["Direct frontend/host event delivery; original callback pointer invocation and ABI intentionally absent."],
+      "implementation": ["src/platform/input.c", "src/platform/main.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "unresolved",
@@ -13560,13 +13600,13 @@
       "kind": "function",
       "name": "sub_00055ca0",
       "aliases": [],
-      "status": "unknown",
+      "status": "partial",
       "instructions": 14,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["ign_input_event text branch: bounded uppercase ASCII history from SDL text; DOS character translation is not reproduced."],
+      "implementation": ["src/platform/input.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "unresolved",
@@ -13621,13 +13661,13 @@
       "kind": "function",
       "name": "sub_00055d04",
       "aliases": [],
-      "status": "unknown",
+      "status": "native",
       "instructions": 43,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["ign_input_init: SDL event initialization replaces keyboard IRQ installation."],
+      "implementation": ["src/platform/input.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13654,13 +13694,13 @@
       "kind": "function",
       "name": "sub_00055d98",
       "aliases": [],
-      "status": "unknown",
+      "status": "native",
       "instructions": 19,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["ign_input_any_key: any-held query; anomalous original uninitialized recursive branch is not reproduced."],
+      "implementation": ["src/platform/input.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13681,13 +13721,13 @@
       "kind": "function",
       "name": "sub_00055e04",
       "aliases": [],
-      "status": "unknown",
+      "status": "native",
       "instructions": 70,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["ign_input_event/dos_scancode/read_key: make/break state, extended key identities and FIFO from SDL; not interrupt-byte emulation."],
+      "implementation": ["src/platform/input.c", "src/platform/main.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "inferred",
@@ -13709,13 +13749,13 @@
       "kind": "function",
       "name": "sub_00055eec",
       "aliases": [],
-      "status": "unknown",
+      "status": "native",
       "instructions": 15,
       "roadmap": "phase1.controls.keyboard-backend",
-      "notes": [],
-      "implementation": [],
-      "tests": [],
-      "references": [],
+      "notes": ["ign_input_shutdown: native input cleanup; no interrupt vector to restore."],
+      "implementation": ["src/platform/input.c"],
+      "tests": ["tests/input_backend.c"],
+      "references": ["src/platform/input.md"],
       "review": [],
       "classification": {
         "confidence": "inferred",
