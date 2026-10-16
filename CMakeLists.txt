@@ -148,6 +148,18 @@ add_test(NAME track_real_assets COMMAND track_real_assets_test "${GAME_DIR}")
 add_executable(hud_assets_test tests/hud_assets.c)
 target_link_libraries(hud_assets_test PRIVATE ignition_core)
 add_test(NAME hud_assets COMMAND hud_assets_test "${GAME_DIR}")
+add_executable(race_ui_test tests/race_ui.c)
+target_link_libraries(race_ui_test PRIVATE ignition_core)
+if(NOT MSVC)
+  target_compile_options(race_ui_test PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME race_ui COMMAND race_ui_test "${GAME_DIR}")
+add_executable(phase4_helpers_test tests/phase4_helpers.c)
+target_link_libraries(phase4_helpers_test PRIVATE ignition_core)
+if(NOT MSVC)
+  target_compile_options(phase4_helpers_test PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME phase4_helpers COMMAND phase4_helpers_test "${GAME_DIR}")
 add_executable(pos_test tests/pos.c)
 target_link_libraries(pos_test PRIVATE ignition_core)
 add_test(NAME pos COMMAND pos_test)
@@ -314,6 +326,17 @@ if(IGN_VERIFY_ORIGINAL)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/lap_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
             --report ${CMAKE_BINARY_DIR}/lap-original-report.json)
+  add_test(NAME race_ui_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/race_ui_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:race_ui_test>
+            --report ${CMAKE_BINARY_DIR}/race-ui-original-report.json)
+  add_test(NAME loading_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/loading_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:race_ui_test>
+            --report ${CMAKE_BINARY_DIR}/loading-original-report.json)
+  add_test(NAME phase4_helpers_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/phase4_helpers_original.py
+            --native $<TARGET_FILE:phase4_helpers_test> --executable "${GAME_DIR}/MAINDOS.EXE")
 endif()
 # Frontend (needs the game data): menu background animation and a full menu run up to a race start.
 add_executable(menu_shot tests/menu_shot.c)

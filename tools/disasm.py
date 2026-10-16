@@ -467,6 +467,19 @@ def owner(funcs, addr):
     return None
 
 
+def call_graph(img, funcs):
+    """Static edges between discovered starts: direct `call imm` and function starts used as operands
+    (callback/pointer registration). Indirect calls through registers or tables are not resolved; starts
+    stored in data (dispatch/callback tables) are flagged instead."""
+    in_data = {t for s, t in img.fixups.items() if img.is_code(t) and not img.is_code(s)}
+    graph = {}
+    for fa, f in funcs.items():
+        calls = sorted(c for c in f["calls"] if c in funcs and c != fa)
+        refs = sorted(r for r in f["refs"] if r in funcs and r != fa and r not in f["calls"])
+        graph[fa] = (["%08x" % c for c in calls], ["%08x" % r for r in refs], fa in in_data)
+    return graph
+
+
 def coverage_metrics(img, funcs):
     code_objects = [(base, data) for base, data, flags in img.objs if flags & 4]
     covered = {base: bytearray(len(data)) for base, data in code_objects}
@@ -571,10 +584,12 @@ def main():
         if set(entries) != set(funcs):
             ap.error("Discovered function addresses differ from the catalog; review additions/removals explicitly")
         counts = {fa: len(f["insns"]) for fa, f in funcs.items()}
+        graph = call_graph(img, funcs)
         metrics = coverage_metrics(img, funcs)
         if args.refresh:
             for fa, entry in entries.items():
                 entry["instructions"] = counts[fa]
+                entry["calls"], entry["pointer_refs"], entry["data_referenced"] = graph[fa]
             CATALOG["coverage"] = {**metrics, "inventory_sha256": inventory_fingerprint(CATALOG)}
             validate_catalog(CATALOG)
             CATALOG_PATH.write_text(json.dumps(CATALOG, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -583,6 +598,9 @@ def main():
             validate_catalog(CATALOG)
             if any(entry["instructions"] != counts[fa] for fa, entry in entries.items()):
                 ap.error("Catalog instruction counts differ; use catalog --refresh")
+            if any((entry.get("calls"), entry.get("pointer_refs"), entry.get("data_referenced")) != graph[fa]
+                   for fa, entry in entries.items()):
+                ap.error("Catalog call graph differs; use catalog --refresh")
             if any(CATALOG["coverage"][key] != metrics[key] for key in COVERAGE_FIELDS):
                 ap.error("Catalog unique coverage differs; use catalog --refresh")
             print(f"Catalog matches executable: {len(entries)} functions, all counts and unique coverage")

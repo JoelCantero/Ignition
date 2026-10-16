@@ -38,7 +38,7 @@ typedef struct {
     double total;  /* [0x1fb4d8]: 1/36 s since the level started */
     int64_t timer_ticks, origin_ms; /* deterministic virtual millisecond source/origin */
     double elapsed; /* [0x1fb540]: sampled seconds since origin */
-    double best_lap; /* [0x1fb390]; port starts a session record, not a saved track record */
+    double best_lap; /* [0x1fb390]; initialized to DBL_MAX, replaced by saved record in reset_times */
     int ai_parity, ai_car; /* [0x1fed68], [0x1fed8c]: independent of the countdown and race tick */
     int players_minus_one;
     double finish_clock; /* [0x1fb4d0]: -1 until the human race-end transition */
@@ -68,7 +68,8 @@ IgnAiControlAction ign_race_ai_action(const IgnRace *r, const IgnCar *car, int i
 void ign_race_ai_step(IgnRace *r, int ncars);
 
 void ign_race_init(IgnRace *r, int mode, int ncars);
-/* sub_0002a97c management reset; preserves points except championship round zero.
+/* sub_0002a97c management reset; preserves clock/best/sample/origin and configuration.
+ * Clears only the first ncars point slots on championship round zero.
  * Audio, weather, rendering scratch and the time-trial allocation remain owned by their subsystems. */
 void ign_race_reset(IgnRace *r, int mode, int ncars, int round);
 void ign_race_configure(IgnRace *r, const IgnRaceConfig *config, int section_count);

@@ -1,6 +1,7 @@
 #include "raster.h"
 
 #include "lisa.h"
+#include "../platform/runtime.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -18,8 +19,8 @@ void ign_frame_init(IgnFrame *fb, int w, int h) {
 }
 
 void ign_frame_clear(IgnFrame *fb) {
-    memset(fb->color, 0, (size_t)fb->w * fb->h);
-    memset(fb->inv_z, 0, (size_t)fb->w * fb->h * sizeof fb->inv_z[0]);
+    ign_fill_pattern(fb->color, 0, (size_t)fb->w * fb->h);
+    ign_fill_pattern(fb->inv_z, 0, (size_t)fb->w * fb->h * sizeof fb->inv_z[0]);
 }
 
 /* ---- Lisa 2 engine scene of the level (sub_0002489c) ---- */

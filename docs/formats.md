@@ -2,6 +2,107 @@
 
 Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmente; **hipótesis** = solo cabecera observada.
 
+## Conduccion y carrera: kernels auxiliares
+
+El lote distingue funciones completas, fragmentos y sustituciones del hardware DOS. No declara
+equivalencia integral de la sección del dashboard. `tests/driving_original.py` ejecuta el LE original
+con CW `0x127f`: **1 014 casos**, sin sustituir callees de los kernels; `tests/driving_kernels.c`
+es el runner de producción y comprueba también los límites nativos.
+
+| Original | Implementación y alcance |
+|---|---|
+| `0x1dcfc` | `ign_track_road_boundary`: primeras 50 caras con tipo <40 excepto terminación 5/6/7; primeros 50 vértices usados una o dos veces. Sumas X/Z módulo 2^32, posición PLC +25600 antes de promediar, división signed truncada. Devuelve las listas ordenadas y el centro; 120 replays completos con mallas vacías, topes y overflow. No se inventa un consumidor para los centroides globales que el original copia sin volver a leer. |
+| `0x1feb0`, `0x350cc` | `ign_physics_sign`: signo double/float de las colisiones. Orden x87 negativo/cero/positivo; unordered produce +1. El helper compartido evita divergencias entre contacto de objetos y cuerpos. |
+| `0x51760`, `0x517fc` | `ign_control_sign` y `ign_integer_sign`; el primero tiene retorno double y unordered -2, el segundo maneja `INT_MIN` sin negarlo. Los cuatro helpers de signo tienen 40 vectores completos cada uno. NaN se comprueba por orden estático y tests nativos, no por Unicorn: su `SAHF` unordered no coincide con la palabra de estado x87. |
+| `0x51980` | `ign_wrap_positive`: 24 vectores, sumas/restas repetidas binary64; no se cambia por `fmod`. Conserva -0 y puede devolver exactamente el período al sumar un negativo diminuto. `ign_angle_normalize` (`0x51938`) sí hace después la segunda comprobación del límite superior. Dominio: valor finito y período finito positivo, como en sus callers. |
+| `0x2e660` | `ign_car_grounded_probe`: `ground + 5 > height && airborne == 1`; limpia airborne y pone landed=1. Treinta casos completos en el límite exacto y sus vecinos. Sin llamador directo original: no se añade al solver vertical activo, cuyo aterrizaje usa otra condición. |
+| `0x2e6a4` | `ign_body_move_planar`: si `car+0x4848 != 0` no mueve; si no, `position += velocity/72`. Doscientos casos completos. Es una ruta antigua sin llamador directo; no se duplica el avance que ya realiza `body_step` con proyección de pendientes. |
+| `0x2e6f8` | `ign_car_body_lean`: aceleración por tick acotada ±0,5; trigonometría de `6.2831853071796 - drive_heading`, damping 0,97 y límites 35°/20°. Doscientos replays completos con modelo distinto de 7. **Parcial**: no reproduce las escrituras de objetos de suspensión del modelo 7. |
+| `0x40ec8` | `ign_car_body_sway`: conversión original `radianes * 180 * 0.31830988618379`, suma de lean, ×10 y suavizado 0,25; cabeceo por delta módulo 3600 en [-1800,1800]. Durante launch toma la inclinación directamente, sin lean. Doscientos fragmentos aritméticos; el estado nativo conserva radianes. **Parcial**: sparks, clima, fade y reloj/presentación de resultados no forman parte de esta prueba. |
+| `0x51204` | `ign_ghost_record`: 200 llamadas originales habilitadas por el caller, siete palabras, contador y final del anillo (21 599→0). +5000 en altura solo con explosión (`+0x354`), no al hundirse/deslizarse. Se comparte el normalizador angular exacto. **Parcial**: el caller nativo filtra reproducción/countdown y deja de escribir tras overflow; el original continúa su anillo no guardable. |
+
+`0x1cd6c` recorre listas sin modificarlas y reescribe su mismo puntero: no hay trabajo nativo que
+reproducir y no se cuenta como port. `0x1cdfa` no es una entrada válida: cae en el byte de desplazamiento
+del `mov` de `0x1cdf7`, dentro del recorrido sin efectos de `0x1cdcc`; se conserva la candidata
+histórica pendiente de conciliación del inventario. `0x1dcc4` libera cinco buffers de rutas; su
+equivalente de propiedad es `ign_free_track`, sin reproducir el asignador Watcom.
+
+Validación integrada: compilación sin warnings; simulación de 200 s con ocho coches en las siete pistas,
+ocho estados y framebuffer por pista, sin NaN. La regresión histórica de 23 escenarios devuelve 22
+diferencias de estado, incluidos recuentos de secciones ya obsoletos (USA 139 frente a 143); no se
+reescribe `tests/expected.json` para ocultarlas. Los tests de contrarreloj siembran récords imbatibles
+para aislar la persistencia del fantasma: igualar el mejor fantasma no impide entrar de nuevo en el
+top cinco de tiempos si la quinta plaza es peor.
+
+## Frontend, HUD y flujo: lote phase4 (2026-10-16)
+
+Este lote distingue los helpers contrastados con bytes LE de las adaptaciones nativas de la interfaz.
+Las pantallas nuevas no constituyen una equivalencia completa de `render_main`: siguen pendientes la
+presentación DOS por tiras, los retratos/indicadores de resultados, las animaciones de podio y las ramas de red
+y dos jugadores. El catálogo mantiene estos alcances como **parciales**, no como funciones terminadas.
+
+### Recursos y helpers verificados
+
+`tests/phase4_helpers_original.py` ejecuta el LE de SHA-256
+`179c654ba65281f08bbcda2b5943ab9f35c309ec718600f81104644d22db948c`: 36 vectores de workspace,
+24 selectores de HUD, 95 colas de mensajes y 111 descriptores de sprites. Intercepta explícitamente
+asignador, constructor/liberador de sprites, callback, CD y logger; no emula dispositivos DOS.
+`tests/phase4_helpers.c` comprueba recursos reales, reconstrucción, destrucción repetida y recuperación tras
+fallo de inicialización. PFM conserva sus 209 fotogramas y hash `c5d5aca8`.
+
+| Función original | Port y alcance comprobado |
+|---|---|
+| `0x15254 menu_msg_post` | `ign_frontend_messages_post` usa la primera duración igual a +0/-0; negativos y NaN ocupan ranura; si las diez están ocupadas reemplaza la 9. Copia nativa limitada a 255 bytes, no el desbordamiento de `strcpy` DOS. |
+| `0x542ac menubox_free_chain` | `ign_menubox_clear` libera la lista iterativamente y reinicia la cola; el original libera recursivamente desde el final. Reinicializar MENUBKG ya no descarta una cadena viva. |
+| `0x54bb8 pfm_include_primitive_workspace` | Máximo firmado de `length * 6` con aritmética módulo 2^32; metadato conservado por `ign_pfm_workspace`. El render nativo procesa primitivas sin reservar el workspace DOS. |
+| `0x54bd8 pfm_include_vertex_workspace` | Máximo firmado de `length * 2` módulo 2^32. La memoria nativa de vértices sigue dimensionada por los registros `li01` válidos. |
+| `0x61319 font_system_shutdown` | Es cierre, no inicialización: 30 ranuras de 0x63e, solo libera las ocupadas exactamente a 1. `ign_font_free_all` barre los bancos de cada propietario; no crea un registro global ni un callback DOS ficticio. |
+| `0x61653 font_free` | `ign_font_free` libera una imagen LFT compartida por sus 224 glifos y pone a cero el propietario; sustituye las liberaciones individuales de handles y es idempotente. |
+| `0x28a14 hud_select_layout` | Índice `video_mode * 8 + view_size * 2 + split`. Modo 0: `[1,0,0,0,0,0,0,0]`; modos 1/2: `[2,1,1,1,1,1,1,0]`. `ign_hud_init_view` selecciona MINI/SMALL por modo, independientemente del tamaño de los sprites. El CLI headless conserva el selector histórico por ancho. |
+| `0x28a84 hud_rebuild_sprites` | `ign_hud_rebuild_sprites` reconstruye vistas prestadas sobre las imágenes, sin handles DOS. Las 111 descripciones de los tres layouts coinciden con las llamadas originales. |
+| `0x21860 load_system_gfx` | `ign_frontend_init` conserva N_SYSGFX, N_SYSG_2, SYS.COL y ocho fuentes proporcionales con espaciado 1; expone accesores prestados y libera la propiedad parcial si falla la carga. Instalar SYS.COL en SDL corresponde al host. |
+| `0x215d0 game_init` | Recursos: LUT `lut[src*256+dst]=src`, cuatro esquinas 20x20 y sprite de carga 61x58; MENUBKG e iris. SDL sustituye los modos VESA y no se emulan los callbacks/device checks DOS; el alcance global sigue parcial. |
+| `0x2b51c race_sprite_release` | El LE libera 97 handles; `ign_hud_destroy` y `ign_race_ui_destroy` liberan backing stores nativos. Los 32 handles de familias de resultados no reconstruidas impiden declarar equivalencia gráfica completa. |
+| `0x2b6b4 shared_system_teardown` | Propietarios nativos: `ign_frontend_destroy`, cierre de música/audio/SDL. Se observó en LE CD stop/free, MENUBKG, cinco sprites y guardia del promedio de FPS; no se reproduce el fichero logger ni su promedio DOS. |
+| `0x215c8 game_shutdown_wrapper` | El original llama al cierre anterior y devuelve 0. La ruta de retorno de `run_frontend` ejecuta el cierre de propietarios; mantiene las limitaciones de `0x2b6b4`. |
+
+### Flujo e interfaz nativa de carrera
+
+`src/frontend/race_ui.c` implementa estados comprobables sin SDL. `main.c` conecta pausa, confirmación de
+reinicio/salida, selección de música, resultados, puntos por pista, total, podio y repetición/avance de campeonato.
+La pausa no acumula ticks para recuperarlos al continuar. Los puntos solo se consolidan una vez y se conservan
+entre rondas; reiniciar no concede puntos. La persistencia del fin de carrera interactivo se pospone hasta la
+decisión de salida; la simulación headless conserva su comportamiento anterior.
+
+| Función original | Port, evidencia y limitaciones |
+|---|---|
+| `0x10158 main_init_no_sys` | `run_frontend`/`run_game` comprueban SDL y la ventana. Equivalencia nativa, no reproduce la prueba VESA ni el modo temporal 350x70. |
+| `0x10334 bios_ticks` | `ign_bios_ticks(ms)` ofrece los ticks diarios con rollover a 1.573.040; el host usa SDL monotónico y no BIOS int 1Ah. Pruebas de medianoche y mediodía, no verificación de hardware. |
+| `0x20d18 game_startup` | `run_game` reinicia carrera, cámaras, rivales y sesión; frontend inicializa recursos compartidos. No existen las variables ni el protocolo de arranque de red DOS. |
+| `0x20d60 game_flow_step` | `run_frontend` enlaza menú/carrera/reinicio/siguiente pista/cierre y propaga fallos de carga. Parcial: no representa la máquina de estados de red ni dos humanos. |
+| `0x21448 network_status_message` | `ign_race_ui_notify`: estados 100/101/102, deduplicación, 80 frames, blink 8, viewport -1; abandonar marca el coche fuera y libera progress_lock. Pruebas nativas; API sin transporte de red conectado. |
+| `0x21d68 loading_screen_build` | `ign_race_loading_init/draw` carga PIC/PAN reales, nombre de pista y LOADING en seis idiomas. `show_loading` presenta hitos 0/33/66/100 al entrar desde el menú. Parcial: fondo escalado y texto, no las esquinas/sprite y cajas originales. |
+| `0x22238 loading_screen_progress` | Ancho `trunc((text_width + 20) * percent * .01 * 1.19)`; acepta 0..100, restaura el fondo y muestra progreso. Parcial: no reproduce el doble blit por tiras del original. Se prueba en siete pistas. |
+| `0x2b734 frame_time` | `ign_frame_time_sample`: `sample=now*.036`, `delta=sample-previous`; si delta<1 no confirma; en otro caso FPS trunc(36/delta), origen de pausa `trunc(origin + delta*27.77777777777778)` y elapsed por resta i32 a segundos. Cap 10.8 después del commit. 516 casos LE exactos; el driver SDL mantiene su acumulador nativo, sin sustituir el reloj determinista headless. |
+| `0x2b850 race_clock` | Se conserva el reloj determinista a 72 Hz y la salida a 200 unidades/36 Hz. La pausa congela su avance; parcial respecto a la negociación/salida anticipada y cambio de video de dos jugadores del LE. |
+| `0x2b430 shutdown_save` | Música/audio, textura, HUD, animación de texturas y nivel se liberan al salir; los resultados finales se guardan antes. El logger DOS y algunos caminos de fallo anteriores al arranque siguen fuera del alcance. |
+| `0x4395c race_pause_draw` | Página nativa CONTINUE/RESTART/QUIT/CD TRACK localizada, navegación circular y selector de música conectado. Parcial: no usa exactamente MENUBKG, iconos de reintentos ni reglas de deshabilitación de red. |
+| `0x43e48 race_confirmation_draw` | Confirmaciones localizadas QUIT?/RESTART?, Y/N y Escape; prueba de cancelación sin modificar el estado anterior. Parcial: panel nativo, no caja y blit PAN originales. |
+| `0x43fe0 render_main` | Resultados, TRACK SCORE, TOTAL SCORE, acumulación única, orden estable, reintentos, avance/desbloqueo y trofeo nativos. Parcial: no hay equivalencia visual por píxel, filas del fantasma, retratos ni animación de podio/ramas de dos jugadores. |
+| `0x47ae0 results_rebuild` | `ign_race_ui_update/draw` reconstruye clasificación cuando llegan otros coches sin conceder puntos dos veces; conserva pregunta de repetir. Parcial: no reconstruye los sprites y tiras del buffer DOS. |
+
+Tabla original `0xc5490`: lugares **uno-basados** 1..6 conceden **10,7,5,3,2,1**; los dos participantes extra del
+port reciben 0. Clasificación de totales estable descendente (`0x44f73`). Las cuatro secuencias de pistas de
+`0xc45b4` se conservan en `ign_champ_track`. La calificación original compara `car+0x3a0 < 4`: son los **tres**
+primeros, no cuatro. Se corrige la adaptación cero-basada de `save.c` a `<3`, y la parrilla
+`6 - lugar_uno_basado` a `5 - lugar_cero_basado`; `tests/save_btz.c` cubre ambos límites.
+`tests/race_ui_original.py` añade 72 comparaciones LE de calificación.
+
+`tools/gen_race_ui_data.py` genera exclusivamente las cadenas localizadas de las tablas originales; no guarda
+imágenes ni dumps del ejecutable. `tests/race_ui.c` cubre transiciones, repetición, puntos/empates, notificaciones,
+seis idiomas y tres resoluciones con recursos reales. Sus comprobaciones de dibujo no prueban equivalencia
+visual con DOS. Las ejecuciones headless de 200 segundos con siete rivales en las siete pistas no muestran NaN.
+
 ## Ejecutable `MAINDOS.EXE`
 
 - MZ + LE (DOS/4GW), Watcom C/C++32 (runtime 1988-1995). "Copyright (c) UDS, 1995-1996".
@@ -18,8 +119,9 @@ Todo little-endian. Estado: **verificado** = decodificado y comprobado visualmen
 
 Se conserva C11/libm para los contratos publicos ya usados por el port; no se enlaza el heap Watcom,
 sus estructuras `FILE`, selectores, interrupciones DOS ni el emulador FPU. Esto no convierte automaticamente
-los 306 candidatos de `runtime.*` en funciones portadas: este lote resuelve **33 entradas** (4 verificadas,
-29 nativas), identifica dos rellenos pendientes y deja las otras 271 sin promover.
+los 306 candidatos de `runtime.*` en funciones portadas: hay **38 entradas resueltas** (8 verificadas,
+30 nativas) y las otras 268 siguen sin promover. El segundo lote implementa cuatro funciones nuevas
+(dos rellenos y dos conversiones) y contrasta una sustitucion nativa existente (`memset`).
 Cada entrada tiene su propia correspondencia en `functions.json`. `native` indica sustitucion de servicio,
 no igualdad de instrucciones, ABI, errores numericos o direcciones del host.
 
@@ -59,12 +161,13 @@ igualdad del orden global de sorteos ni de una carrera DOS completa.
 | `0x77171` | Cuenta bytes hasta NUL mediante `repne scasb`. | `strlen`; `size_t` del host en vez de EAX de 32 bits. |
 | `0x7d338` | Convierte exclusivamente ASCII A..Z a a..z. | `tolower((unsigned char)c)` en locale C, como el HUD; no equivalencia de locales arbitrarios. |
 
-El oracle `tests/runtime_original.py` ejecuta sin parchear las 15 entradas de RNG/cadenas/matematicas
+El oracle `tests/runtime_original.py` ejecuta sin parchear las 20 entradas de RNG/cadenas/matematicas/rellenos/conversiones
 listadas en su tabla `ENTRIES`, incluidos sus callees originales. Usa segmentos planos validos,
 palabra x87 `0x127f`, pila de retorno propia y una instruccion `fstp` de captura fuera del ejecutable.
 Rechaza callees inesperados, escrituras a globals distintos de la semilla y danos a guardas de cadenas.
-**19 729 casos**: 17 358 sorteos con 42 semillas, 675 operaciones de cadenas (vacias, largas y bytes altos),
-1 696 casos matematicos finitos en dominio. RNG y cadenas son exactos; libm admite error absoluto
+**45 725 casos**: 17 358 sorteos con 42 semillas, 675 operaciones de cadenas (vacias, largas y bytes altos),
+1 696 casos matematicos finitos en dominio, 16 896 rellenos y 9 100 conversiones de enteros.
+RNG, cadenas, rellenos y conversiones son exactos; libm admite error absoluto
 `4e-15`, observado maximo `2.220446049250313e-16`.
 En cuatro casos `FPREM` emulado devuelve `+0` donde C11 `fmod` devuelve `-0`: se registra la diferencia
 y se exige el signo del dividendo nativo. No se afirma que esa diferencia sea evidencia de una CPU DOS real.
@@ -102,17 +205,43 @@ intercambiables numericamente con los Watcom. Las sustituciones nativas no se su
 de instrucciones portadas. El denominador historico sigue excluyendo solo el estado `library`,
 por lo que reclasificar entradas a `native` puede ampliarlo sin anadir codigo del juego.
 
-### Rellenos identificados, no sustituidos
+### Rellenos y conversiones de enteros verificados
 
-- **`0x65367`**: rellena **ECX palabras de 32 bits** con EDX; EAX avanza `4*ECX`.
-  No es `memset(dest,byte,count)`. Con EDX de bytes iguales se puede usar `memset(dest,EDX&255,4*ECX)`,
-  pero esa equivalencia parcial no justifica marcar el contrato general como nativo.
-- **`0x65330`**: relleno de **ECX bytes** con patron EDX y alineacion; rota el patron al avanzar
-  hasta alinear y delega los dwords a `0x65367`. Su cola escribe DL/DH/DL, no necesariamente
-  los tres primeros bytes de un patron general. La entrada `0x7d320` replica un byte en EDX antes
-  de llamarla y conserva el destino original: esa si forma la interfaz de `memset`.
+| Direccion | Implementacion | Contrato verificado |
+|---|---|---|
+| `0x65367` | `ign_fill_dwords` | Escribe ECX palabras de 32 bits con EDX en little-endian; devuelve EAX avanzado `4*ECX`. Admite desalineacion. No es `memset` de bytes. |
+| `0x65330` | `ign_fill_pattern` | Escribe ECX bytes, rota EDX ocho bits a la derecha por cada byte previo a alinear destino a 4; delega los dwords a `0x65367`; cola DL/DH/DL. |
+| `0x7d320` | `memset` C11 existente (`native`) | Replica DL en los cuatro bytes de EDX, toma longitud de EBX, llama a `0x65330` y devuelve el destino original, no el cursor interno. |
+| `0x700d0` | `ign_u32toa` | Divide EAX unsigned por EBX, invierte los digitos de `0123456789abcdefghijklmnopqrstuvwxyz` en `0x700ab`, escribe NUL y devuelve destino EDX. |
+| `0x7011a` | `ign_i32toa` | Solo ante base 10 y EAX negativo escribe `-` y convierte la magnitud unsigned; las otras bases convierten los 32 bits originales. Devuelve el destino previo al signo. |
 
-Estas dos entradas quedan `understood`, sin implementacion ni prueba diferencial atribuida.
+El cursor de **`0x65330` no avanza por la cola**: tras `prefix` bytes de alineacion, retorna
+`dest + prefix + 4 * floor((count-prefix)/4)`, aunque escriba hasta tres bytes mas.
+Por ejemplo, destino alineado, patron `0x12345678` y count 3 produce `78 56 78` y devuelve destino.
+Se preservan esa peculiaridad, los patrones no uniformes y los destinos desalineados, no solo el caso cero.
+La limpieza de color/profundidad en `ign_frame_clear` usa el helper; con patron cero conserva exactamente
+el alcance y contenido del `memset` previo. Un fixture 7x3 verifica tambien que no se limpia el pixel siguiente.
+
+Las conversiones soportan todas las bases **2..36**, cero, `UINT32_MAX`, `INT32_MIN` y cada frontera de bit.
+`INT32_MIN` usa resta unsigned, no negacion con overflow C. Los buffers del consumidor necesitan 33 bytes;
+las posiciones decimales del HUD usan `ign_i32toa`, que delega en `ign_u32toa`, con el buffer existente de 64.
+El oracle contiene 130 valores unsigned distintos (tambien interpretados como int32), las 35 bases y
+ambas entradas: **9 100 casos**, comparando texto, NUL, puntero devuelto y guardas sin tolerancia.
+
+Los **16 896 rellenos** cubren ambas primitivas y `memset`, los 32 residuos de direccion modulo 32,
+44 longitudes (0..33 y fronteras hasta 512) y cuatro patrones, incluidos bytes altos y no repetidos.
+Las longitudes de `0x65367` se interpretan como dwords; el resto como bytes.
+Cada escritura original se restringe al intervalo exacto de salida, y se compara la region completa con
+guardas y el desplazamiento de EAX. Las 20 entradas del oracle deben haberse ejecutado.
+
+**Limites/desviaciones deliberadas:** no se reproducen las lecturas especulativas de las rutinas de relleno,
+su ABI de registros ni tiempos de cache; si los buffers no tienen el alcance declarado, no hay contrato C valido.
+El port mantiene little-endian explicitamente, sin stores desalineados ni aliasing indefinido.
+Las bases invalidas devuelven NULL con `errno=EINVAL` y no escriben el destino; el original podria dividir
+por cero, no terminar (base 1) o consultar fuera de la tabla. No se ejecutan esas entradas invalidas del original.
+Las dos primitivas y las dos conversiones pasan a `verified`; `0x7d320` permanece una sustitucion `native`,
+no una quinta funcion nueva. No se afirman cambios en el resto del formateador printf por verificar sus auxiliares.
+
 No se considera resuelto el resto de arranque, DOS, parsing, heap interno o emulador por pertenecer
 a una categoria cuyo servicio publico usa libc. Pendientes concretos: adaptadores de directorios DOS,
 control/conversion x87 y reconciliacion del resto de funciones no identificadas del runtime.

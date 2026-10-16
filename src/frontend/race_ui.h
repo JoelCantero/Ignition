@@ -53,14 +53,16 @@ double ign_frame_time_sample(IgnFrameTime *time, int32_t now, int paused);
 uint32_t ign_bios_ticks(uint64_t milliseconds);
 
 typedef struct {
-    IgnPic background;
-    IgnFont font;
-    uint8_t *pan;
+    IgnPic background, system;
+    IgnFont font, blue;
+    uint8_t *pan, *boxes, *overlay;
+    IgnFrame *frame;
     int language, track;
 } IgnRaceLoading;
 
 int ign_race_loading_init(IgnRaceLoading *loading, const char *data_dir, const char *level, int language);
-int ign_race_loading_draw(const IgnRaceLoading *loading, IgnFrame *frame, int percent);
+/* Original 320x200 composition; larger outputs scale the completed indexed frame. */
+int ign_race_loading_draw(IgnRaceLoading *loading, IgnFrame *frame, int percent);
 void ign_race_loading_destroy(IgnRaceLoading *loading);
 
 #endif

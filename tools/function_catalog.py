@@ -15,6 +15,23 @@ FUNCTION_STATUSES = frozenset(STATUS_ORDER)
 CLASSIFICATION_CONFIDENCES = ("documented", "inferred", "unresolved")
 COVERAGE_FIELDS = ("unique_instructions", "library_instructions", "ported_instructions",
                    "partial_instructions", "covered_code_bytes", "code_bytes")
+# How each original function is satisfied, and which published states count as satisfying it.
+TREATMENTS = {
+    "port": frozenset({"ported", "verified"}),
+    "equivalent": frozenset({"ported", "verified", "native"}),
+    "native": frozenset({"native", "verified", "ported"}),
+    "not-needed": frozenset(FUNCTION_STATUSES),
+}
+# Treatments whose callees are not required: the replacement or omission covers the whole subtree.
+LEAF_TREATMENTS = frozenset({"native", "not-needed"})
+
+
+def _nonempty(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_address(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{8}", value) is not None
 
 
 def inventory_fingerprint(catalog):
@@ -25,7 +42,7 @@ def inventory_fingerprint(catalog):
 
 def validate_catalog(catalog, verify_snapshot=True):
     if (not isinstance(catalog, dict) or type(catalog.get("schema_version")) is not int or
-            catalog["schema_version"] != 2):
+            catalog["schema_version"] != 3):
         raise ValueError("Unsupported function catalog schema_version")
     executable = catalog.get("executable", {})
     if (not isinstance(executable, dict) or not isinstance(executable.get("sha256"), str) or
@@ -34,14 +51,33 @@ def validate_catalog(catalog, verify_snapshot=True):
     symbols = catalog.get("symbols")
     if not isinstance(symbols, list) or not symbols:
         raise ValueError("Catalog must contain a nonempty symbols list")
+    milestones = catalog.get("milestones")
+    if not isinstance(milestones, dict) or not milestones:
+        raise ValueError("Catalog must define milestones")
+    for index, (key, milestone) in enumerate(milestones.items()):
+        if (key != f"H{index}" or not isinstance(milestone, dict) or
+                set(milestone) != {"title", "goal", "criteria", "depends_on", "entry_points", "deferred"} or
+                any(not _nonempty(milestone[field]) for field in ("title", "goal", "criteria"))):
+            raise ValueError(f"Invalid milestone definition: {key}")
+        earlier = list(milestones)[:index]
+        if (not isinstance(milestone["depends_on"], list) or
+                any(d not in earlier for d in milestone["depends_on"]) or
+                not isinstance(milestone["entry_points"], list) or
+                any(not _is_address(a) for a in milestone["entry_points"]) or
+                not isinstance(milestone["deferred"], list) or
+                any(not isinstance(d, dict) or set(d) != {"target", "reason"} or
+                    not _nonempty(d["target"]) or not _nonempty(d["reason"]) for d in milestone["deferred"])):
+            raise ValueError(f"Invalid milestone dependencies, entry points or deferrals: {key}")
     subsystems = catalog.get("subsystems")
     if not isinstance(subsystems, dict) or not subsystems:
         raise ValueError("Catalog must define subsystems")
     for key, subsystem in subsystems.items():
         if (not re.fullmatch(r"(?:phase[0-9]+|runtime)(?:\.[a-z0-9-]+){2,}", key) or
                 not isinstance(subsystem, dict) or
-                any(not isinstance(subsystem.get(field), str) or not subsystem[field].strip()
-                    for field in ("title", "description"))):
+                any(not _nonempty(subsystem.get(field)) for field in ("title", "description")) or
+                subsystem.get("treatment") not in TREATMENTS or
+                "milestone" not in subsystem or
+                subsystem["milestone"] is not None and subsystem["milestone"] not in milestones):
             raise ValueError(f"Invalid subsystem definition: {key}")
     addresses = set()
     for symbol in symbols:
@@ -86,12 +122,37 @@ def validate_catalog(catalog, verify_snapshot=True):
             if (not isinstance(evidence, list) or not evidence or
                     any(not isinstance(item, str) or not item.strip() for item in evidence)):
                 raise ValueError(f"{address}: classification requires individual evidence")
-        elif any(field in symbol for field in ("status", "instructions", "roadmap", "classification")):
+            for field in ("calls", "pointer_refs"):
+                edges = symbol.get(field)
+                if (not isinstance(edges, list) or any(not _is_address(e) or e == address for e in edges) or
+                        edges != sorted(set(edges))):
+                    raise ValueError(f"{address}: {field} must be a sorted list of other function addresses")
+            if type(symbol.get("data_referenced")) is not bool:
+                raise ValueError(f"{address}: data_referenced must be a boolean")
+            plan = symbol.get("plan")
+            if plan is not None and (
+                    not isinstance(plan, dict) or not set(plan) <= {"treatment", "milestone", "rationale"} or
+                    not _nonempty(plan.get("rationale")) or not {"treatment", "milestone"} & set(plan) or
+                    "treatment" in plan and plan["treatment"] not in TREATMENTS or
+                    "milestone" in plan and plan["milestone"] not in milestones):
+                raise ValueError(f"{address}: invalid plan override")
+        elif any(field in symbol for field in ("status", "instructions", "roadmap", "classification",
+                                               "calls", "pointer_refs", "data_referenced", "plan")):
             raise ValueError(f"{address}: data/code labels cannot carry function state")
     if [s["address"] for s in symbols] != sorted(addresses):
         raise ValueError("Catalog symbols must be sorted by address")
     if not any(s["kind"] == "function" for s in symbols):
         raise ValueError("Catalog contains no functions")
+    functions = {s["address"] for s in symbols if s["kind"] == "function"}
+    for symbol in symbols:
+        if symbol["kind"] == "function" and any(
+                e not in functions for e in symbol["calls"] + symbol["pointer_refs"]):
+            raise ValueError(f'{symbol["address"]}: call graph references an unknown function')
+    for key, milestone in milestones.items():
+        if any(a not in functions for a in milestone["entry_points"]):
+            raise ValueError(f"{key}: entry point is not a catalog function")
+        if any(d["target"] not in functions and d["target"] not in subsystems for d in milestone["deferred"]):
+            raise ValueError(f"{key}: deferral target must be a function address or subsystem")
     coverage = catalog.get("coverage")
     if not isinstance(coverage, dict) or any(
             type(coverage.get(k)) is not int or coverage[k] < 0 for k in COVERAGE_FIELDS):
@@ -140,6 +201,75 @@ def summarize(catalog):
         "game_instructions": coverage["unique_instructions"] - coverage["library_instructions"],
         **coverage,
     }
+
+
+def plan_milestones(catalog):
+    """Assign every function to the earliest milestone that statically requires it.
+
+    A milestone requires its entry points, the functions of subsystems homed in it and, transitively, their
+    direct callees and pointer references. Functions treated as `native`/`not-needed` are required but not
+    expanded; deferred targets are not followed for that milestone. Indirect calls are not resolved, so
+    unreached functions are reported as unplanned rather than declared unnecessary.
+    """
+    functions = {s["address"]: s for s in catalog["symbols"] if s["kind"] == "function"}
+    subsystems, milestones = catalog["subsystems"], catalog["milestones"]
+    order = {key: index for index, key in enumerate(milestones)}
+    info = {}
+    for address, s in functions.items():
+        plan = s.get("plan", {})
+        treatment = plan.get("treatment", subsystems[s["roadmap"]]["treatment"])
+        info[address] = {
+            "treatment": treatment, "home": plan.get("milestone", subsystems[s["roadmap"]]["milestone"]),
+            "pinned": "milestone" in plan, "done": s["status"] in TREATMENTS[treatment],
+            "milestone": None, "required_by": [],
+        }
+    report = {"milestones": {}, "errors": [], "unplanned": []}
+    for key, milestone in milestones.items():
+        deferred = {d["target"] for d in milestone["deferred"]}
+        used = set()
+        roots = sorted(set(milestone["entry_points"]) |
+                       {a for a, i in info.items() if i["home"] == key})
+        visited, postorder = set(), []
+        for root in roots:
+            stack = [(root, False)]
+            while stack:
+                address, expanded = stack.pop()
+                if expanded:
+                    postorder.append(address)
+                    continue
+                if address in visited:
+                    continue
+                if address != root and (address in deferred or functions[address]["roadmap"] in deferred):
+                    used.add(address if address in deferred else functions[address]["roadmap"])
+                    continue
+                visited.add(address)
+                stack.append((address, True))
+                if info[address]["treatment"] not in LEAF_TREATMENTS:
+                    s = functions[address]
+                    stack.extend((e, False) for e in reversed(s["calls"] + s["pointer_refs"]) if e not in visited)
+        for address in visited:
+            info[address]["required_by"].append(key)
+            if info[address]["milestone"] is None:
+                info[address]["milestone"] = key
+        new = [a for a in postorder if info[a]["milestone"] == key]
+        report["milestones"][key] = {
+            "required": len(visited), "new": new,
+            "pending": [a for a in new if not info[a]["done"]],
+            "unused_deferrals": sorted(deferred - used),
+        }
+    for address, i in sorted(info.items()):
+        if i["milestone"] is None:
+            report["unplanned"].append(address)
+            if i["pinned"]:
+                report["errors"].append(f"{address}: pinned to {i['home']} but not required by it")
+        elif i["home"] is not None and order[i["milestone"]] < order[i["home"]] and not i["done"]:
+            report["errors"].append(
+                f"{address} {functions[address]['name']}: homed in {i['home']} but required by {i['milestone']}; "
+                "pin it with a reviewed plan or defer the dependency")
+        elif i["pinned"] and i["milestone"] != i["home"]:
+            report["errors"].append(f"{address}: pinned to {i['home']} but first required by {i['milestone']}")
+    report["functions"] = info
+    return report
 
 
 def sync_readme(catalog, path):

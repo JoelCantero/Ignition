@@ -1,8 +1,10 @@
 #include "race_ui.h"
 #include "race_ui_data.h"
+#include "gfx2d.h"
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 int ign_race_points(int place) {
@@ -69,6 +71,50 @@ static int load_font(IgnFont *font, const char *dir, const char *name) {
     return 0;
 }
 
+/* 0x21d68: three box groups in a 320x480 scratch layer, composited into a 320x200 screen. */
+static void loading_build(IgnRaceLoading *loading) {
+    IgnFrame *frame = loading->frame;
+    ign_frame_init(frame, 320, 200);
+    memcpy(frame->color, loading->background.pixels, 320 * 200);
+    const uint8_t *identity = ign_gfx_identity_lut();
+    for (int i = 0; i < 4; i++) {
+        IgnSprite corner;
+        ign_sprite_from_pic(&corner, &loading->system, 236, i * 20, 20, 20);
+        ign_sprite_draw(frame, NULL, &corner, i & 1 ? 300 : 0, i & 2 ? 180 : 0, loading->pan);
+    }
+    const char *title = race_text_track[loading->language][loading->track];
+    const char *label = race_text_loading[loading->language][0];
+    int title_width = ign_font_text_width(&loading->font, title);
+    int label_width = ign_font_text_width(&loading->font, label);
+    IgnMenuBox title_box = {106, 106 + title_width, 0, 18, 0, NULL};
+    ign_menubox_draw_list(loading->overlay, 320, 320, 480, loading->boxes, &title_box);
+    /* Glyph drawing uses the native frame type; save the background while drawing the opaque text layer. */
+    uint8_t background[320 * 200];
+    memcpy(background, frame->color, sizeof background);
+    memcpy(frame->color, loading->overlay, sizeof background);
+    ign_font_draw(frame, NULL, &loading->font, title, 119, 30, identity);
+    memcpy(loading->overlay, frame->color, sizeof background);
+    memcpy(frame->color, background, sizeof background);
+    ign_blend_rect(loading->overlay, 0, 0, 320, 200, frame->color, 0, 0, loading->pan, 320, 320, 320, 200);
+
+    memset(loading->overlay, 0, 320 * 480);
+    IgnMenuBox lower = {106, 106 + title_width, 1, 45, 1, NULL};
+    IgnMenuBox upper = {106, 106 + label_width, 0, 45, 1, &lower};
+    ign_menubox_draw_list(loading->overlay, 320, 320, 480, loading->boxes, &upper);
+    upper.yoff = lower.yoff = 95;
+    upper.style = lower.style = 0;
+    ign_menubox_draw_list(loading->overlay, 320, 320, 480, loading->boxes, &upper);
+    memcpy(background, frame->color, sizeof background);
+    memcpy(frame->color, loading->overlay, sizeof background);
+    ign_font_draw(frame, NULL, &loading->blue, label, 119, 57, identity);
+    ign_font_draw(frame, NULL, &loading->font, label, 119, 107, identity);
+    memcpy(loading->overlay, frame->color, sizeof background);
+    memcpy(frame->color, background, sizeof background);
+    IgnSprite sprite;
+    ign_sprite_from_pic(&sprite, &loading->system, 153, 190, 61, 58);
+    ign_sprite_draw(frame, NULL, &sprite, 44, 1, loading->pan);
+}
+
 int ign_race_loading_init(IgnRaceLoading *loading, const char *data_dir, const char *level, int language) {
     memset(loading, 0, sizeof *loading);
     loading->language = language >= 0 && language < 6 ? language : 0;
@@ -77,49 +123,62 @@ int ign_race_loading_init(IgnRaceLoading *loading, const char *data_dir, const c
     int n = snprintf(path, sizeof path, "%s/LEVELS/%s/%s.PIC", data_dir, level, level);
     if (loading->track < 0 || n < 0 || (size_t)n >= sizeof path ||
         ign_load_pic(path, &loading->background) ||
-        load_font(&loading->font, data_dir, "BALTAZAR/DATA/RED_LITE.LFT")) goto fail;
+        loading->background.width != 320 || loading->background.height != 200 ||
+        load_font(&loading->font, data_dir, "BALTAZAR/DATA/RED_LITE.LFT") ||
+        load_font(&loading->blue, data_dir, "BALTAZAR/DATA/BLUELITE.LFT")) goto fail;
     n = snprintf(path, sizeof path, "%s/LEVELS/%s/%s.PAN", data_dir, level, level);
     size_t size;
     if (n < 0 || (size_t)n >= sizeof path || !(loading->pan = ign_read_file(path, &size)) || size != 65536)
         goto fail;
+    n = snprintf(path, sizeof path, "%s/N_SYSGFX.PIC", data_dir);
+    if (n < 0 || (size_t)n >= sizeof path || ign_load_pic(path, &loading->system) ||
+        loading->system.width != 256 || loading->system.height < 248) goto fail;
+    n = snprintf(path, sizeof path, "%s/MENUBKG.DAT", data_dir);
+    if (n < 0 || (size_t)n >= sizeof path || !(loading->boxes = ign_read_file(path, &size)) || size < 0x9358)
+        goto fail;
+    loading->overlay = calloc(320 * 480, 1);
+    loading->frame = malloc(sizeof *loading->frame);
+    if (!loading->overlay || !loading->frame) goto fail;
+    loading_build(loading);
     return 0;
 fail:
-    fprintf(stderr, "race UI: cannot load loading screen for %s\n", level);
+    fprintf(stderr, "race UI: cannot build loading screen for %s (resource %s)\n", level, path);
     ign_race_loading_destroy(loading);
     return -1;
 }
 
 void ign_race_loading_destroy(IgnRaceLoading *loading) {
     ign_free_pic(&loading->background);
+    ign_free_pic(&loading->system);
     ign_font_free(&loading->font);
+    ign_font_free(&loading->blue);
     free(loading->pan);
+    free(loading->boxes);
+    free(loading->overlay);
+    free(loading->frame);
     memset(loading, 0, sizeof *loading);
 }
 
-int ign_race_loading_draw(const IgnRaceLoading *loading, IgnFrame *frame, int percent) {
-    if (percent < 0 || percent > 100 || !loading->background.pixels || !loading->pan) {
+int ign_race_loading_draw(IgnRaceLoading *loading, IgnFrame *frame, int percent) {
+    if (percent < 0 || percent > 100 || !loading->background.pixels || !loading->pan ||
+        !loading->frame || !loading->overlay) {
         fprintf(stderr, "race UI: invalid loading progress %d or uninitialised resources\n", percent);
         return -1;
     }
-    const IgnPic *pic = &loading->background;
-    for (int y = 0; y < frame->h; y++)
-        for (int x = 0; x < frame->w; x++)
-            frame->color[y * frame->w + x] =
-                pic->pixels[(size_t)(y * pic->height / frame->h) * pic->width + x * pic->width / frame->w];
-    IgnFont font = loading->font;
-    int x = frame->w / 3 + 13;
-    ign_font_draw(frame, NULL, &font, race_text_track[loading->language][loading->track], x, 30, loading->pan);
+    IgnFrame *screen = loading->frame;
+    /* 0x2225c: restore x=104..294, y=0..26 from the unadorned PIC, not the whole screen. */
+    for (int y = 0; y < 27; y++)
+        memcpy(screen->color + y * 320 + 104, loading->background.pixels + y * 320 + 104, 191);
     const char *label = race_text_loading[loading->language][0];
     /* 0x222aa..0x222e8: trunc((text_width + 20) * percent * .01 * 1.19). */
-    int width = (int)((double)((ign_font_text_width(&font, label) + 20) * percent) * 0.01 * 1.19);
-    int start = frame->w / 3;
-    for (int y = 50; y < 75 && y < frame->h; y++)
-        for (int col = start; col < start + width && col < frame->w; col++)
-            frame->color[y * frame->w + col] = loading->pan[0x800 | frame->color[y * frame->w + col]];
-    ign_font_draw(frame, NULL, &font, label, x, 57, loading->pan);
-    char value[16];
-    snprintf(value, sizeof value, "%d%%", percent);
-    ign_font_draw(frame, NULL, &font, value, x, 107, loading->pan);
+    int width = (int)((double)((ign_font_text_width(&loading->font, label) + 20) * percent) * 0.01 * 1.19);
+    int split = 106 + width;
+    ign_blend_rect(loading->overlay, 0, 50, split, 75, screen->color, 0, 4, loading->pan, 320, 320, 320, 200);
+    ign_blend_rect(loading->overlay, split, 100, 320, 125, screen->color, split, 4,
+                   loading->pan, 320, 320, 320, 200);
+    for (int y = 0; y < frame->h; y++)
+        for (int x = 0; x < frame->w; x++)
+            frame->color[y * frame->w + x] = screen->color[(y * 200 / frame->h) * 320 + x * 320 / frame->w];
     return 0;
 }
 

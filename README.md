@@ -42,16 +42,17 @@ volando, peligros móviles que destruyen el coche, géiseres, coches aplastados 
 con matriz) son idénticos píxel a píxel a los bytes originales. El **frontend original está portado**: pantalla de
 idioma, intro en vídeo CDP, menús en 6 idiomas con su motor de páginas, fondo vectorial animado (idéntico al píxel al
 original), carrusel de coches 3D, récords, créditos y configuración en `IGN_DOS.BTZ`; al elegir pista y coche arranca
-la carrera y al salir de ella se vuelve al menú. Faltan la validación integral de una carrera DOS, el sombreado original, el campeonato completo de
-varias pistas y el multijugador.
+la carrera y al salir de ella se vuelve al menú. Hay una implementación nativa integrada de pausa, resultados,
+puntuación y avance del campeonato; falta validar ese ciclo de extremo a extremo. Siguen pendientes la validación
+integral de una carrera DOS, el sombreado original y el multijugador.
 
 | Métrica | Valor |
 |---|---|
-| Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 449 clasificadas como runtime) |
-| Instrucciones únicas desensambladas | **128 832** (19 093 de runtime/libc/DOS/4G) |
-| Código del juego marcado como portado/verificado | **48 756 de 109 739 instrucciones (44,4 %)**; **191 de 663 funciones (28,8 %)** |
-| Código del juego marcado como parcial | **8 402 instrucciones en 18 funciones**; excluido del numerador portado |
-| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **663 de 663 (100,0 %)**; 338 documentadas, 295 inferidas y 30 por resolver; no es cobertura de portado |
+| Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 446 clasificadas como runtime) |
+| Instrucciones únicas desensambladas | **128 832** (19 033 de runtime/libc/DOS/4G) |
+| Código del juego marcado como portado/verificado | **49 442 de 109 799 instrucciones (45,0 %)**; **202 de 666 funciones (30,3 %)** |
+| Código del juego marcado como parcial | **13 843 instrucciones en 28 funciones**; excluido del numerador portado |
+| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **666 de 666 (100,0 %)**; 341 documentadas, 295 inferidas y 30 por resolver; no es cobertura de portado |
 | Formatos de datos propios descifrados | 15 de 21 (TRI, POS y TAB solo en parte) |
 | Código del port | ≈ 13 900 líneas de C (`src/`, sin contar las tablas generadas `menu_data.c`) |
 
@@ -63,6 +64,14 @@ Mide cobertura de código original asociado a funciones, no equivalencia instruc
 es cobertura del desensamblado, no del port; la clasificación runtime también es heurística.
 
 ### Dashboard del port
+
+La sección **Conducción y carrera** incluye ahora helpers de signo/normalización, apoyo y avance
+antiguos, centro de bordes de carretera y correcciones de balanceo y grabación del fantasma,
+con **1 014 casos contra instrucciones LE originales**.
+Los helpers sin llamador DOS no se insertan artificialmente en la física activa. El balanceo del
+modelo 7, varios wrappers de entrada/efectos y la equivalencia de una carrera completa siguen
+parciales; el catálogo no los presenta como terminados.
+Detalle: [kernels auxiliares](docs/formats.md#conduccion-y-carrera-kernels-auxiliares).
 
 Abrir [`docs/port-dashboard.html`](docs/port-dashboard.html) en el navegador: funciona sin servidor ni dependencias
 externas. Muestra cobertura de instrucciones únicas, estados por función, sistemas, roadmap y un inventario con
@@ -153,16 +162,20 @@ cada una `ms` después de la anterior). Con esta última se comprobó el ciclo c
 ### Biblioteca C y DOS/4G
 
 El port usa servicios C11/libm en lugar de reconstruir el runtime Watcom. El catálogo documenta
-**33 correspondencias** de esta categoría: 4 rutinas de estado/azar verificadas y 29 sustituciones
+**38 correspondencias** de esta categoría: 8 funciones verificadas y 30 sustituciones
 nativas de memoria, archivos, errores, cadenas y matemáticas. No se declara completada la categoría
-de 306 entradas: quedan 273 sin resolver (dos rellenos ya comprendidos y 271 sin promover).
+de 306 entradas: quedan 268 sin resolver.
 El dashboard muestra las sustituciones nativas separadas de las funciones portadas/verificadas,
 también en las barras de subsistemas. Su estado no añade instrucciones al numerador portado.
 
 El generador compatible se centraliza en `src/platform/runtime.c`; ya no depende de `rand()`/`RAND_MAX`
 del host. Se preserva la secuencia de efectos/IA y se corrigen los sorteos de HUD, cámara, menú y parrilla.
 `runtime_native` prueba los contratos C11; `runtime_original` (con `IGN_VERIFY_ORIGINAL=ON`) compara
-**19 729 casos** contra bytes LE sin parchear: azar y cadenas exactos, matemáticas con tolerancia explícita.
+**45 725 casos** contra bytes LE sin parchear: azar, cadenas, rellenos y conversiones de enteros exactos;
+matemáticas con tolerancia explícita. El segundo lote añade **cuatro implementaciones nuevas**:
+dos rellenos que conservan patrones/alineación/cursores originales y dos conversiones int32/uint32 en bases
+2..36, integradas en limpieza de fotogramas y posiciones del HUD. Añade además una equivalencia nativa
+verificada de `memset`; no cuenta esa sustitución existente como una quinta implementación nueva.
 Véanse las [correspondencias individuales, evidencia y límites](docs/formats.md#biblioteca-c-y-dos4g-equivalentes-nativos).
 
 ```sh
@@ -634,15 +647,15 @@ Las tablas de este README y el dashboard son vistas derivadas; se edita una sola
 
 | Estado | Funciones | Interpretación |
 |---|---:|---|
-| `unknown` | 359 | Sin identificación fiable; requiere análisis |
-| `identified` | 55 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
-| `understood` | 3 | Comportamiento entendido, todavía no implementado |
+| `unknown` | 344 | Sin identificación fiable; requiere análisis |
+| `identified` | 46 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
+| `understood` | 1 | Comportamiento entendido, todavía no implementado |
 | `port-pending` | 0 | Pendiente explícita y priorizada (ninguna: `car_ground_contact` y `collisions_pass` ya están portadas) |
-| `partial` | 18 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
-| `ported` | 141 | Implementada en el port, sin afirmar verificación completa |
-| `verified` | 50 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
-| `native` | 37 | Bucle/temporizador (`0x10010`–`0x1034c`) → SDL; busy, play y stop de CD → reproducción OGG |
-| `library` | 449 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
+| `partial` | 28 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
+| `ported` | 148 | Implementada en el port, sin afirmar verificación completa |
+| `verified` | 54 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
+| `native` | 45 | Bucle/temporizador (`0x10010`–`0x1034c`) → SDL; busy, play y stop de CD → reproducción OGG |
+| `library` | 446 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
 
 ### Catálogo único de funciones
 
@@ -902,6 +915,9 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
   orden global de sorteos. C11/libm conserva sus errores, tamaños de tipos y semántica de texto,
   no los de DOS/Watcom. `fmod` conserva el signo del dividendo incluso en cero (cuatro diferencias
   de signo frente a `FPREM` emulado en los fixtures). No se reproducen handlers FPU/errno de Watcom.
+  Las conversiones enteras rechazan bases fuera de 2..36 con NULL/EINVAL sin tocar el destino;
+  no se reproducen división por cero, bucles ni lecturas fuera de la tabla de dígitos.
+  Los rellenos preservan bytes y cursor devuelto, pero omiten lecturas especulativas y ABI de registros.
 
 1. **IA**: controlador, cargador TRI, selector y topología portados y contrastados con bytes LE.
    El original puede consultar altura/extremos fuera de placeholders TRI de un byte: el port conserva
@@ -957,57 +973,80 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
 12. **Persistencia**: `IGN_DOS.BTZ` y `GHOSTS/` en `SDL_GetPrefPath("UDS", "Ignition")` (o `IGN_SAVE_DIR`), nunca en la
    carpeta del juego, que solo se lee. Jugador = participante 0, récords
    guardados ya al terminar el jugador, nombres de 3 letras, sin récords de coches eliminados ni vueltas vacías, y
-   sin desbloqueos del campeonato (falta la clasificación por puntos). "LAP RECORD"/"TRACK RECORD" salen por la salida
+   con lógica nativa de puntos y desbloqueos del campeonato integrada, pendiente de validación del ciclo completo.
+   "LAP RECORD"/"TRACK RECORD" salen por la salida
    estándar y también como mensajes del HUD. Véase [BTZ](docs/formats.md#configuración-y-récords-ign_dosbtz-portado-en-savec-toolsbtzpy).
 13. **HUD**: `main.c` usa una sola ventana (el HUD admite las dos del original); los contadores por fotograma avanzan
    una vez por cada 1/36 s del reloj de carrera; el primer fotograma pone aguja y palanca en su objetivo; el temblor
    usa un generador propio; los mensajes se detectan comparando el estado entre fotogramas y los pilotos se nombran por
-   el código de su modelo; la capa de paneles se elige por el ancho del fotograma; cada sprite escalado ocupa su propia
+   el código de su modelo; el frontend usa las tablas originales de modo/vista para los paneles y el CLI headless
+   conserva la selección por ancho; cada sprite escalado ocupa su propia
    página de textura; no se emiten el sonido del lugar al terminar (`0x4bc54`) ni el bucle de «fuegos» sin dibujo de
    `0x4bca8`.
 14. **Frontend**: el menú corre a 320×200 como el DOS y comparte la carpeta de usuario de la persistencia: lee su
    `IGN_DOS.BTZ` (o, si no hay, el de la carpeta del juego) y escribe solo allí; *RESET GHOST CAR* borra los fantasmas de
-   esa carpeta. El CD del menú es la música OGG (`MUSIC/Track02–08.ogg`, un disco de 8 pistas con la 1 de datos). No hay
-   joystick/volante (sus páginas de calibración no terminan solas) ni la espera "NO SOUNDCARD FOUND". Los coches 3D del
+   esa carpeta. El CD del menú es la música OGG (`MUSIC/Track02–08.ogg`, un disco de 8 pistas con la 1 de datos).
+   Hay un backend SDL de gamepad/joystick y calibración de ejes; falta validar el recorrido completo de las páginas
+   de calibración con hardware real. No se reproduce la espera "NO SOUNDCARD FOUND". Los coches 3D del
    carrusel usan el rasterizador del port con una cámara que reproduce posición y objetivo pero no la focal exacta del
-   motor Lisa 2. El reloj del menú es `SDL_GetTicks` (el original iba un 1,15 % rápido). La carrera aún no usa los nombres, las teclas configuradas ni
-   las opciones gráficas del menú, ni corre un campeonato completo de varias pistas.
+   motor Lisa 2. El reloj del menú es `SDL_GetTicks` (el original iba un 1,15 % rápido). La carrera lee las teclas,
+   el tipo de control y la aceleración automática del menú; el avance entre pistas del campeonato está conectado.
+   Faltan la validación integral de esos recorridos y la integración completa de nombres y opciones gráficas.
+   Los resultados y diálogos usan composición nativa, no las tiras 320×480 ni todos los sprites/animaciones DOS;
+   la carga presenta hitos discretos y un fondo escalado. Los participantes séptimo/octavo reciben cero puntos.
+   Los avisos de desconexión tienen API y pruebas, pero no transporte de red.
+   Alcance por función y evidencia: [Frontend, HUD y flujo](docs/formats.md#frontend-hud-y-flujo-lote-phase4-2026-10-16).
 
 ---
 
 ## Roadmap
 
 Prioridad: **P1** = necesario para un juego completo de un jugador · **P2** = fidelidad y contenido · **P3** = extras.
-Cada tarea indica las direcciones de partida.
+Cada tarea indica las direcciones de partida. Las **fases 0–9 son áreas de trabajo**, no una secuencia obligatoria.
+El orden de ejecución lo fijan los hitos siguientes y sus dependencias; la prioridad no sustituye a esas dependencias.
 
-### Siguientes portes recomendados
+### Hitos de ejecución y criterios de cierre
 
-Orden sugerido según impacto, tamaño y lo que ya está identificado. Los recuentos son instrucciones desensambladas
-del original, no líneas de C; `identified` significa que falta portar, y no implica que el comportamiento ya esté
-implementado.
+Objetivo: cerrar primero una carrera fiable y el ciclo completo de un jugador en macOS; después completar la
+fidelidad visual y ampliar plataformas y modos. No se prioriza por número de funciones o instrucciones portadas.
 
-1. ~~Contacto y colisiones con objetos móviles~~ (hecho: `car_ground_contact`, `collisions_pass`, objetos especiales,
-   aplastamiento y animaciones de textura; véase Fase 2). Quedan en otras áreas el dibujo de los mensajes (`hud.c`), el
-   ensanchamiento del coche aplastado (`raster.c`).
-2. **Entrada y controles fieles (P1, alcance medio):** completar `human_input` (`0x2c5b8`, 424),
-   `car_input` (`0x4d5f4`, 335), `car_steer` (`0x500f0`, 121), `car_throttle` (`0x4db90`, 389) y
-   `car_turbo` (`0x4e2d8`, 215). Esto permite reemplazar los controles aproximados, conservar las reglas originales
-   de salida y añadir el joystick; véase Fase 1.
-3. ~~Terminar el controlador y trazado de IA~~ (hecho: `ai_drive`, `load_tri`, `ai_find_section` y
-   `build_sections`; oracles desde sus entradas originales, tablas de las siete pistas y desviaciones
-   de heap indefinido documentadas). Sigue pendiente validar una carrera DOS integral con física/dispatcher.
-4. **Fidelidad del paso de coche (P1, muy grande):** portar por partes `car_update` (`0x2ed00`, 2 335) y
-   `cars_update_all` (`0x2d008`, 846). El planificador rotatorio de IA ya está conectado; siguen pendientes la
-   actualización completa de superficies y el resto del dispatcher. Requiere
-   mantener las regresiones de las siete pistas; no conviene abordarlo como un único porte monolítico. Véase Fase 3.
+| Hito | Dependencias | Trabajo y criterio de cierre |
+|---|---|---|
+| **H0 — Estado y referencias reproducibles (P1)** | Ninguna | Reconciliar código, catálogo y tareas de las fases, conservando el alcance de cada prueba. Ejecutar y registrar las pruebas relevantes con revisión, datos, binario y argumentos identificados. Separar fallos de ejecución, diferencias históricas y regresiones nuevas; no sobrescribir la referencia histórica para hacerla pasar. |
+| **H1 — Referencia integrada DOS (P1)** | H0 | Conseguir primero un tramo corto reproducible, no una carrera entera: confirmar ejecución en carrera, mapeo LE, coche, estado inicial, entradas y frontera/cadencia de tick. Conservar captura y conversión, comparar campos comunes y obtener un informe que localice la primera divergencia. Véase [captura DOS](docs/dosbox-trace.md). |
+| **H2 — Cadena de simulación fiel (P1)** | H0; H1 para acreditar equivalencia integrada | Completar por bloques controles → dispatcher → física → consultas de pista. Mantener oráculos de fragmentos y replay; para cada escenario integrado, declarar campos y tolerancias antes de comparar, sin divergencias inexplicadas dentro del alcance acordado. Las desviaciones deliberadas se documentan y quedan fuera de la afirmación de equivalencia. |
+| **H3 — Carreras completas en siete pistas (P1)** | H2; incorporar creación/mapeo de objetos de Fase 2 si bloquea consultas de pista | Ejecutar escenarios deterministas de tres vueltas en las siete pistas, primero sin rivales y después con siete. Registrar llegada o eliminación de cada participante dentro de un límite de ticks fijado por escenario, sin NaN/Inf ni atascos sin diagnosticar. Cubrir bifurcaciones, barranco de USA, muros, peligros y destrucción/reaparición con casos específicos. Un smoke de 200 s con avance de vueltas no cierra este hito. |
+| **H4 — Ciclo completo de un jugador (P1)** | H3 para cierre; pruebas de UI/configuración pueden avanzar tras H0 | Validar menú → carrera → pausa/continuar/reinicio/salida → resultados → siguiente pista → fin del campeonato → menú. Cubrir puntos, empates, reintentos, desbloqueos, récords y fantasma; comprobar persistencia tras relanzar usando una carpeta de usuario aislada. Verificar las opciones del menú realmente aplicadas; completar las restantes o declarar su limitación. |
+| **H5 — Fidelidad visual (P2)** | H3 para comparación de escenas estables; creación y transformaciones de objetos antes de comparar escenas que las usan | Completar correspondencia de objetos y rotaciones POS; después orden de dibujo, recorte y primitivas Lisa 2. Resolver TAB/PAN/SHD en sus consumidores, reutilizando los kernels ya verificados. Comparar escenas con cámara, tick, resolución y configuración fijos; igualdad de píxel donde se afirme equivalencia exacta y desviaciones explícitas en el resto. |
+| **H6 — Entrega y ampliaciones (P1/P2/P3)** | H4 para entrega funcional macOS; H5 para afirmar fidelidad visual; dependencias propias para cada ampliación | Bundle macOS con selección de datos, probado fuera de la ruta de desarrollo y sin modificar la copia del juego. Windows requiere build y pruebas en CI; pantalla partida requiere dos entradas/cámaras/viewports; iOS requiere importación de datos y controles táctiles; red requiere decidir protocolo y sincronización. No son un único bloqueo secuencial. |
+
+**Siguiente objetivo operativo:** cerrar H0 y obtener la captura corta de H1; usar su primera divergencia para elegir
+el siguiente bloque de H2, no empezar un porte monolítico del rasterizador ni de `car_update`.
+Si la captura DOS queda bloqueada, registrar el intento y el obstáculo en `docs/dosbox-trace.md` y continuar con
+oráculos LE y pruebas de integración del port. Eso permite avanzar H2, pero no cerrar su equivalencia integrada.
+
+En H2, los puntos de entrada son `human_input` (`0x2c5b8`), `car_input` (`0x4d5f4`),
+`cars_update_all` (`0x2d008`) y `car_update` (`0x2ed00`). Dirección, acelerador, freno, marchas y turbo ya tienen
+fragmentos verificados: se debe completar su composición y sus productores de estado, no reimplementarlos desde cero.
+La IA y su trazado también tienen oráculos propios; una divergencia integrada no se atribuye al controlador sin
+localizar antes el primer estado o llamada que difiere.
+
+**Estado de las tareas:** `[ ]` pendiente, `[~]` parcial o implementación integrada con cierre pendiente,
+`[x]` alcance descrito completado. Una marca no acredita fidelidad de todo el sistema. Los estados por función siguen
+siendo los de `docs/functions.json`; esta revisión del plan no los promueve. La revisión documental de 2026-10-16
+confirma conexiones estáticas de código, no una nueva ejecución de carreras ni una nueva validación DOS.
+
+**Validación transversal:** en cada cambio, ejecutar las pruebas focalizadas, conservar los oráculos existentes y
+escalar a las siete pistas cuando afecte a la simulación. El replay mide determinismo del port; los fragmentos LE
+miden su alcance aislado; las capturas DOS miden integración. No son pruebas intercambiables.
 
 ### Fase 0 — Infraestructura de ingeniería inversa
 
 - [x] **P1** Inicializar git y subir solo código, documentación y herramientas (los datos ya están excluidos).
 - [~] **P1** Separar la libc de Watcom y DOS/4G del código del juego: no hay base de firmas FLIRT para Watcom 10.x, así
-      que `disasm.py` la clasifica heurísticamente por grafo de llamadas y datos de runtime (estado `library`,
-      488 funciones, 20 323 instrucciones). Quedan sin clasificar ≈ 25 000 instrucciones de `0x60000–0x86000`;
-      la separación completa requiere mejores firmas o verificación manual.
+      que `disasm.py` la clasifica heurísticamente por grafo de llamadas y datos de runtime (estado `library`;
+      recuentos actuales en "Estado en una línea"). La separación completa de
+      `0x60000–0x86000` requiere mejores firmas o verificación manual; no bloquea el ciclo de un jugador.
 - [x] **P1** Cubrir el 17 % de bytes restante: `disasm.py sweep` (barrido de huecos con prólogos Watcom, decodificación
       limpia, validación de relocaciones y rechazo de solapes) subió la cobertura del 83,0 % al **98,5 %**
       (277 candidatos de huecos aceptados; 303 inicios validados persistidos, incluidos los llamados).
@@ -1042,7 +1081,7 @@ implementado.
       5 184 casos / 31 104 pasos exactos; total entradas 49 272 / 214 116.
       Snapshot antes de consumir carga y commit después de marchas; sin gate de salida inventado.
       Pendientes sondeo, timer DOS/pausa/salida forzada, IA/joystick y callees intermedios.
-- [~] **P3** Trazas de ejecución del original en DOSBox-X: hecho `tools/trace_compare.py`; DOSBox-X 2026.10.01 está
+- [~] **P1** Referencia integrada H1 mediante trazas del original en DOSBox-X: hecho `tools/trace_compare.py`; DOSBox-X 2026.10.01 está
       instalado; se confirmó la entrada MZ de `MAINDOS.EXE` y que DOS lo mantiene cargado, pero tras reanudar solo se
       observó el bucle de espera de BIOS. Aún falta llegar a carrera, validar el mapeo LE, el muestreo por tick y la
       comparación ([`docs/dosbox-trace.md`](docs/dosbox-trace.md)).
@@ -1062,6 +1101,28 @@ implementado.
       Diagnóstico repetido: 48 945 decisiones definidas sin discrepancias y permanencias de ≥5 s de 24 a 0.
       No acredita todos los productores del dispatcher ni equivalencia de una carrera DOS completa.
 - [x] **P1** Arreglar el atasco en la bifurcación de CANADA (tramo −34): la IA usa registros de la rama B en tramos negativos.
+- [~] **P1** Completar por bloques `car_update` (`0x2ed00`) y `cars_update_all` (`0x2d008`):
+      controles y física tienen kernels verificados, pero faltan productores de estado, actualización completa de
+      superficies y composición del dispatcher. Cierre según H2, manteniendo regresiones de las siete pistas.
+- [ ] **P1** USA tramos 48–50: diagnosticar salto del barranco y reaparición con referencia original
+      (punto de partida adicional `0x00435910` en `Ign_win.exe`). Se ha observado IA que cae a ~70 km/h y queda
+      atascada; reproducir el caso antes de atribuirlo a física, suelo o reaparición.
+- [ ] **P1** Integración IA/física contra los muros: controlador y trazado originales ya portados y cotejados.
+      El smoke de 200 s con ocho coches avanzó vueltas en las siete pistas, pero se observaron rivales lentos
+      o atascados (por ejemplo ICELAND). Reproducir y localizar la primera divergencia de física/dispatcher;
+      las ventanas originales de marcha atrás no garantizan desatascarse. Cierre de carreras completas según H3.
+- [x] **P1** Planificador rotatorio de IA de `cars_update_all`: fase de controles a 36 Hz, pero decisión nueva
+      por coche a **36/N Hz**, con N coches totales, incluidos humanos/inactivos. Resto de turnos: replay de
+      pedales, dirección y solicitud de turbo; caja automática antes de controles, física a 72 Hz.
+      Contador de atasco incrementado por N, sin espera artificial. Verificación contra fragmentos LE:
+      **17 640 casos sin diferencias** y **32 comprobaciones de caché**. Cadencia en el ejecutable con N=1..8,
+      replay independiente 21/21 y conducción humana recta/turbo exacta frente al binario previo (14/14).
+      Smoke de 200 s con siete rivales en siete pistas, repetido con estados/trazas/imágenes idénticos y sin
+      valores no finitos. No verifica la IA completa ni el dispatcher: `car+0x350` sigue sin modelar.
+      La observación histórica «la geometría del error de rumbo aún es aproximada» debe leerse junto al porte
+      posterior del trazado en esta fase.
+      La referencia histórica no se regenera: la comparación registrada entonces fue 0/23,
+      con 22 diferencias de estado y 23 de imagen, sin fallos de ejecución; no es una medición nueva.
 - [x] **P1** Orden de carrera, posiciones, fin de carrera y número de vueltas por modo (`race.c`; 3 vueltas, modo 3 sin límite; clasificación propia: ver desviaciones).
       Cruce/fases/registro de tiempos verificados por fragmentos: 3 024 casos / 4 112 pasos.
       Pendientes geometría de sondas, productor del gate, récords guardados y avisos.
@@ -1084,9 +1145,10 @@ implementado.
       lista del motor. Disparador por objetos `0x12c` portado (peligros móviles; en ICELAND a < 30 del origen).
 - [~] **P1** Entrada original: teclado `0x2c5b8` decodificado; dirección digital cotejada contra bytes LE
       (24 casos: signo, prioridad de derecha e inversión al aplastarse; ver `docs/formats.md`);
-      pedales/arbitraje y selección de marchas verificados, manual 0–2 (M, Q/E); faltan sondeo/flancos/caché,
-      joystick `0x4c9b4` y `car_input` completo
-      (`0x4f874`, `0x50464`, `0x50824` sin identificar; freno `0x4e1bc` identificado y verificado para coche no terminado).
+      pedales/arbitraje y selección de marchas verificados, manual 0–2 (M, Q/E). Backend nativo SDL integrado
+      (`src/platform/input.c`, `tests/input_backend.c`): teclas BTZ, flancos, foco y gamepad/joystick.
+      No emula IRQ/BIOS ni el puerto DOS; faltan acreditar composición/caché de `car_input`, callees intermedios
+      y equivalencia de la ruta analógica original `0x4c9b4`. El freno `0x4e1bc` está verificado para coche no terminado.
 - [x] **P2** Caja automática `0x502c4` sin audio verificada (curvas compartidas, ángulo, empate y contador/retardo);
       cambios manuales 0–2 y reset al reaparecer verificados. Inicialización completa y secuencia de callers aún fuera de prueba.
 - [x] **P2** Dificultad `0xc5470` (agarre trasero ×1/1,15/1,3/1,3, `--difficulty N`) y tipo de control
@@ -1131,30 +1193,12 @@ implementado.
 
 ### Fase 3 — Render fiel
 
-- [ ] **P1** Rasterizador del motor Lisa 2 (`0x54000–0x60000`, ~12 900 instrucciones): orden de dibujo, recorte,
+- [ ] **P2** Rasterizador del motor Lisa 2 (`0x54000–0x60000`, ~12 900 instrucciones): orden de dibujo, recorte,
       relleno y z (o algoritmo del pintor).
-- [ ] **P1** Sombreado **TAB**: cómo se elige el nivel por cara (bits bajos de `flags`: `0x11/0x13/0x15`; byte alto
+- [ ] **P2** Sombreado **TAB**: cómo se elige el nivel por cara (bits bajos de `flags`: `0x11/0x13/0x15`; byte alto
       ≥ 64 = sin sombra) y luz por distancia o normal.
-- [ ] **P1** Función de **PAN** (tabla de 64 KB `PAN[a*256+b]`; filas 16–159 a cero, así que no es la mezcla de las
+- [ ] **P2** Función de **PAN** (tabla de 64 KB `PAN[a*256+b]`; filas 16–159 a cero, así que no es la mezcla de las
       caras 18/19/22). **SHD**: fila 0x28 = sombra de coche (hecho); resto de filas por confirmar en el DOS.
-- [ ] **P1** USA tramos 48–50: la IA no salta el barranco a ~70 km/h, cae al fondo y no hay reaparición
-      (`0x00435910` en `Ign_win.exe`), así que se queda atascada.
-- [ ] **P1** Integración IA/física contra los muros: controlador y trazado originales ya portados y cotejados.
-      La simulación de 200 s con ocho coches avanza vueltas en las siete pistas, pero siguen rivales lentos
-      o atascados (por ejemplo ICELAND). No se atribuye ya a términos ausentes del controlador;
-      falta cotejar la carrera completa, física y dispatcher. Las ventanas originales de marcha atrás
-      no garantizan desatascarse.
-- [x] **P1** Planificador rotatorio de IA de `cars_update_all`: fase de controles a 36 Hz, pero decisión nueva
-      por coche a **36/N Hz**, con N coches totales, incluidos humanos/inactivos. Resto de turnos: replay de
-      pedales, dirección y solicitud de turbo; caja automática antes de controles, física a 72 Hz.
-      Contador de atasco incrementado por N, sin espera artificial. Verificación contra fragmentos LE:
-      **17 640 casos sin diferencias** y **32 comprobaciones de caché**. Cadencia en el ejecutable con N=1..8,
-      replay independiente 21/21 y conducción humana recta/turbo exacta frente al binario previo (14/14).
-      Smoke de 200 s con siete rivales en siete pistas, repetido con estados/trazas/imágenes idénticos y sin
-      valores no finitos. No verifica la IA completa ni el dispatcher: `car+0x350` sigue sin modelar y la
-      geometría del error de rumbo aún es aproximada. La referencia histórica no se regenera.
-      Comparación histórica actual: 0/23, con 22 diferencias de estado y 23 de imagen, sin fallos de ejecución;
-      ya existían divergencias previas y este cambio altera deliberadamente la conducción de IA.
 - [x] **P1** Cámara de persecución original (`sub_00047f94`, `sub_000420cc`, focales de `race_setup_video`).
 - [x] **P2** Cámara trasera (`car+0x5a4`, campos `+0x90/+0xa0/+0x70`) y cámaras fijas tras la meta (`0xc464c`).
 - [x] **P1** Cuenta atrás y reloj de salida (`sub_0002b850`) con sus pitidos y el semáforo 3-2-1-GO del HUD.
@@ -1179,17 +1223,26 @@ implementado.
 - [x] **P1** HUD en carrera `0x4a320`: coordenadas y estados de las tres resoluciones, aguja y medidores (turbo
       incluido), palanca de cambios, señales y WRONG WAY, semáforo, barra de eliminación, lugar al terminar, mensajes
       multilingües (IS OUT, LAP/TRACK RECORD, WARNING, YOU'RE LAST!) y ventanas de dos jugadores.
-- [ ] **P1** Pantallas de resultados y puntuación (`render_main` `0x43fe0`: TRACK RESULTS, TRACK SCORE, TOTAL SCORE)
-      y trofeo `POKAL.PIC`.
-- [ ] **P1** Pausa, continuar, salir y reiniciar (`0x4395c`, `0x43e48`).
+- [~] **P1** Pantallas de resultados y puntuación (`render_main` `0x43fe0`: TRACK RESULTS, TRACK SCORE, TOTAL SCORE)
+      y trofeo `POKAL.PIC`: implementación nativa en `src/frontend/race_ui.c`, conectada en `main.c`.
+      Pruebas nativas de estados/puntos/empates, seis idiomas y tres resoluciones; 72 casos LE del umbral de
+      calificación. Pendientes comparación visual DOS y ciclo completo H4; no se afirma igualdad de layout ni flujo.
+- [~] **P1** Pausa, continuar, salir y reiniciar (`0x4395c`, `0x43e48`): estados y acciones nativos integrados
+      en `race_ui.c`/`main.c`. Confirmación/cancelación y límites de reintentos cubiertos por `race_ui`;
+      quedan validación SDL integral, flancos al reanudar y recorrido completo del campeonato H4.
 - [x] **P1** Menús: `menu_load_gfx` `0x11504`, `menu_frame` `0x12bb8`, callbacks `0x160c4`/`0x170ac`, motor de menús
       `0x51b20`–`0x539f8` con las 25 páginas × 6 idiomas, intro CDP, fondo PSQ/PFM al píxel, carrusel 3D `0x19508`,
       récords, créditos, cajas `MENUBKG.DAT` y `IGN_DOS.BTZ`. Pruebas `menu_flow` y `menu_background`.
-- [ ] **P1** Llevar a la carrera el resto de la configuración del menú: campeonato de varias pistas, nombres, teclas
-      de `IGN_DOS.BTZ`, opciones gráficas y obstáculos (pista, coche, corredores, dificultad, cambio, contrarreloj,
-      persecución y música ya pasan).
-- [ ] **P2** Modos de juego (campeonato, contrarreloj, práctica…), desbloqueos y flujo entre pistas.
-- [ ] **P2** Pantallas de carga (`0x21d68`) e idiomas (inglés, alemán, francés, italiano, español y sueco).
+- [~] **P1** Configuración menú → carrera: pista, coche, corredores, dificultad, cambio, contrarreloj,
+      persecución y música ya pasan; también se leen teclas BTZ, tipo de control y aceleración automática.
+      Completar nombres, opciones gráficas y obstáculos; probar cada opción aplicada en H4.
+- [~] **P1** Campeonato y flujo entre pistas: `race_ui.c` implementa puntos, clasificación y acciones;
+      `main.c` conecta avance, reintentos y guardado/desbloqueos. Pendiente validar un campeonato completo,
+      resultados empatados, eliminación/no clasificación y persistencia tras relanzar. Contrarreloj tiene pruebas propias;
+      no se da por acreditado el resto de modos por compartir este flujo.
+- [~] **P2** Pantallas de carga (`0x21d68`): cargador y dibujo nativos en `race_ui.c`; pendiente verificar
+      integración y comparación DOS. Los menús ya tienen seis idiomas; comprobar también carga y resultados
+      en inglés, alemán, francés, italiano, español y sueco.
 - [x] **P2** Configuración y récords en **BTZ** (`0x2b430`, `0x2cf60`, `IGN_DOS.BTZ`): formato completo, imagen por
       defecto del menú verificada contra el original, récords, avance del campeonato y persistencia (`save.c`). El HUD lee
       de la misma imagen el idioma y los récords de carrera para «TRACK RECORD».
@@ -1215,7 +1268,9 @@ implementado.
 - [x] **P2** Reproducir el fantasma (`--ghost`): una muestra por tick, sin choques, con el modelo de la cabecera.
 - [x] **P2** Modo contrarreloj (`[0x1feefc] == 2`): grabar al terminar si se bate `[0x1fee04]` y cargar al empezar
       (`--time-trial`, `tests/time_trial.py`).
-- [ ] **P1** Validar física e IA contra un fantasma real: grabar una contrarreloj en DOSBox y usar `--ghost`.
+- [ ] **P1** Complementar H1/H2 con una contrarreloj y un fantasma reales de DOS: comparar trayectoria y tiempos
+      con entradas y estado inicial conocidos. `--ghost` reproduce muestras, no vuelve a simular los controles;
+      por sí solo no verifica física ni IA. La IA requiere escenarios de referencia con rivales.
 - [x] **P2** Récords de vuelta ("LAP RECORD") y su persistencia: tablas por pista de `render_main` `0x45938`, mejor
       vuelta inicial desde el récord guardado (`0x2a442`); los avisos aún no se dibujan en el HUD.
 
@@ -1231,7 +1286,8 @@ implementado.
 - [ ] **P1** Bundle `.app` de macOS con selector de la carpeta de datos (sin rutas fijas).
 - [ ] **P2** Windows: CMake + SDL3 (MSVC/MinGW), CI con GitHub Actions para macOS y Windows.
 - [ ] **P2** iOS: SDL3 en iOS, controles táctiles e importación de los datos por el usuario (no se pueden incluir).
-- [ ] **P3** Mandos (SDL gamepad), remapeo de teclas y guardado en una carpeta de usuario.
+- [~] **P3** Mandos y remapeo: backend SDL y teclas BTZ conectados; guardado en carpeta de usuario ya disponible.
+      Validar dispositivos reales, conexión/desconexión y calibración desde el menú antes de cerrar el soporte.
 
 ### Fase 9 — Cierre del desensamblado
 

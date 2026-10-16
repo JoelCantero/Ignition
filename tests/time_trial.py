@@ -2,7 +2,7 @@
 """Headless time trial: record the ghost, load it again and only replace it when beaten.
 
 Runs `ignition USA --time-trial --sim 150 auto` (the autopilot finishes in about 142 s) with IGN_SAVE_DIR set to
-a temporary folder and checks that:
+a temporary folder and unbeatable track records (to isolate ghost persistence), and checks that:
   1. the first run (no ghost) writes GHOSTS/GOLDRUSH.GST and IGN_DOS.BTZ in the user folder only;
   2. the second run loads the ghost, does not beat it and leaves both files unchanged;
   3. after making the saved ghost slower (header time), a third run replaces it with the new time;
@@ -69,6 +69,13 @@ def main():
         shot = os.path.join(tmp, "x.ppm")
         gst = os.path.join(save, "GHOSTS", "GOLDRUSH.GST")
         btz = os.path.join(save, "IGN_DOS.BTZ")
+        seed = bytearray(open(os.path.join(a.data, "IGN_DOS.BTZ"), "rb").read())
+        # An equal ghost time may still enter the race/lap top five; exclude that separate save path.
+        for table in (0x14, 0x50):
+            for slot in range(5):
+                struct.pack_into("<d", seed, 0x1BF + 0x78 + table + slot * 8, 0.0)
+        with open(btz, "wb") as f:
+            f.write(seed)
 
         out1 = run(a.binary, a.data, save, shot)
         check("time trial: no ghost, record 30000.00 s" in out1, "first run starts without a ghost")
@@ -103,11 +110,13 @@ def main():
 
         save2 = os.path.join(tmp, "elim") + os.sep
         os.makedirs(save2)
+        with open(os.path.join(save2, "IGN_DOS.BTZ"), "wb") as f:
+            f.write(seed)
         out4 = run(a.binary, a.data, save2, shot, ("--elimination", "--rivals", "3", "--sim", "600", "auto"))
         if "race: 4/4 finished" not in out4:
             print("skip elimination race end: not every car is out")
         else:
-            orig = open(os.path.join(a.data, "IGN_DOS.BTZ"), "rb").read()
+            orig = seed
             new = open(os.path.join(save2, "IGN_DOS.BTZ"), "rb").read()
             changed = [i for i in range(0x597) if orig[i] != new[i]]
             check(all(0x133 <= i < 0x143 for i in changed), "elimination end only touches grid slots 0-3")

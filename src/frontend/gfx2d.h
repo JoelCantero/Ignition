@@ -43,10 +43,20 @@ void ign_blend_rect(const uint8_t *src, int x0, int y0, int x1, int y1, uint8_t 
                     const uint8_t *lut, int sp, int dp, int buf_w, int buf_h);
 
 /* MenuBkg.dat boxes. */
+typedef struct IgnMenuBox {
+    int x0, x1, row, yoff, style;
+    struct IgnMenuBox *next;
+} IgnMenuBox;
+
 int ign_menubox_init(const char *path);             /* sub_000541d4 */
 void ign_menubox_free(void);
 void ign_menubox_clear(void); /* 0x54278 + recursive node release 0x542ac; native iteration avoids stack growth */
 void ign_menubox_add(int x, int row, int w, int yoff, int style); /* sub_000542c4 */
 void ign_menubox_draw(uint8_t *buf, int pitch, int buf_w, int buf_h); /* sub_0005430c */
+/* Draw a caller-owned list with a validated MenuBkg.dat (at least 0x9358 bytes), leaving the menu list intact.
+ * Original linear-pitch addressing permits horizontal row wrap, but writes outside pitch*buf_h are clipped.
+ * The legacy ign_menubox_draw keeps its rectangular clipping for existing menu screens. */
+void ign_menubox_draw_list(uint8_t *buf, int pitch, int buf_w, int buf_h, const uint8_t *tiles,
+                           const IgnMenuBox *boxes);
 
 #endif

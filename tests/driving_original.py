@@ -38,9 +38,10 @@ class DrivingOriginal(Original):
             "W": [(0x51980, 0x519C5)],
             "G": [(0x2E660, 0x2E6A1)],
             "M": [(0x2E6A4, 0x2E6F5)],
-            "L": [(0x2E6F8, 0x2EA3D)],
+            "L": [(0x2E6F8, 0x2EA41)],
             "B": [(0x40EED, 0x41014), (0x65782, 0x658FF)],
-            "R": [(0x51204, 0x5146B), (0x51938, 0x5197C), (0x55F9C, 0x55FB8)],
+            "R": [(0x51204, 0x5146B), (0x5192E, 0x5197C), (0x55F9C, 0x55FB8)],
+            "C": [(0x1DCFC, 0x1DEC8)],
         }
         if not any(lo <= address <= hi for lo, hi in ranges[self.active]):
             raise ValueError(f"Unexpected {self.active} instruction {address:#x}")
@@ -48,7 +49,8 @@ class DrivingOriginal(Original):
 
     def write(self, uc, access, address, size, value, _):
         ranges = [(STACK, STACK + 0x10000), (CAR, CAR + 0x484C), (BODY, BODY + 0x1D0),
-                  (GHOST, GHOST + 0x4A000), (0x1FEE64, 0x1FEE68), (0x1FEE00, 0x1FEE04)]
+                  (GHOST, GHOST + 0x4A000), (0x1FEE64, 0x1FEE68), (0x1FEE00, 0x1FEE04),
+                  (0x1FEFE0, 0x1FEFE4), (0xEB460, 0xEB7C0)]
         if not any(lo <= address and address + size <= hi for lo, hi in ranges):
             raise ValueError(f"Unexpected {self.active} write {address:#x}")
 
@@ -90,7 +92,8 @@ class DrivingOriginal(Original):
             self.execute(0x51760, struct.pack("<d", value))
             # Store st0 with an actual x87 instruction, rather than Unicorn's extended register layout.
             self.uc.mem_write(RETURN, b"\xdd\x1d" + struct.pack("<I", STACK))
-            self.uc.emu_start(RETURN, RETURN + 6, count=1)
+            self.uc.ctl_remove_cache(RETURN, RETURN + 6)
+            self.uc.emu_start(RETURN, RETURN + 6, count=10)
             control, = self.get(STACK, "d")
             self.execute(0x517FC, eax=integer & 0xFFFFFFFF)
             integer_sign, = struct.unpack("<i", struct.pack("<I", self.uc.reg_read(self.reg.UC_X86_REG_EAX)))
@@ -98,7 +101,8 @@ class DrivingOriginal(Original):
         if mode == "W":
             self.execute(0x51980, struct.pack("<2d", *v))
             self.uc.mem_write(RETURN, b"\xdd\x1d" + struct.pack("<I", STACK))
-            self.uc.emu_start(RETURN, RETURN + 6, count=1)
+            self.uc.ctl_remove_cache(RETURN, RETURN + 6)
+            self.uc.emu_start(RETURN, RETURN + 6, count=10)
             return list(self.get(STACK, "d"))
         if mode == "G":
             ground, height, airborne, landed = v
@@ -146,12 +150,29 @@ class DrivingOriginal(Original):
             self.execute(0x51204)
             return list(self.get(GHOST + count * 14, "7h")) + [
                 self.get(0x1FEE64, "i")[0], self.get(0x1FEE00, "i")[0]]
+        if mode == "C":
+            nv, nf, px, py, pz = v[:5]
+            self.put(GHOST, "2i", nv, nf)
+            self.put(GHOST + 8, f"{nv * 3}i", *v[5:5 + nv * 3])
+            self.put(INFO, "3i", px, py, pz)
+            for f in range(nf):
+                surface, a, b, c = v[5 + nv * 3 + f * 4:9 + nv * 3 + f * 4]
+                self.put(GHOST + 0x2000 + f * 44, "4I", surface << 16, a, b, c)
+            for ptr, value in [(0xEB790, GHOST), (0xEB78C, GHOST + 8),
+                               (0xEB7B8, INFO), (0xEB7BC, GHOST + 0x2000)]:
+                self.put(ptr, "I", value)
+            self.execute(0x1DCFC)
+            faces, = self.get(0xEB7A0, "i")
+            vertices, = self.get(0xEB79C, "i")
+            return [self.get(0xEB7AC, "i")[0], self.get(0xEB7A8, "i")[0], faces, vertices] + list(
+                self.get(0xEB528, f"{faces}i")) + list(self.get(0xEB460, f"{vertices}i"))
         raise ValueError(mode)
 
 
 def fixtures():
     cases = []
-    for value in [-math.inf, -1e30, -1.0, -0.0, 0.0, 1.0, 1e30, math.inf, math.nan]:
+    # Unicorn's SAHF unordered path is inconsistent with the x87 status word for NaNs.
+    for value in [-math.inf, -1e30, -1.0, -0.0, 0.0, 1.0, 1e30, math.inf]:
         for integer in [-2147483648, -1, 0, 1, 2147483647]:
             cases.append(("S", [value, integer]))
     for period in [1.0, 6.2831853071796, 3600.0]:
@@ -173,6 +194,16 @@ def fixtures():
                             rng.uniform(-7, 7), rng.uniform(-14, 14), rng.uniform(-7, 7),
                             i % 4, rng.randint(-200, 200), i % 5, i % 4, 200,
                             21599 if i % 3 == 0 else 0]))
+    for i in range(120):
+        nv = [0, 3, 20, 60, 100][i % 5]
+        nf = [0, 1, 50, 51, 100][i // 5 % 5] if nv else 0
+        position = [rng.randint(-2000000000, 2000000000) for _ in range(3)]
+        vertices = [rng.randint(-100000, 100000) for _ in range(nv * 3)]
+        faces = []
+        for f in range(nf):
+            surface = [0, 4, 5, 6, 7, 8, 15, 17, 20, 39, 40, 65535][(i + f) % 12]
+            faces.extend([surface, rng.randrange(nv), rng.randrange(nv), rng.randrange(nv)])
+        cases.append(("C", [nv, nf] + position + vertices + faces))
     return cases
 
 
@@ -183,12 +214,12 @@ def main():
     parser.add_argument("--report", required=True, type=Path)
     args = parser.parse_args()
     cases = fixtures()
+    original = DrivingOriginal(args.original)
     text = "".join(mode + " " + " ".join(map(str, values)) + "\n" for mode, values in cases)
     result = subprocess.run([str(args.runner.resolve())], input=text, text=True, capture_output=True, check=True)
     lines = result.stdout.splitlines()
     if len(lines) != len(cases):
         raise ValueError("Native output count mismatch")
-    original = DrivingOriginal(args.original)
     failures = []
     for index, ((mode, values), line) in enumerate(zip(cases, lines)):
         expected = original.run(mode, values)
@@ -196,11 +227,12 @@ def main():
         tolerance = 5e-13 if mode in ("L", "B") else 0
         if len(actual) != len(expected) or any(
                 not math.isclose(a, b, abs_tol=tolerance, rel_tol=tolerance) for a, b in zip(actual, expected)):
-            failures.append({"index": index, "mode": mode, "input": values, "expected": expected, "actual": actual})
+            failures.append({"index": index, "mode": mode, "input": list(map(str, values)),
+                             "expected": expected, "actual": actual})
     report = {
         "original_sha256": ORIGINAL_SHA256, "cases": len(cases), "failures": failures,
         "coverage": {mode: len(addresses) for mode, addresses in sorted(original.visits.items())},
-        "scope": "Full sign/wrap/legacy ground/planar helpers and 51204; lean model!=7; sway arithmetic only",
+        "scope": "Full sign/wrap/legacy ground/planar helpers, 1dcfc and 51204; lean model!=7; sway arithmetic only; NaNs excluded from emulator comparison",
         "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "runner_sha256": hashlib.sha256(args.runner.read_bytes()).hexdigest(),
     }

@@ -1,5 +1,6 @@
 #include "game/car.h"
 #include "game/ghost.h"
+#include "game/track.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -44,6 +45,13 @@ static int self_test(void) {
     car.wreck_kind = 1;
     ign_ghost_record(&ghost, &car, 100);
     CHECK(ghost.s[1].y == 5100);
+    const int32_t verts[9] = {0, 0, 0, 90, 0, 0, 0, 0, 90};
+    const IgnFace faces[1] = {{.v = {0, 1, 2}}};
+    const IgnObject road = {.nv = 3, .verts = verts, .nf = 1, .faces = faces};
+    IgnRoadBoundary boundary;
+    ign_track_road_boundary(&road, &boundary);
+    CHECK(boundary.nfaces == 1 && boundary.nvertices == 3);
+    CHECK(boundary.center[0] == 25630 && boundary.center[1] == 25630);
 #undef CHECK
     if (!failed) puts("driving kernels: OK");
     return failed != 0;
@@ -84,6 +92,31 @@ int main(int argc, char **argv) {
                       &car.launch) != 7) goto invalid;
             ign_car_body_sway(&car);
             printf("%.17g %.17g\n", car.body_roll, car.body_pitch);
+        } else if (mode == 'C') {
+            int32_t vertices[300];
+            IgnFace faces[100] = {0};
+            IgnObject object = {.verts = vertices, .faces = faces};
+            if (scanf("%d %d %d %d %d", &object.nv, &object.nf,
+                      &object.pos[0], &object.pos[1], &object.pos[2]) != 5 ||
+                object.nv < 0 || object.nv > 100 || object.nf < 0 || object.nf > 100) goto invalid;
+            for (int v = 0; v < object.nv * 3; v++)
+                if (scanf("%d", &vertices[v]) != 1) goto invalid;
+            for (int f = 0; f < object.nf; f++) {
+                unsigned type;
+                int a, b, c;
+                if (scanf("%u %d %d %d", &type, &a, &b, &c) != 4 ||
+                    type > 65535 || a < 0 || b < 0 || c < 0 ||
+                    a >= object.nv || b >= object.nv || c >= object.nv) goto invalid;
+                faces[f].flags = type << 16;
+                faces[f].v[0] = a; faces[f].v[1] = b; faces[f].v[2] = c;
+            }
+            IgnRoadBoundary boundary;
+            ign_track_road_boundary(&object, &boundary);
+            printf("%d %d %d %d", boundary.center[0], boundary.center[1],
+                   boundary.nfaces, boundary.nvertices);
+            for (int f = 0; f < boundary.nfaces; f++) printf(" %d", boundary.faces[f]);
+            for (int v = 0; v < boundary.nvertices; v++) printf(" %d", boundary.vertices[v]);
+            putchar('\n');
         } else if (mode == 'R') {
             int sections, count;
             if (scanf("%f %lf %f %lf %lf %lf %d %d %d %d %d",

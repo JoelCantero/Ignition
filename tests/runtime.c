@@ -1,5 +1,6 @@
 #include "platform/runtime.h"
 #include "game/fx.h"
+#include "render/raster.h"
 
 #include <errno.h>
 #include <ctype.h>
@@ -12,6 +13,37 @@
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "runtime:%d: %s\n", __LINE__, #x); return 1; } } while (0)
 
 static int native_contracts(void) {
+    _Alignas(32) unsigned char fill[128];
+    memset(fill, 0xa5, sizeof fill);
+    CHECK(ign_fill_dwords(fill + 1, UINT32_C(0x12345678), 2) == fill + 9);
+    CHECK(!memcmp(fill + 1, "\x78\x56\x34\x12\x78\x56\x34\x12", 8));
+    CHECK(fill[0] == 0xa5 && fill[9] == 0xa5);
+    CHECK(ign_fill_pattern(fill + 32, UINT32_C(0x12345678), 3) == fill + 32);
+    CHECK(!memcmp(fill + 32, "\x78\x56\x78", 3));
+    CHECK(ign_fill_pattern(fill + 65, UINT32_C(0x12345678), 6) == fill + 68);
+    CHECK(!memcmp(fill + 65, "\x78\x56\x34\x12\x78\x12", 6));
+    CHECK(ign_fill_pattern(fill, 0, 0) == fill && ign_fill_dwords(fill, 0, 0) == fill);
+    IgnFrame *frame = malloc(sizeof *frame);
+    CHECK(frame != NULL);
+    memset(frame->color, 0xa5, 22);
+    memset(frame->inv_z, 0xa5, 22 * sizeof frame->inv_z[0]);
+    ign_frame_init(frame, 7, 3);
+    ign_frame_clear(frame);
+    for (int i = 0; i < 21; i++) CHECK(frame->color[i] == 0 && frame->inv_z[i] == 0);
+    CHECK(frame->color[21] == 0xa5 && *(unsigned char *)&frame->inv_z[21] == 0xa5);
+    free(frame);
+    char integer[33];
+    CHECK(ign_u32toa(UINT32_MAX, integer, 2) == integer && strlen(integer) == 32);
+    CHECK(ign_u32toa(UINT32_MAX, integer, 36) == integer && !strcmp(integer, "1z141z3"));
+    CHECK(ign_i32toa(INT32_MIN, integer, 10) == integer && !strcmp(integer, "-2147483648"));
+    CHECK(ign_i32toa(-1, integer, 16) == integer && !strcmp(integer, "ffffffff"));
+    for (unsigned base = 0; base <= 37; base++) {
+        if (base >= 2 && base <= 36) continue;
+        memset(integer, 0x5a, sizeof integer);
+        errno = 0;
+        CHECK(ign_i32toa(-1, integer, base) == NULL && errno == EINVAL);
+        for (size_t i = 0; i < sizeof integer; i++) CHECK(integer[i] == 0x5a);
+    }
     uint32_t state = 0;
     ign_random_seed(&state, 1);
     const unsigned sequence[] = {16838, 5758, 10113, 17515, 31051};
@@ -102,7 +134,41 @@ static int oracle_runner(void) {
     while (fgets(line, sizeof line, stdin)) {
         char op, kind;
         if (sscanf(line, " %c", &op) != 1) return 2;
-        if (op == 'R') {
+        if (op == 'B') {
+            unsigned offset, count;
+            uint32_t pattern;
+            _Alignas(32) unsigned char buffer[2112];
+            if (sscanf(line, " B %c %u %u %" SCNu32, &kind, &offset, &count, &pattern) != 4 ||
+                offset > 31 || count > 512 || (kind != 'D' && kind != 'P' && kind != 'M')) return 2;
+            memset(buffer, 0xa5, sizeof buffer);
+            unsigned char *dest = buffer + 32 + offset, *end;
+            size_t length = kind == 'D' ? (size_t)count * 4 : count;
+            if (kind == 'D') end = ign_fill_dwords(dest, pattern, count);
+            else if (kind == 'P') end = ign_fill_pattern(dest, pattern, count);
+            else end = memset(dest, (int)(pattern & 255), count);
+            for (size_t i = 0; i < 32 + offset; i++) if (buffer[i] != 0xa5) return 2;
+            for (size_t i = 32 + offset + length; i < sizeof buffer; i++)
+                if (buffer[i] != 0xa5) return 2;
+            printf("%td ", end - dest);
+            for (size_t i = 0; i < length; i++) printf("%02x", dest[i]);
+            puts(length ? "" : "-");
+        } else if (op == 'I') {
+            uint32_t value;
+            unsigned base;
+            _Alignas(32) unsigned char buffer[96];
+            if (sscanf(line, " I %c %" SCNu32 " %u", &kind, &value, &base) != 3 ||
+                (kind != 'U' && kind != 'S') || base < 2 || base > 36) return 2;
+            memset(buffer, 0xa5, sizeof buffer);
+            char *dest = (char *)buffer + 32, *end;
+            int32_t signed_value;
+            memcpy(&signed_value, &value, sizeof value);
+            end = kind == 'U' ? ign_u32toa(value, dest, base) : ign_i32toa(signed_value, dest, base);
+            if (end != dest) return 2;
+            for (size_t i = 0; i < 32; i++) if (buffer[i] != 0xa5) return 2;
+            for (size_t i = 32 + strlen(dest) + 1; i < sizeof buffer; i++)
+                if (buffer[i] != 0xa5) return 2;
+            puts(dest);
+        } else if (op == 'R') {
             uint32_t seed;
             unsigned count;
             if (sscanf(line, " R %" SCNu32 " %u %c", &seed, &count, &kind) != 3 ||

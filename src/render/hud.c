@@ -553,11 +553,11 @@ void ign_hud_draw(IgnHud *hud, IgnFrame *fb, const IgnHudState *st) {
         /* 0x4a805: place; elimination races show place / cars left while racing. */
         if (st->mode != IGN_MODE_ELIMINATION) {
             draw_sprite(hud, fb, &vp, &hud->panel_pos, x0 + p[P_POS_X], y1 + p[P_POS_Y]);
-            snprintf(text, sizeof text, "%d", car->out ? car->finish_position : car->position);
+            ign_i32toa(car->out ? car->finish_position : car->position, text, 10);
         } else if (!car->out) {
             snprintf(text, sizeof text, "%d/%d", car->position, st->remaining);
         } else {
-            snprintf(text, sizeof text, "%d", car->position);
+            ign_i32toa(car->position, text, 10);
         }
         draw_text(hud, fb, &vp, &hud->pos_font, text, x0 + t[4], y1 + t[5]);
     }

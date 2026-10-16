@@ -4,6 +4,32 @@
 #include <stdlib.h>
 #include <string.h>
 
+void ign_track_road_boundary(const IgnObject *object, IgnRoadBoundary *boundary) {
+    memset(boundary, 0, sizeof *boundary);
+    for (int f = 0; f < object->nf && boundary->nfaces < 50; f++) {
+        unsigned type = object->faces[f].flags >> 16;
+        unsigned digit = type % 10;
+        if (type < 40 && digit != 5 && digit != 6 && digit != 7)
+            boundary->faces[boundary->nfaces++] = f;
+    }
+    uint32_t sum_x = 0, sum_z = 0;
+    for (int v = 0; v < object->nv && boundary->nvertices < 50; v++) {
+        int uses = 0;
+        for (int f = 0; f < boundary->nfaces; f++) {
+            const IgnFace *face = &object->faces[boundary->faces[f]];
+            for (int k = 0; k < 3; k++) uses += face->v[k] == v;
+        }
+        if (uses != 1 && uses != 2) continue;
+        boundary->vertices[boundary->nvertices++] = v;
+        sum_x += (uint32_t)object->verts[v * 3] + (uint32_t)object->pos[0] + IGN_SRF_ORIGIN;
+        sum_z += (uint32_t)object->verts[v * 3 + 2] + (uint32_t)object->pos[2] + IGN_SRF_ORIGIN;
+    }
+    if (boundary->nvertices) {
+        boundary->center[0] = (int32_t)sum_x / boundary->nvertices;
+        boundary->center[1] = (int32_t)sum_z / boundary->nvertices;
+    }
+}
+
 static void face_sum(const IgnObject *o, const IgnFace *f, uint32_t s[3]) {
     for (int k = 0; k < 3; k++)
         for (int c = 0; c < 3; c++)

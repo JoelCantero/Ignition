@@ -19,7 +19,7 @@ class DashboardTests(unittest.TestCase):
         game = [row for row in data["functions"] if row["status"] != "library"]
         self.assertEqual(data["metrics"]["gameFunctions"], len(game))
         self.assertEqual(len(data["functions"]), 1112)
-        self.assertEqual(data["metrics"]["instructions"], 109739)
+        self.assertEqual(data["metrics"]["instructions"], 109799)
         self.assertEqual(data["metrics"]["mapped"], len(game))
         self.assertEqual(data["metrics"]["mappedAll"], len(data["functions"]))
         self.assertEqual({phase["number"] for phase in data["phases"]}, set(range(10)))

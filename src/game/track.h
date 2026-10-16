@@ -9,6 +9,15 @@
 #define IGN_AI_ROUTE_RECORDS 2
 
 typedef struct {
+    int faces[50], nfaces;
+    int vertices[50], nvertices;
+    int32_t center[2]; /* engine x/z; zero when no boundary vertices survive */
+} IgnRoadBoundary;
+
+/* sub_0001dcfc: first 50 road faces, first 50 vertices used once/twice, wrapping i32 mean. */
+void ign_track_road_boundary(const IgnObject *object, IgnRoadBoundary *boundary);
+
+typedef struct {
     int32_t point[6]; /* load_tri +0x02..+0x16: left/right xyz; y includes twice the recentered PLC y */
     int object; /* section object: PLC index, not an engine-pool index */
     int plc;    /* same PLC identity retained for asset validation */

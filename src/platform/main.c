@@ -24,6 +24,7 @@
 #include "audio.h"
 #include "input.h"
 #include "music.h"
+#include "runtime.h"
 #include "sound.h"
 
 #define DEFAULT_DATA_DIR "/Users/Shared/Epic Games/Ignition/ignition"
@@ -166,12 +167,13 @@ static void grid_pose(const IgnLevel *lv, const IgnTrack *t, int slot, int ncars
 }
 
 /* sub_00022d08: computer cars in grid slots 1..want with the models of 0xc5520 for the difficulty. */
-static void spawn_rivals(const IgnLevel *lv, const IgnTrack *t, const IgnCar *player, int want) {
+static void spawn_rivals(const IgnLevel *lv, const IgnTrack *t, const IgnCar *player, int want,
+                         const IgnRaceConfig *config) {
     int spare = 5;
     for (int k = 0; nrivals < want && nrivals < MAX_RIVALS && k < 10; k++) {
         int id = ign_computer_model(k, &player->id, 1, &spare);
         float x, z, h;
-        grid_pose(lv, t, nrivals + 1, want + 1, &x, &z, &h);
+        grid_pose(lv, t, config ? config->grid[nrivals + 1] : nrivals + 1, want + 1, &x, &z, &h);
         if (ign_car_init(&rivals[nrivals], lv, id, x, z, h)) continue;
         ign_car_set_computer(&rivals[nrivals]);
         ign_ai_init(&rival_ai[nrivals], nrivals);
@@ -236,7 +238,6 @@ static int session_setup(const char *data_dir, const char *level, int car_model,
         return -1;
     }
     session_on = 1;
-    race.best_lap = ign_session_best_lap(&session);
     if (session.time_trial) {
         static const char *const STATE[] = {"no ghost", "ghost", "ghost of another track (not saved)"};
         printf("time trial: %s, record %.2f s, saving in %s\n", STATE[session.ghost_state], session.record_cs / 100.0,
@@ -379,8 +380,10 @@ static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, Ig
     }
     /* Advanced last so the player (ticked before this function) and the rivals see the same clock. */
     ign_race_clock(&race);
+    if (!started && ign_race_started(&race))
+        ign_race_reset_times(&race, all, nrivals + 1, (int32_t)(uint32_t)race.origin_ms,
+                             session_on ? ign_session_best_lap(&session) : race.best_lap);
     for (int i = 0; i <= nrivals; i++) {
-        if (!started && ign_race_started(&race)) ign_race_reset_car_clock(all[i]);
         ign_race_car_clock(all[i], race.mode, race.elapsed);
     }
     ign_set_race_started(ign_race_started(&race));
@@ -490,7 +493,28 @@ static SDL_Window *shared_win;
 static SDL_Renderer *shared_ren;
 static bool quit_requested;
 
-static int run_game(int argc, char **argv) {
+static int show_loading(IgnRaceLoading *loading, const char *data_dir, const char *level, int percent) {
+    if (!shared_win) return 0;
+    if (!loading->frame && ign_race_loading_init(loading, data_dir, level, ign_cfg_get(CFG_LANGUAGE))) return -1;
+    static IgnFrame loading_frame;
+    static uint32_t rgb[640 * 480];
+    ign_frame_init(&loading_frame, 640, 480);
+    int rc = ign_race_loading_draw(loading, &loading_frame, percent);
+    SDL_Texture *texture = SDL_CreateTexture(shared_ren, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING,
+                                              640, 480);
+    if (!texture) rc = -1;
+    if (!rc) {
+        to_rgb(&loading_frame, &loading->background.palette, rgb);
+        if (!SDL_SetRenderLogicalPresentation(shared_ren, 640, 480, SDL_LOGICAL_PRESENTATION_LETTERBOX) ||
+            !SDL_UpdateTexture(texture, NULL, rgb, 640 * 4) || !SDL_RenderClear(shared_ren) ||
+            !SDL_RenderTexture(shared_ren, texture, NULL, NULL) || !SDL_RenderPresent(shared_ren)) rc = -1;
+    }
+    if (rc) fprintf(stderr, "cannot present loading screen: %s\n", SDL_GetError());
+    SDL_DestroyTexture(texture);
+    return rc;
+}
+
+static int run_game(int argc, char **argv, const IgnRaceConfig *config) {
     race_action = IGN_FLOW_STAY;
     nrivals = 0;
     ai_trace = 0;
@@ -634,6 +658,11 @@ static int run_game(int argc, char **argv) {
             level = argv[i];
     }
 
+    if (config) {
+        race_mode = config->mode;
+        music_volume = config->music_volume / 10;
+        music_mode = config->music_track;
+    }
     if (race_mode == IGN_MODE_TIME_TRIAL && ghost_in) {
         fprintf(stderr, "--time-trial loads its own ghost; use --ghost without it\n");
         return 1;
@@ -643,17 +672,29 @@ static int run_game(int argc, char **argv) {
         return 1;
     }
     interactive_race = !shot;
+    IgnRaceLoading loading = {0};
+    if (!shot && show_loading(&loading, data_dir, level, 0)) {
+        ign_race_loading_destroy(&loading);
+        return 1;
+    }
     IgnLevel lv;
     if (ign_load_level(data_dir, level, &lv)) {
         fprintf(stderr, "cannot load level %s from %s\n", level, data_dir);
+        ign_race_loading_destroy(&loading);
         return 1;
     }
     ign_render_set_level_dir(data_dir, level);
+    if (!shot && show_loading(&loading, data_dir, level, 33)) {
+        ign_race_loading_destroy(&loading);
+        ign_free_level(&lv);
+        return 1;
+    }
 
     /* Start on the class-0 object facing the class-1 object, as sub_00028f08 walks the track. */
     IgnTrack track;
     if (ign_build_track(&lv.track, &track)) {
         fprintf(stderr, "cannot build track sections\n");
+        ign_race_loading_destroy(&loading);
         return 1;
     }
     ign_track_gates(&track, &lv);
@@ -664,13 +705,19 @@ static int run_game(int argc, char **argv) {
     int want = race_mode == IGN_MODE_TIME_TRIAL ? 0 : want_rivals >= 0 ? want_rivals : (shot ? 0 : 3);
     if (want > MAX_RIVALS) want = MAX_RIVALS;
     float sx, sz, sh;
-    grid_pose(&lv, &track, 0, want + 1, &sx, &sz, &sh);
+    grid_pose(&lv, &track, config ? config->grid[0] : 0, want + 1, &sx, &sz, &sh);
     player_car = &car;
     if (ign_car_init(&car, &lv, car_id >= 0 ? car_id : ign_first_car_id(&lv), sx, sz, sh)) {
         fprintf(stderr, "no car models in CARS.PLC\n");
+        ign_race_loading_destroy(&loading);
         return 1;
     }
-    spawn_rivals(&lv, &track, &car, want);
+    spawn_rivals(&lv, &track, &car, want, config);
+    if (!shot && show_loading(&loading, data_dir, level, 66)) {
+        ign_race_loading_destroy(&loading);
+        ign_free_level(&lv);
+        return 1;
+    }
     /* BANARNE typed in the menu (0x160c4 toggles 0x1fb2f0[0]): 3x tall bodies from the start. */
     if (ign_frontend_cheat(0)) {
         car.body_stretch = 3.0f;
@@ -682,10 +729,12 @@ static int run_game(int argc, char **argv) {
     track_id = ign_ghost_track_id(level);
     if (ign_texanim_init(&texanims, &lv.track, ign_texanim_period(track_id)) < 0) {
         fprintf(stderr, "out of memory\n");
+        ign_race_loading_destroy(&loading);
         return 1;
     }
     if (ign_coll_init(&colls, &lv.track) < 0) {
         fprintf(stderr, "Ingen info om kollisions objektet!!\n");
+        ign_race_loading_destroy(&loading);
         return 1;
     }
     ign_weather_init(&weather, level);
@@ -695,22 +744,42 @@ static int run_game(int argc, char **argv) {
     if (ghost_in) {
         if (ign_ghost_load(ghost_in, &ghost)) {
             fprintf(stderr, "cannot read ghost %s\n", ghost_in);
+            ign_race_loading_destroy(&loading);
             return 1;
         }
         if (ghost.track != track_id)
             fprintf(stderr, "ghost track id %d, level %s is %d\n", ghost.track, level, track_id);
         if (ign_car_init(&ghost_car, &lv, ghost.car, sx, sz, sh) &&
-            ign_car_init(&ghost_car, &lv, car.id, sx, sz, sh))
+            ign_car_init(&ghost_car, &lv, car.id, sx, sz, sh)) {
+            ign_race_loading_destroy(&loading);
             return 1;
+        }
         ghost_on = 1;
     }
     hud_track = &track;
-    if (ign_hud_init(&hud, data_dir, level, frame.w, frame.h)) {
+    int hud_rc = shared_win && !shot ?
+        ign_hud_init_view(&hud, data_dir, level, frame.w >= 800 ? 2 : frame.w >= 640 ? 1 : 0, 0, 1) :
+        ign_hud_init(&hud, data_dir, level, frame.w, frame.h);
+    if (hud_rc) {
         fprintf(stderr, "cannot load HUD panel or fonts from %s\n", data_dir);
+        ign_race_loading_destroy(&loading);
         ign_free_level(&lv);
         return 1;
     }
     ign_race_init(&race, race_mode, nrivals + 1);
+    if (config) {
+        IgnRaceConfig active = *config;
+        /* The current time-trial frontend starts a solo field; configure only instantiated cars. */
+        active.ncars = nrivals + 1;
+        ign_race_configure(&race, &active, track.count);
+    }
+    if (!shot && show_loading(&loading, data_dir, level, 100)) {
+        ign_race_loading_destroy(&loading);
+        ign_hud_destroy(&hud);
+        ign_free_level(&lv);
+        return 1;
+    }
+    ign_race_loading_destroy(&loading);
     race.section_count = track.count;
     /* Headless runs keep the user folder untouched unless --time-trial or an explicit IGN_SAVE_DIR. */
     if ((race_mode == IGN_MODE_TIME_TRIAL || !shot || getenv("IGN_SAVE_DIR")) &&
@@ -725,6 +794,10 @@ static int run_game(int argc, char **argv) {
         int language = ign_btz_i32(&session.btz, IGN_BTZ_LANGUAGE);
         if (!getenv("IGN_LANG") && language >= 0 && language < 6) hud.language = language;
     }
+    IgnCar *race_cars[MAX_RIVALS + 1] = {&car};
+    for (int i = 0; i < nrivals; i++) race_cars[i + 1] = &rivals[i];
+    ign_race_reset_times(&race, race_cars, nrivals + 1, 0,
+                         session_on ? ign_session_best_lap(&session) : race.best_lap);
     /* Headless runs start at once unless --countdown; the game window always counts down. */
     if (shot && !countdown) ign_race_skip_countdown(&race);
     ign_set_race_started(ign_race_started(&race));
@@ -1101,6 +1174,7 @@ static int host_cd_tracks(void) {
     fclose(f);
     return IGN_MUSIC_LAST;
 }
+static double race_random01(void) { return ign_random14(ign_random_state()); }
 /* Track 1 is the data track: MSCDEX refuses to play it, so the menu just tries again 2 s later, silently. */
 static void host_cd_play(int track) {
     if (track >= 2) ign_music_play(menu_data_dir, track, 0);
@@ -1213,7 +1287,13 @@ static int run_frontend(const char *data_dir) {
                                          SDL_LOGICAL_PRESENTATION_LETTERBOX);
         memset(g_key_latch, 0, sizeof g_key_latch);
         ign_input_reset(&platform_input);
-        ign_frontend_load();
+        if (ign_frontend_load() != 1) {
+            fprintf(stderr, "cannot load menu resources\n");
+            SDL_DestroyTexture(menu_tex);
+            menu_tex = NULL;
+            rc = 1;
+            break;
+        }
         int result = IGN_FRONTEND_STAY;
         while (result == IGN_FRONTEND_STAY) {
             SDL_Event ev;
@@ -1264,13 +1344,15 @@ static int run_frontend(const char *data_dir) {
         argv[argc] = NULL;
         printf("menu: race on %s, car %s, %s rivals\n", argv[argc - 1], car, rivals);
         do {
-            if (ign_cfg_get(CFG_GAME_MODE) == 0) {
-                static const char *const levels[] = {"CANADA", "USA", "CARIB", "BRAZIL", "AUSTRIA", "ICELAND", "JAPAN"};
-                int next = ign_champ_track(ign_cfg_get(CFG_DIFFICULTY), ign_cfg_get(CFG_TRACK));
-                if (next < 0) { rc = 1; break; }
-                argv[argc - 1] = (char *)levels[next];
+            IgnRaceConfig config;
+            if (ign_race_config_decode(&config, g_cfg, sizeof g_cfg, host_cd_tracks(), race_random01)) {
+                fprintf(stderr, "invalid race settings in %s\n", IGN_BTZ_NAME);
+                rc = 1;
+                break;
             }
-            rc = run_game(argc, argv);
+            static const char *const levels[] = {"CANADA", "USA", "CARIB", "BRAZIL", "AUSTRIA", "ICELAND", "JAPAN"};
+            argv[argc - 1] = (char *)levels[config.track];
+            rc = run_game(argc, argv, &config);
             if (race_action == IGN_FLOW_ADVANCE && session_on) {
                 ign_cfg_set(CFG_TRACK, ign_btz_i32(&session.btz, IGN_BTZ_TRACK));
             }
@@ -1292,7 +1374,7 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--menu")) menu = 1;
     if (!menu) {
         int rc;
-        do rc = run_game(argc, argv); while (!rc && !quit_requested && race_action == IGN_FLOW_RESTART);
+        do rc = run_game(argc, argv, NULL); while (!rc && !quit_requested && race_action == IGN_FLOW_RESTART);
         return rc;
     }
     const char *data_dir = getenv("IGNITION_DATA");

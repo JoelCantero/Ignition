@@ -1,5 +1,8 @@
 #include "game/race.h"
 #include "game/save.h"
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <assert.h>
 #include <limits.h>
 #include <math.h>
@@ -50,6 +53,20 @@ static void unit_tests(void) {
     ign_race_rank(&r, cars, 3);
     assert(r.ghost_position == 2 && c[0].position == 1);
 
+    r.ghost_enabled = 0;
+    for (int mode = 0; mode < 4; mode++) {
+        r.mode = mode;
+        ign_race_rank(&r, cars, 3);
+        int position = c[0].position;
+        c[0].wrecked = 1;
+        c[0].wreck_kind = 3;
+        c[0].blow = 1;
+        ign_race_rank(&r, cars, 3);
+        assert(c[0].position == position && c[0].out == 0 && r.finished == 0);
+        c[0].wrecked = c[0].wreck_kind = 0;
+        c[0].blow = 0;
+    }
+
     for (int i = 0; i < 8; i++) r.points[i] = 10 + i;
     r.best_lap = 15; r.elapsed = 12; r.clock = 99; r.origin_ms = 123;
     ign_race_reset(&r, 0, 3, 0);
@@ -71,10 +88,16 @@ static void unit_tests(void) {
     assert(ign_race_position((const IgnCar *const *)cars, 2, -1) == 0);
 
     IgnBtz b;
-    ign_btz_defaults(&b);
+    ign_btz_default(&b);
     IgnRaceConfig config;
     assert(ign_race_config_decode(&config, b.raw, sizeof b.raw, 8, random01) == 0);
     IgnRaceConfig before = config;
+    config.mode = 3; config.ncars = 3; config.players_minus_one = 1;
+    config.ghost = 1; config.grid[0] = 2;
+    ign_race_configure(&r, &config, 191);
+    assert(r.mode == 3 && r.remaining == 3 && r.elimination_limit == 2);
+    assert(r.section_count == 191 && r.grid[0] == 2 && r.players_minus_one == 1 && r.ghost_enabled == 1);
+    config = before;
     assert(ign_race_config_decode(&config, b.raw, sizeof b.raw - 1, 8, random01) == -1);
     assert(!memcmp(&config, &before, sizeof config));
     ign_btz_set_i32(&b, IGN_BTZ_NCARS, 9);

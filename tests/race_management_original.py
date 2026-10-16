@@ -43,7 +43,7 @@ class RaceOriginal(Original):
 
     def code(self, uc, address, size, _):
         if self.active == "C":
-            if address == 0x22947:
+            if address == 0x22942:
                 self.substitutions["BTZ filesystem read"] += 1
                 uc.reg_write(self.reg.UC_X86_REG_EIP, 0x229B9)
                 return
@@ -72,6 +72,7 @@ class RaceOriginal(Original):
             if address == 0x2DEEC:
                 self.substitutions["elimination log/effect geometry"] += 1
                 uc.reg_write(self.reg.UC_X86_REG_EBX, 0)
+                uc.reg_write(self.reg.UC_X86_REG_EAX, CAR)
                 uc.reg_write(self.reg.UC_X86_REG_EIP, 0x2DF1D)
                 return
             if address == 0x2DF28:
@@ -268,7 +269,8 @@ def fixtures():
                          rng.choice([-2147483648, -100, -30, 0, 3, 10, 30, 100]),
                          rng.randrange(4), rng.randrange(3), rng.randrange(4), i + 1,
                          rng.choice([-2147483648, -30, 0, 0, 10, 2147483647]),
-                         rng.choice([0, 12, 12, 30, math.nan]), 0, 0, n - i - 1])
+                         rng.choice([0, 12, 12, 30, math.nan]),
+                         rng.choice([0, 1, math.nan]), rng.randrange(4), n - i - 1])
         cases.append(("R", header, cars))
     # Elimination covers one/many/no trailers, existing outs, human identities and +/-0.
     for index in range(800):

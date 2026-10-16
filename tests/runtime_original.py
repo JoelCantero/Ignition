@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute unchanged Watcom random, string and math routines against native contracts."""
+"""Execute unchanged Watcom runtime routines against their native or reconstructed contracts."""
 import argparse
 from collections import Counter
 import hashlib
@@ -19,7 +19,8 @@ SHA256 = "179c654ba65281f08bbcda2b5943ab9f35c309ec718600f81104644d22db948c"
 BUFFER, STACK, ESP, RETURN = 0x400000, 0x500000, 0x508000, 0x600000
 SEED = 0xD7D94
 ENTRIES = (0x51714, 0x6476E, 0x64774, 0x64798, 0x647B2, 0x647CD, 0x647DA,
-           0x647EF, 0x64804, 0x64810, 0x65782, 0x6579C, 0x70078, 0x770D0, 0x77171)
+           0x647EF, 0x64804, 0x64810, 0x65330, 0x65367, 0x65782, 0x6579C,
+           0x70078, 0x700D0, 0x7011A, 0x770D0, 0x77171, 0x7D320)
 
 
 class Original:
@@ -42,6 +43,8 @@ class Original:
             self.uc.hook_add(unicorn.UC_HOOK_MEM_WRITE, self.write,
                              begin=obj["base"], end=obj["base"] + size - 1)
         self.uc.mem_map(BUFFER, 0x2000)
+        self.buffer_writes = (0, 0)
+        self.uc.hook_add(unicorn.UC_HOOK_MEM_WRITE, self.buffer_write, begin=BUFFER, end=BUFFER + 4095)
         self.uc.mem_map(STACK, 0x10000)
         self.uc.mem_map(RETURN, 0x1000)
         self.uc.mem_map(0x700000, 0x1000)
@@ -62,7 +65,8 @@ class Original:
 
     def code(self, uc, address, size, _):
         allowed = ((0x51714, 0x5175D), (0x6476E, 0x64820), (0x65782, 0x657AC),
-                   (0x70078, 0x700AB), (0x770D0, 0x7718A), (0x7D292, 0x7D2C7))
+                   (0x65330, 0x653D3), (0x70078, 0x700AB), (0x700D0, 0x70135),
+                   (0x770D0, 0x7718A), (0x7D292, 0x7D2C7), (0x7D320, 0x7D338))
         if not any(start <= address < end for start, end in allowed):
             raise ValueError(f"Unexpected original callee: 0x{address:x}")
         if address in ENTRIES:
@@ -72,14 +76,19 @@ class Original:
         if not (SEED <= address and address + size <= SEED + 4):
             raise ValueError(f"Unexpected original global write: 0x{address:x}")
 
+    def buffer_write(self, uc, access, address, size, value, _):
+        start, end = self.buffer_writes
+        if not (start <= address and address + size <= end):
+            raise ValueError(f"Original wrote outside the output extent: 0x{address:x}, size {size}")
+
     def state(self):
         return struct.unpack("<I", self.uc.mem_read(SEED, 4))[0]
 
-    def call(self, address, eax=0, edx=0, stack=b"", floating=False):
+    def call(self, address, eax=0, edx=0, stack=b"", floating=False, ebx=0, ecx=0):
         r, uc = self.reg, self.uc
         landing = RETURN + 0x100 if floating else RETURN
         uc.mem_write(ESP, struct.pack("<I", landing) + stack)
-        for name, value in (("EAX", eax), ("EDX", edx), ("EBX", 0), ("ECX", 0),
+        for name, value in (("EAX", eax), ("EDX", edx), ("EBX", ebx), ("ECX", ecx),
                             ("ESP", ESP), ("EBP", 0), ("ESI", 0), ("EDI", 0)):
             uc.reg_write(getattr(r, f"UC_X86_REG_{name}"), value)
         uc.reg_write(r.UC_X86_REG_EFLAGS, 2)
@@ -106,6 +115,8 @@ class Original:
         self.uc.mem_write(BUFFER, b"\xa5" * 1024)
         self.uc.mem_write(BUFFER + 16, a + b"\0")
         self.uc.mem_write(BUFFER + 2048, b + b"\0" + b"\xa5" * 16)
+        self.buffer_writes = ((BUFFER + 16, BUFFER + 16 + len(a) + len(b) + 1)
+                              if kind == "A" else (0, 0))
         entry = {"L": 0x77171, "C": 0x770D0, "A": 0x70078}[kind]
         value = self.call(entry, eax=BUFFER + 16, edx=BUFFER + 2048)
         if kind == "A":
@@ -129,6 +140,32 @@ class Original:
             value = struct.unpack("<i", struct.pack("<I", value))[0]
             value = (value > 0) - (value < 0)
         return str(value)
+
+    def fill(self, kind, offset, count, pattern):
+        dest = BUFFER + 32 + offset
+        length = count * 4 if kind == "D" else count
+        self.uc.mem_write(BUFFER, b"\xa5" * 4096)
+        self.buffer_writes = (dest, dest + length)
+        entry = {"D": 0x65367, "P": 0x65330, "M": 0x7D320}[kind]
+        value = self.call(entry, eax=dest, edx=pattern, ecx=count, ebx=count)
+        buffer = bytes(self.uc.mem_read(BUFFER, 4096))
+        start, end = dest - BUFFER, dest - BUFFER + length
+        if buffer[:start] != b"\xa5" * start or buffer[end:] != b"\xa5" * (4096 - end):
+            raise ValueError("Original fill damaged guard bytes")
+        return f"{value - dest} {buffer[start:end].hex() or '-'}"
+
+    def integer(self, kind, value, base):
+        dest = BUFFER + 32
+        self.uc.mem_write(BUFFER, b"\xa5" * 128)
+        self.buffer_writes = (dest, dest + 33)
+        result = self.call(0x700D0 if kind == "U" else 0x7011A, eax=value, edx=dest, ebx=base)
+        if result != dest:
+            raise ValueError("Integer conversion did not return its original destination")
+        buffer = bytes(self.uc.mem_read(BUFFER, 128))
+        end = buffer.index(0, 32, 65) + 1
+        if buffer[:32] != b"\xa5" * 32 or buffer[end:] != b"\xa5" * (128 - end):
+            raise ValueError("Original integer conversion damaged guard bytes")
+        return buffer[32:end - 1].decode("ascii")
 
 
 def main():
@@ -172,6 +209,24 @@ def main():
                 value = original.call(entry, stack=stack, floating=True)
                 expected.append(("math", value, kind, a))
                 counts["math"] += 1
+    lengths = list(range(34)) + [63, 64, 65, 127, 128, 129, 255, 256, 511, 512]
+    for kind in ("D", "P", "M"):
+        for offset in range(32):
+            for count in lengths:
+                for pattern in (0, 0xFFFFFFFF, 0x12345678, 0x8000FF01):
+                    commands.append(f"B {kind} {offset} {count} {pattern}")
+                    expected.append(("fill", original.fill(kind, offset, count, pattern)))
+                    counts["fills"] += 1
+    values = {0, 1, 9, 10, 35, 36, 37, 255, 256, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF}
+    for bit in range(32):
+        values.update(((1 << bit) - 1, 1 << bit, (1 << bit) + 1))
+    values.update(rng.getrandbits(32) for _ in range(32))
+    for kind in ("U", "S"):
+        for value in sorted(values):
+            for base in range(2, 37):
+                commands.append(f"I {kind} {value} {base}")
+                expected.append(("integer", original.integer(kind, value, base)))
+                counts["integer_conversions"] += 1
     result = subprocess.run([str(args.runner.resolve()), "--oracle"], input="\n".join(commands) + "\n",
                             text=True, capture_output=True, check=True)
     lines = result.stdout.splitlines()
@@ -202,7 +257,8 @@ def main():
     if missing:
         raise ValueError(f"Unexecuted original entries: {sorted(missing)}")
     sources = ["src/platform/runtime.c", "src/platform/runtime.h", "tests/runtime.c",
-               "tests/runtime_original.py", "src/game/fx.c", "src/game/fx.h"]
+               "tests/runtime_original.py", "src/game/fx.c", "src/game/fx.h",
+               "src/render/raster.c", "src/render/hud.c"]
     hashes = {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in sources}
     report = {"cases": dict(counts), "total": len(expected), "original_sha256": SHA256,
               "runner_sha256": hashlib.sha256(args.runner.read_bytes()).hexdigest(),
@@ -213,6 +269,8 @@ def main():
               "limitations": ["Native math tolerance 4e-15 for finite in-domain fixtures only.",
                               "fmod zero follows C11 dividend sign; original emulated FPREM can return +0.",
                               "No DOS I/O, software FPU, runtime startup or complete game execution.",
+                              "Integer conversion bases 2..36 only; invalid bases rejected natively with EINVAL.",
+                              "Pattern fills preserve bytes and EAX cursor, not speculative reads or register ABI.",
                               "RNG kernel exactness does not imply identical shared-stream scheduling."]}
     args.report.write_text(json.dumps(report, indent=2) + "\n")
     print(f"runtime original: {len(expected)} cases OK; max math error {max_error:g}")

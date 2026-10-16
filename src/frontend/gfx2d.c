@@ -91,28 +91,21 @@ void ign_blend_rect(const uint8_t *src, int x0, int y0, int x1, int y1, uint8_t 
 
 #define MENUBKG_SIZE 0x9358
 
-typedef struct Box {
-    int x0, x1, row, yoff, style;
-    struct Box *next;
-} Box;
+typedef IgnMenuBox Box;
 
 static uint8_t *g_bkg;       /* [0x20876c] */
-static uint8_t g_remap[256]; /* 0x208660 */
 static Box *g_boxes;         /* 0xc57fc */
 static Box **g_box_tail = &g_boxes;
 static struct {
     uint8_t *buf;
+    const uint8_t *bkg;
     int pitch, w, h;
+    int linear;
     int style, upper_style, lower_style; /* 0x208760, 0x208774, 0x208770 */
 } g_bx;
 
 int ign_menubox_init(const char *path) {
-    /* Highlight remap 0x541c0: identity except c1->f5 c3->bd c4->be d5->b4 d6->bb fd->bc c0->bd c2->f4. */
-    static const uint8_t pairs[] = {0xc1, 0xf5, 0xc3, 0xbd, 0xc4, 0xbe, 0xd5, 0xb4,
-                                    0xd6, 0xbb, 0xfd, 0xbc, 0xc0, 0xbd, 0xc2, 0xf4};
     ign_menubox_clear();
-    for (int i = 0; i < 256; i++) g_remap[i] = (uint8_t)i;
-    for (size_t i = 0; i < sizeof pairs; i += 2) g_remap[pairs[i]] = pairs[i + 1];
     size_t size;
     free(g_bkg);
     g_bkg = ign_read_file(path, &size);
@@ -151,33 +144,52 @@ void ign_menubox_add(int x, int row, int w, int yoff, int style) {
 }
 
 static void put(int x, int y, uint8_t c) {
-    if (x >= 0 && x < g_bx.w && y >= 0 && y < g_bx.h) g_bx.buf[(size_t)y * g_bx.pitch + x] = c;
+    if (g_bx.linear) {
+        /* DOS tiles address a linear buffer: a right-edge overhang lands on the next row. */
+        ptrdiff_t at = (ptrdiff_t)y * g_bx.pitch + x;
+        if (at >= 0 && at < (ptrdiff_t)g_bx.pitch * g_bx.h) g_bx.buf[at] = c;
+    } else if (x >= 0 && x < g_bx.w && y >= 0 && y < g_bx.h)
+        g_bx.buf[(size_t)y * g_bx.pitch + x] = c;
+}
+
+/* 0x541c0: the eight non-identity entries of the highlight remap. */
+static uint8_t highlight(uint8_t c) {
+    switch (c) {
+    case 0xc1: return 0xf5;
+    case 0xc3: case 0xc0: return 0xbd;
+    case 0xc4: return 0xbe;
+    case 0xd5: return 0xb4;
+    case 0xd6: return 0xbb;
+    case 0xfd: return 0xbc;
+    case 0xc2: return 0xf4;
+    default: return c;
+    }
 }
 
 /* sub_00054838: one fill scanline, remapped in the highlight style. */
 static void hline(int x, int y, int len, uint8_t c) {
-    if (g_bx.style == 1) c = g_remap[c];
+    if (g_bx.style == 1) c = highlight(c);
     for (int i = 0; i < len; i++) put(x + i, y, c);
 }
 
 /* sub_00054864: a 19-row tile stored bottom-up; rows 0-9 take the upper box's style, 10-18 the own style; 0 is
  * transparent. */
 static void tile(int off, int w, int x, int y) {
-    const uint8_t *src = g_bkg + off + 18 * w;
+    const uint8_t *src = g_bx.bkg + off + 18 * w;
     for (int r = 0; r < 19; r++, src -= w) {
         int remap = (r < 10 ? g_bx.upper_style : g_bx.lower_style) == 1;
         for (int i = 0; i < w; i++)
-            if (src[i]) put(x + i, y + r, remap ? g_remap[src[i]] : src[i]);
+            if (src[i]) put(x + i, y + r, remap ? highlight(src[i]) : src[i]);
     }
 }
 
 /* sub_00054330 */
-static void draw_box(const Box *b) {
+static void draw_box(const Box *b, const Box *boxes) {
     int left_up = 0, right_up = 0, left_down = 0, right_down = 0;
     g_bx.style = b->style;
-    for (int i = 0; i < 24; i++) hline(b->x0 + 13, b->row * 19 + i + b->yoff + 8, b->x1 - b->x0, g_bkg[0x9340 + i]);
+    for (int i = 0; i < 24; i++) hline(b->x0 + 13, b->row * 19 + i + b->yoff + 8, b->x1 - b->x0, g_bx.bkg[0x9340 + i]);
     int top = b->row * 19 + b->yoff;
-    for (const Box *o = g_boxes; o; o = o->next) {
+    for (const Box *o = boxes; o; o = o->next) {
         if (o == b) continue;
         int dl = o->x0 - b->x0, dr = o->x1 - b->x1;
         if (b->row - 1 == o->row) {
@@ -216,11 +228,22 @@ static void draw_box(const Box *b) {
     if (!right_down) tile(0x390, 16, b->x1 + 13, top + 19);
 }
 
-void ign_menubox_draw(uint8_t *buf, int pitch, int buf_w, int buf_h) {
-    if (!g_bkg) return;
+static void draw_list(uint8_t *buf, int pitch, int buf_w, int buf_h, const uint8_t *tiles,
+                      const IgnMenuBox *boxes, int linear) {
     g_bx.buf = buf;
+    g_bx.bkg = tiles;
     g_bx.pitch = pitch;
     g_bx.w = buf_w;
     g_bx.h = buf_h;
-    for (const Box *b = g_boxes; b; b = b->next) draw_box(b);
+    g_bx.linear = linear;
+    for (const Box *b = boxes; b; b = b->next) draw_box(b, boxes);
+}
+
+void ign_menubox_draw(uint8_t *buf, int pitch, int buf_w, int buf_h) {
+    if (g_bkg) draw_list(buf, pitch, buf_w, buf_h, g_bkg, g_boxes, 0);
+}
+
+void ign_menubox_draw_list(uint8_t *buf, int pitch, int buf_w, int buf_h, const uint8_t *tiles,
+                           const IgnMenuBox *boxes) {
+    draw_list(buf, pitch, buf_w, buf_h, tiles, boxes, 1);
 }
