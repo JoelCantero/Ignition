@@ -261,16 +261,6 @@ static void special_tick(IgnCar *c, const IgnLevel *lv, const IgnTrack *t) {
     ign_car_flat_effects(c, &fx, c->x, c->z);
 }
 
-/* human_input 0x2c8f5: a flattened car steers the other way. */
-static IgnInput human_steer(const IgnCar *c, IgnInput in) {
-    if (c->flat > 0) {
-        bool left = in.left;
-        in.left = in.right, in.right = left;
-        in.a_steer = -in.a_steer;
-    }
-    return in;
-}
-
 static int tick_rivals(const IgnLevel *lv, const IgnTrack *t, IgnCar *player, IgnAi *player_ai, int autopilot) {
     ghost_tick++;
     int started = ign_race_started(&race);
@@ -785,9 +775,8 @@ static int run_game(int argc, char **argv) {
         for (int step = 0; sim_ticks >= 0 ? step < sim_ticks : t < sim_seconds; step++, t += SIM_DT) {
             special_tick(&car, &lv, &track);
             if (!car.wrecked) {
-                IgnInput steered = human_steer(&car, in);
-                if (!autopilot && car.progress_lock != 1) player_ai.input = steered;
-                ign_car_tick(&car, &lv, autopilot || car.progress_lock == 1 ? NULL : &steered);
+                if (!autopilot && car.progress_lock != 1) player_ai.input = in;
+                ign_car_tick(&car, &lv, autopilot || car.progress_lock == 1 ? NULL : &in);
                 if (!autopilot && car.progress_lock != 1) player_ai.turbo_request = car.turbo_key;
             }
             car_hits += tick_rivals(&lv, &track, &car, &player_ai, autopilot);
@@ -952,7 +941,7 @@ static int run_game(int argc, char **argv) {
                 .manual_gear = manual_gear,
             };
             for (accumulator += dt; accumulator >= SIM_DT; accumulator -= SIM_DT) {
-                IgnInput tick_input = human_steer(&car, in);
+                IgnInput tick_input = in;
                 tick_input.gear_shift = pending_gear_shift;
                 pending_gear_shift = 0;
                 special_tick(&car, &lv, &track);

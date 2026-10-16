@@ -880,6 +880,13 @@ void ign_car_auto_gearbox(IgnCar *car) {
     ign_car_gearbox(car, curves);
 }
 
+int ign_car_input_steer(const IgnCar *car, const IgnInput *in) {
+    if (in->analog) return in->a_steer;
+    /* human_input 0x2c71c/0x2c809: right overwrites left; 0x2c8f5 inverts when flattened. */
+    int steer = in->right ? 100 : in->left ? -100 : 0;
+    return car->flat > 0 ? -steer : steer;
+}
+
 void ign_car_apply_input(IgnCar *car, const IgnInput *in, int turbo_request) {
     int accel = in->analog ? in->a_accel : in->accel ? 100 : 0;
     int brake = in->analog ? in->a_brake : in->brake ? 100 : 0;
@@ -889,8 +896,7 @@ void ign_car_apply_input(IgnCar *car, const IgnInput *in, int turbo_request) {
     ign_car_update_revs(car, throttle_in, torque_index);
     ign_car_turbo(car);
     ign_car_input_direction(car, accel, brake, automatic);
-    ign_car_steer(car, in->analog ? in->a_steer : (in->left ? 100 : 0) - (in->right ? 100 : 0),
-                  car->grip_avg, in->analog);
+    ign_car_steer(car, ign_car_input_steer(car, in), car->grip_avg, in->analog);
     ign_car_turbo_request(car, turbo_request);
 }
 

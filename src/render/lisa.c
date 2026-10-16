@@ -2,6 +2,7 @@
  * (sub_00056410) and the face handlers that turn each visible face into a primitive in one of 6000 depth buckets.
  * Engine coordinates: x/z = world + 25600, y up; angles in tenths of a degree. */
 #include "lisa.h"
+#include "../game/palette.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -24,9 +25,7 @@ static uint8_t keyed_table[65536];
 
 int lisa_scene_init(LisaScene *s, int width, int depth, int max_objects) {
     memset(s, 0, sizeof *s);
-    if (!keyed_table[1])
-        for (int a = 0; a < 256; a++)
-            for (int b = 0; b < 256; b++) keyed_table[a * 256 + b] = (uint8_t)(a ? a : b);
+    if (!keyed_table[1]) ign_palette_table_overlay(keyed_table);
     s->keyed = keyed_table;
     s->gw = div_pow2(width + 0xff, CELL_SHIFT); /* engine_alloc_objects (0x569ec) */
     s->gh = div_pow2(depth + 0xff, CELL_SHIFT);
@@ -650,7 +649,36 @@ static void faces(Ctx *c) {
     }
 }
 
-void lisa_build(LisaScene *scene, const LisaView *view, LisaFrame *f) {
+static double camera_angle(double ratio) {
+    return atan(ratio) * 180.0 * 0.31830988618379 * 10.0;
+}
+
+void lisa_camera_angles(LisaView *view) {
+    double dx = view->target[0] - view->x, dz = view->target[2] - view->z;
+    int32_t ix = chop(dx), iz = chop(dz);
+    int32_t neg_y = (int32_t)(0u - (uint32_t)view->target[1]);
+    int32_t iy = chop(neg_y + view->y);
+    float horizontal = (float)sqrt(dx * dx + dz * dz);
+    if (iy > 0 && horizontal > 0) view->pitch = trunc(camera_angle(iy / (double)horizontal));
+    else if (iy < 0 && horizontal > 0)
+        view->pitch = trunc(camera_angle(horizontal / -(double)iy) + 2700.0);
+    else if (iy < 0) view->pitch = 2700;
+    else if (iy > 0) view->pitch = 900;
+    else view->pitch = 0;
+
+    if (ix > 0 && iz > 0) view->yaw = trunc(camera_angle(ix / (double)iz));
+    else if (ix > 0 && iz < 0) view->yaw = trunc(camera_angle(-(double)iz / ix) + 900.0);
+    else if (ix < 0 && iz < 0) view->yaw = trunc(camera_angle(ix / (double)iz) + 1800.0);
+    else if (ix < 0 && iz > 0) view->yaw = trunc(camera_angle(iz / -(double)ix) + 2700.0);
+    else if (ix == 0 && iz > 0) view->yaw = 0;
+    else if (ix == 0 && iz < 0) view->yaw = 1800;
+    else if (iz == 0 && ix > 0) view->yaw = 900;
+    else if (iz == 0 && ix < 0) view->yaw = 2700;
+    view->roll = view->target_roll;
+}
+
+void lisa_build(LisaScene *scene, LisaView *view, LisaFrame *f) {
+    if (view->look_at) lisa_camera_angles(view);
     init_sine_table();
     Ctx c = {scene, view, f};
     f->nprim = 0;

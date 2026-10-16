@@ -32,7 +32,18 @@ typedef struct {
     double contact_x, contact_z; /* +0x1c0/+0x1c8: last car-car contact point, metres */
 } IgnBody;
 
-/* sub_0001ebb4 + sub_0001e638: box vs box impulse between two cars; returns 1 on contact. */
+typedef struct {
+    double x[4], z[4];               /* +0x138: interleaved x/z in the original body */
+    double scaled_x[4], scaled_z[4]; /* +0x178: scaled local offsets, same centre */
+} IgnBodyCorners;
+
+/* sub_0001fdb4: both current and scaled world-space corners. */
+void ign_body_corners(const IgnBody *body, double scale, IgnBodyCorners *corners);
+
+/* sub_0001e638: returns 1 only when the mutual impulse is applied. */
+int ign_body_pair_impulse(IgnBody *a, IgnBody *b, double cx, double cz, double theta);
+
+/* sub_0001ebb4: returns 1 on geometric contact, even if no impulse is applied. */
 int ign_body_collide_pair(IgnBody *a, IgnBody *b);
 
 /* sub_0001f708 + sub_0001f3fc: box vs wall segments (metres); returns 1 if an impulse was applied. */

@@ -4,6 +4,7 @@
   disasm.py funcs [--strings]          list discovered functions
   disasm.py coverage                   report function states (incl. auto-detected library) and coverage
   disasm.py roadmap [-o FILE]           export every discovered function and its roadmap disposition as TSV
+  disasm.py catalog [--refresh]         verify catalog against the executable, or refresh measured coverage
   disasm.py dis ADDR                   disassemble one function
   disasm.py sweep                      linear sweep of uncovered code; writes tools/gap_seeds.txt
   disasm.py export ghidra|ida [-o F]   Ghidra/IDA script with function names, comments and structures
@@ -17,6 +18,8 @@ Functions are discovered from the entry point, code pointers stored in data (LE 
 push/mov immediates, and Watcom switch jump tables.
 """
 import argparse
+import hashlib
+import json
 import os
 import re
 import struct
@@ -27,38 +30,28 @@ from capstone.x86 import X86_OP_IMM, X86_OP_MEM
 
 sys.path.insert(0, os.path.dirname(__file__))
 from le2elf import LE, convert  # noqa: E402
+from function_catalog import (CATALOG as CATALOG_PATH, COVERAGE_FIELDS, FUNCTION_STATUSES,
+                              STATUS_ORDER, inventory_fingerprint, load_catalog, validate_catalog)
 
 DEFAULT_EXE = "/Users/Shared/Epic Games/Ignition/ignition/MAINDOS.EXE"
-SYMBOLS = os.path.join(os.path.dirname(__file__), "symbols.txt")
 GAP_SEEDS = os.path.join(os.path.dirname(__file__), "gap_seeds.txt")
 END_MNEMONICS = {"ret", "retf", "iret", "iretd", "jmp", "hlt"}
 
 
-FUNCTION_STATUSES = {
-    "unknown", "identified", "understood", "port-pending", "partial",
-    "ported", "verified", "native", "library",
-}
-STATUS_ALIASES = {"ported-partial": "partial"}
+CATALOG = load_catalog(verify_snapshot=False)
 
 
 def load_symbols():
     names = {}
     statuses = {}
     roadmaps = {}
-    with open(SYMBOLS) as f:
-        for line in f:
-            parts = line.split()
-            if parts and not line.lstrip().startswith("#"):
-                addr = int(parts[0], 16)
-                names[addr] = parts[1]
-                for field in parts[2:]:
-                    if field.startswith("status="):
-                        status = STATUS_ALIASES.get(field.partition("=")[2], field.partition("=")[2])
-                        if status not in FUNCTION_STATUSES:
-                            raise ValueError("invalid function status %r at 0x%x" % (status, addr))
-                        statuses[addr] = status
-                    elif field.startswith("roadmap="):
-                        roadmaps[addr] = field.partition("=")[2]
+    for symbol in CATALOG["symbols"]:
+        addr = int(symbol["address"], 16)
+        names[addr] = symbol["name"]
+        if symbol["kind"] == "function":
+            statuses[addr] = symbol["status"]
+            if symbol["roadmap"] != "unmapped":
+                roadmaps[addr] = symbol["roadmap"]
     return names, statuses, roadmaps
 
 
@@ -384,14 +377,22 @@ STRUCTS = os.path.join(os.path.dirname(__file__), "structs.txt")
 
 
 def load_symbol_notes():
-    """{address: (name, note)} from symbols.txt (status= fields removed)."""
+    """Names and comments from the catalog, including data, labels and all historical notes."""
     out = {}
-    with open(SYMBOLS) as f:
-        for line in f:
-            parts = line.split(None, 2)
-            if len(parts) >= 2 and not line.lstrip().startswith("#"):
-                note = " ".join(w for w in (parts[2].split() if len(parts) > 2 else []) if not w.startswith("status="))
-                out[int(parts[0], 16)] = (parts[1], note)
+    for symbol in CATALOG["symbols"]:
+        notes = list(symbol["notes"])
+        for field in ("status", "roadmap"):
+            if field in symbol:
+                notes.append(f"{field}={symbol[field]}")
+        if "classification" in symbol:
+            classification = symbol["classification"]
+            notes.append("area confidence=" + classification["confidence"])
+            notes.append(classification["rationale"])
+        if symbol["aliases"]:
+            notes.append("aliases: " + ", ".join(symbol["aliases"]))
+        for review in symbol["review"]:
+            notes.append(f"REVIEW {review['field']}: {review['legacy_value']} ({review['reason']})")
+        out[int(symbol["address"], 16)] = (symbol["name"], "\n".join(notes))
     return out
 
 
@@ -466,6 +467,32 @@ def owner(funcs, addr):
     return None
 
 
+def coverage_metrics(img, funcs):
+    code_objects = [(base, data) for base, data, flags in img.objs if flags & 4]
+    covered = {base: bytearray(len(data)) for base, data in code_objects}
+    unique_insns = set()
+    insns_by_status = {status: set() for status in FUNCTION_STATUSES}
+    for fa, function in funcs.items():
+        insns_by_status[function_status(fa)].update(function["insns"])
+        for addr, ins in function["insns"].items():
+            unique_insns.add(addr)
+            for base, data in code_objects:
+                off = addr - base
+                if 0 <= off < len(data):
+                    size = min(ins.size, len(data) - off)
+                    covered[base][off:off + size] = b"\1" * size
+                    break
+    game_insns = unique_insns - insns_by_status["library"]
+    return {
+        "unique_instructions": len(unique_insns),
+        "library_instructions": len(insns_by_status["library"]),
+        "ported_instructions": len((insns_by_status["ported"] | insns_by_status["verified"]) & game_insns),
+        "partial_instructions": len(insns_by_status["partial"]),
+        "covered_code_bytes": sum(sum(bits) for bits in covered.values()),
+        "code_bytes": sum(len(data) for _, data in code_objects),
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--exe", default=DEFAULT_EXE)
@@ -473,6 +500,8 @@ def main():
     p = sub.add_parser("funcs")
     p.add_argument("--strings", action="store_true")
     sub.add_parser("coverage")
+    sub.add_parser("catalog").add_argument("--refresh", action="store_true",
+                                         help="update measured counts/coverage, preserving names, states and notes")
     p = sub.add_parser("roadmap")
     p.add_argument("-o", "--output")
     sub.add_parser("dis").add_argument("addr")
@@ -535,6 +564,29 @@ def main():
     for fa in classify_library(img, funcs):
         STATUSES.setdefault(fa, "library")
 
+    if args.cmd == "catalog":
+        if hashlib.sha256(open(args.exe, "rb").read()).hexdigest() != CATALOG["executable"]["sha256"]:
+            ap.error("Executable SHA-256 differs from docs/functions.json")
+        entries = {int(s["address"], 16): s for s in CATALOG["symbols"] if s["kind"] == "function"}
+        if set(entries) != set(funcs):
+            ap.error("Discovered function addresses differ from the catalog; review additions/removals explicitly")
+        counts = {fa: len(f["insns"]) for fa, f in funcs.items()}
+        metrics = coverage_metrics(img, funcs)
+        if args.refresh:
+            for fa, entry in entries.items():
+                entry["instructions"] = counts[fa]
+            CATALOG["coverage"] = {**metrics, "inventory_sha256": inventory_fingerprint(CATALOG)}
+            validate_catalog(CATALOG)
+            CATALOG_PATH.write_text(json.dumps(CATALOG, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            print(f"Updated {CATALOG_PATH}: {len(entries)} functions; names, states and notes preserved")
+        else:
+            validate_catalog(CATALOG)
+            if any(entry["instructions"] != counts[fa] for fa, entry in entries.items()):
+                ap.error("Catalog instruction counts differ; use catalog --refresh")
+            if any(CATALOG["coverage"][key] != metrics[key] for key in COVERAGE_FIELDS):
+                ap.error("Catalog unique coverage differs; use catalog --refresh")
+            print(f"Catalog matches executable: {len(entries)} functions, all counts and unique coverage")
+        return
     if args.cmd == "export":
         text = export_script(args.kind, funcs)
         if args.output:
@@ -560,48 +612,26 @@ def main():
             sys.stdout.write(text)
         return
     if args.cmd == "coverage":
-        code_objects = [(base, data) for base, data, flags in img.objs if flags & 4]
-        covered = {base: bytearray(len(data)) for base, data in code_objects}
-        unique_insns = {}
-        for f in funcs.values():
-            for addr, ins in f["insns"].items():
-                unique_insns.setdefault(addr, ins)
-                for base, data in code_objects:
-                    off = addr - base
-                    if 0 <= off < len(data):
-                        covered[base][off:min(off + ins.size, len(data))] = b"\1" * min(
-                            ins.size, len(data) - off
-                        )
-                        break
-
-        total_bytes = sum(len(data) for _, data in code_objects)
-        covered_bytes = sum(sum(bits) for bits in covered.values())
+        metrics = coverage_metrics(img, funcs)
+        total_bytes = metrics["code_bytes"]
+        covered_bytes = metrics["covered_code_bytes"]
         totals = {status: 0 for status in FUNCTION_STATUSES}
-        insns_by_status = {status: set() for status in FUNCTION_STATUSES}
         for fa in funcs:
             status = function_status(fa)
             totals[status] += 1
-            insns_by_status[status].update(funcs[fa]["insns"])
-
-        status_order = (
-            "unknown", "identified", "understood", "port-pending", "partial",
-            "ported", "verified", "native", "library",
-        )
         print("functions: %d (%s)" % (
             len(funcs),
             ", ".join("%s=%d" % (s, totals[s]) for s in
-                      status_order),
+                      STATUS_ORDER),
         ))
-        lib_insns = {a for fa in funcs if function_status(fa) == "library" for a in funcs[fa]["insns"]}
-        print("library (C runtime / DOS4G) unique instructions: %d, to exclude from game review" % len(lib_insns))
-        print("unique instructions: %d" % len(unique_insns))
-        game_insns = set(unique_insns) - lib_insns
-        ported_insns = (insns_by_status["ported"] | insns_by_status["verified"]) & game_insns
+        print("library (C runtime / DOS4G) unique instructions: %d, to exclude from game review" % metrics["library_instructions"])
+        print("unique instructions: %d" % metrics["unique_instructions"])
+        game_count = metrics["unique_instructions"] - metrics["library_instructions"]
         print("game instructions marked ported/verified: %d/%d (%.1f%%)" % (
-            len(ported_insns), len(game_insns),
-            100 * len(ported_insns) / len(game_insns) if game_insns else 0,
+            metrics["ported_instructions"], game_count,
+            100 * metrics["ported_instructions"] / game_count if game_count else 0,
         ))
-        print("game instructions marked partial: %d (excluded from ported/verified)" % len(insns_by_status["partial"]))
+        print("game instructions marked partial: %d (excluded from ported/verified)" % metrics["partial_instructions"])
         mapped_game = sum(1 for fa in funcs
                           if fa in ROADMAPS and function_status(fa) != "library")
         game_functions = sum(1 for fa in funcs if function_status(fa) != "library")

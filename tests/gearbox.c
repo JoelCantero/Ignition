@@ -188,8 +188,44 @@ static int lap_tests(void) {
     return failed;
 }
 
+static int steering_tests(void) {
+    int failed = 0;
+    for (int spec = 0; spec < 11; spec++)
+        for (int flat = 0; flat < 2; flat++)
+            for (int left = 0; left < 2; left++)
+                for (int right = 0; right < 2; right++) {
+                    IgnCar car = {.spec = spec, .flat = flat, .gear = 1, .grip_avg = 5};
+                    IgnInput in = {.left = left, .right = right};
+                    int expected = right ? 100 : left ? -100 : 0;
+                    if (flat) expected = -expected;
+                    failed |= check(ign_car_input_steer(&car, &in) == expected, "human steering mapping");
+                    IgnCar reference = car;
+                    ign_car_steer(&reference, expected, car.grip_avg, 0);
+                    ign_car_apply_input(&car, &in, 0);
+                    failed |= check(car.body.steer == reference.body.steer &&
+                                    car.steer_visual == reference.steer_visual, "human steering dispatch");
+                    car.ai = 1;
+                    in.analog = true;
+                    for (int steer = -100; steer <= 100; steer += 100) {
+                        in.a_steer = steer;
+                        failed |= check(ign_car_input_steer(&car, &in) == steer, "AI steering preserved");
+                    }
+                }
+    for (int right = 0; right < 2; right++) {
+        IgnCar car = {.gear = 1, .grip_avg = 5,
+                      .body = {.mass = 1000, .inertia = 1000, .a = 1, .b = 1,
+                               .vx = 10, .v_fwd = 10, .grip_f = 5, .grip_r = 5}};
+        IgnInput in = {.left = !right, .right = right};
+        ign_car_apply_input(&car, &in, 0);
+        ign_body_step(&car.body, 0, 1);
+        failed |= check(right ? car.body.heading > 0 : car.body.heading < 0,
+                        "forward motion turns toward the pressed side");
+    }
+    return failed;
+}
+
 int main(void) {
-    int failed = respawn_tests() | lap_tests();
+    int failed = respawn_tests() | lap_tests() | steering_tests();
     IgnCar car;
     IgnLevel level;
     memset(&car, 0, sizeof car);

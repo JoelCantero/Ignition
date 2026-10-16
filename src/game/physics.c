@@ -102,12 +102,9 @@ static double cross(double ax, double az, double bx, double bz) {
 }
 
 int ign_body_collide(IgnBody *b, const double (*walls)[4], int nwalls) {
-    double ch = cos(b->heading), sh = sin(b->heading);
-    double cx[4], cz[4];
-    for (int i = 0; i < 4; i++) {
-        cx[i] = b->px + b->corner_x[i] * ch - b->corner_z[i] * sh;
-        cz[i] = b->pz + b->corner_x[i] * sh + b->corner_z[i] * ch;
-    }
+    IgnBodyCorners corners;
+    ign_body_corners(b, 1.0, &corners);
+    const double *cx = corners.x, *cz = corners.z;
     double hx[8], hz[8];
     int nh = 0;
     for (int w = 0; w < nwalls && nh < 8; w++) {
@@ -148,11 +145,16 @@ int ign_body_collide(IgnBody *b, const double (*walls)[4], int nwalls) {
     return wall_impulse(b, mx, mz, theta);
 }
 
-static void world_corners(const IgnBody *b, double cx[4], double cz[4]) {
+/* sub_0001fdb4: preserve the separate products before scaling and translating. */
+void ign_body_corners(const IgnBody *b, double scale, IgnBodyCorners *corners) {
     double ch = cos(b->heading), sh = sin(b->heading);
     for (int i = 0; i < 4; i++) {
-        cx[i] = b->px + b->corner_x[i] * ch - b->corner_z[i] * sh;
-        cz[i] = b->pz + b->corner_x[i] * sh + b->corner_z[i] * ch;
+        double xc = b->corner_x[i] * ch, zs = b->corner_z[i] * sh;
+        double xs = b->corner_x[i] * sh, zc = b->corner_z[i] * ch;
+        corners->x[i] = (xc - zs) + b->px;
+        corners->z[i] = (xs + zc) + b->pz;
+        corners->scaled_x[i] = (xc * scale - zs * scale) + b->px;
+        corners->scaled_z[i] = (xs * scale + zc * scale) + b->pz;
     }
 }
 
@@ -167,7 +169,7 @@ static void contact_frame(IgnBody *b, double cx, double cz, double *r, double *a
 }
 
 /* sub_0001e638: mutual impulse, mass-weighted, restitution = product of both bodies. */
-static int pair_impulse(IgnBody *A, IgnBody *B, double cx, double cz, double theta) {
+int ign_body_pair_impulse(IgnBody *A, IgnBody *B, double cx, double cz, double theta) {
     double e = A->restitution * B->restitution;
     double ct = cos(theta), st = sin(theta);
     double ra, aa, vax, vaz, rb, ab, vbx, vbz;
@@ -177,12 +179,16 @@ static int pair_impulse(IgnBody *A, IgnBody *B, double cx, double cz, double the
     double vn = ct * (vaz - vbz) - st * (vax - vbx);
     if (side != sign(vn)) return 0;
 
-    A->impact = B->impact = fabs(vn);
-    double ka = 2.0 * ra * cos(theta - aa) * A->mass / A->inertia;
-    double kb = 2.0 * rb * cos(theta - ab) * B->mass / B->inertia;
-    double n = -(1.0 + e) * vn / (A->mass + B->mass);
-    double ja = B->mass * n / (1.0 + ka * ra * cos(aa - theta));
-    double jb = A->mass * n / (1.0 + kb * rb * cos(ab - theta));
+    double normal = (vbx * st - vbz * ct) - (vax * st - vaz * ct);
+    A->impact = B->impact = fabs(normal);
+    double ka = cos(theta - aa) * ra * 2.0 * A->mass / A->inertia;
+    double kb = cos(theta - ab) * rb * 2.0 * B->mass / B->inertia;
+    double inv_mass = 1.0 / (A->mass + B->mass);
+    double n = -(1.0 + e) * normal;
+    double ja = (B->mass * inv_mass) * n /
+                (1.0 + (ka * ra) * (sin(aa) * st + cos(aa) * ct));
+    double jb = (A->mass * inv_mass) * n /
+                (1.0 + (kb * rb) * (sin(ab) * st + cos(ab) * ct));
     A->yaw_rate += ka * ja;
     A->vx -= st * ja;
     A->vz += ct * ja;
@@ -201,11 +207,13 @@ static int segment_hit(double p0x, double p0z, double p1x, double p1z, double q0
 
 int ign_body_collide_pair(IgnBody *a, IgnBody *b) {
     a->impact = b->impact = 0;
+    a->contact_x = a->contact_z = b->contact_x = b->contact_z = 0;
     double dx = a->px - b->px, dz = a->pz - b->pz, rr = a->radius + b->radius;
     if (dx * dx + dz * dz > rr * rr) return 0;
-    double ax[4], az[4], bx[4], bz[4];
-    world_corners(a, ax, az);
-    world_corners(b, bx, bz);
+    IgnBodyCorners ac, bc;
+    ign_body_corners(a, 1.0, &ac);
+    ign_body_corners(b, 1.0, &bc);
+    const double *ax = ac.x, *az = ac.z, *bx = bc.x, *bz = bc.z;
     double hx[8], hz[8];
     int nh = 0;
     for (int i = 0; i < 4; i++)
@@ -223,8 +231,10 @@ int ign_body_collide_pair(IgnBody *a, IgnBody *b) {
 
     double mx = 0, mz = 0;
     for (int i = 0; i < nh; i++) mx += hx[i], mz += hz[i];
-    mx /= nh;
-    mz /= nh;
+    double inv_count = 1.0 / nh;
+    mx *= inv_count;
+    mz *= inv_count;
+    /* Original indices are undefined for coincident hits; keep the first point in the native port. */
     int bi = 0, bj = 0;
     double best = 0;
     for (int i = 0; i < nh - 1; i++)
@@ -236,7 +246,8 @@ int ign_body_collide_pair(IgnBody *a, IgnBody *b) {
     double theta = (tx != 0 || tz != 0) ? atan2(tz, tx) : 0.0;
     a->contact_x = b->contact_x = mx;
     a->contact_z = b->contact_z = mz;
-    return pair_impulse(a, b, mx, mz, theta);
+    ign_body_pair_impulse(a, b, mx, mz, theta);
+    return 1;
 }
 
 /* Proper intersection of segments p0-p1 and q0-q1 (sign tests as in sub_0001ebb4). */
@@ -249,9 +260,8 @@ static int segment_hit(double p0x, double p0z, double p1x, double p1z, double q0
         return 0;
     double den = cross(px, pz, qx, qz);
     if (den == 0) return 0;
-    double t = cross(p0x - q0x, p0z - q0z, qx, qz) / den;
-    *hx = p0x - t * px;
-    *hz = p0z - t * pz;
+    *hx = ((px * qx) * (p0z - q0z) - (p0x * pz) * qx + (q0x * qz) * px) / den;
+    *hz = ((pz * qz) * (p0x - q0x) - (p0z * px) * qz + (q0z * qx) * pz) / -den;
     return 1;
 }
 

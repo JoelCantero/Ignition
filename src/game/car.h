@@ -11,7 +11,7 @@
 
 typedef struct {
     bool accel, brake, left, right, turbo;
-    /* car_input (0x4d5f4) analog form used by the AI: pedals 0..100, steer -100..100 (+ = left). */
+    /* car_input (0x4d5f4) analog form used by the AI: pedals 0..100, steer -100..100 (+ = right). */
     bool analog;
     int a_accel, a_brake, a_steer;
     bool manual_gear;
@@ -148,6 +148,8 @@ void ign_car_apply_input(IgnCar *car, const IgnInput *in, int turbo_request);
 void ign_car_auto_gearbox(IgnCar *car);
 /* Isolated production kernels: steering input -100..100, positive mean surface grip; valid car spec 0..11. */
 void ign_car_steer(IgnCar *car, int input, double grip_avg, int analog);
+/* human_input digital steering; analog/AI values are already resolved car_input arguments. */
+int ign_car_input_steer(const IgnCar *car, const IgnInput *in);
 /* Retains mean/front/rear grip if any wheel type is outside 0..29; mean starts at 0.4. */
 double ign_car_update_grip(IgnCar *car, const int types[4]);
 /* Drive arithmetic (0x4db90..0x4dfbe), signed throttle -100..100; gear 0..2, spec 0..11.

@@ -18,4 +18,32 @@ void ign_palette_blend(const IgnPalette *in, int r, int g, int b, double frac, c
  * sub_00012bb8 (menu) crossfades with it. `out` may alias `a` or `b`. */
 void ign_palette_lerp(const IgnPalette *a, const IgnPalette *b, int t, IgnPalette *out);
 
+/* 0x10d34 / 0x11004: caller-owned replacement for the original global square, brightness-bucket and
+ * chromaticity tables. Initialise before searching; rebuild buckets when the searched palette changes. */
+typedef struct {
+    int32_t squares[599]; /* differences -299..299, zero at 299 */
+    int32_t buckets[1025];
+    int32_t red_fraction[256], green_fraction[256];
+} IgnColorSearch;
+
+void ign_color_squares_init(IgnColorSearch *search);
+void ign_color_buckets_build(IgnColorSearch *search, const IgnPalette *palette);
+int ign_rgb_avg3(const uint8_t rgb[3]);
+void ign_rgb_avg(const uint8_t a[3], const uint8_t b[3], int32_t out[3]);
+void ign_rgb_lerp(const uint8_t a[3], const uint8_t b[3], int32_t t, int32_t out[3]);
+
+/* RGB components 0..255. Equal distances retain the first index. The fast search is deliberately the
+ * original heuristic, not necessarily the exact nearest colour; it falls back when its error exceeds 2048. */
+int ign_nearest_color(const IgnColorSearch *search, const int32_t rgb[3], const IgnPalette *palette);
+int ign_nearest_color_fast(const IgnColorSearch *search, const int32_t rgb[3], const IgnPalette *palette);
+
+/* 0x10e04 / 0x10ea4: out[a_index * b_count + b_index], not the other way around.
+ * Counts are 0..256; empty tables do not write. The output must not overlap the palettes. */
+int ign_palette_table_avg(const IgnPalette *a, int a_count, const IgnPalette *b, int b_count,
+                          const IgnPalette *palette, int fast, uint8_t *out);
+/* 0x10f4c: a full 256x256 table; t is 0..256. */
+int ign_palette_table_lerp(const IgnPalette *palette, int t, uint8_t out[65536]);
+/* 0x11494: colour zero preserves the background, all other rows overwrite it. */
+void ign_palette_table_overlay(uint8_t out[65536]);
+
 #endif

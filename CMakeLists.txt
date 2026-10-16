@@ -85,6 +85,8 @@ add_test(NAME regress COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/regress.py
   --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}"
   --report ${CMAKE_BINARY_DIR}/regression-report.json)
 add_test(NAME verification_tools COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/test_verification.py)
+add_test(NAME function_catalog COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/function_catalog.py)
+add_test(NAME port_dashboard COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/port_dashboard.py)
 add_test(NAME headless_trace_contract COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/test_verification.py
   --binary $<TARGET_FILE:ignition> --data "${GAME_DIR}" HeadlessTests)
 add_test(NAME solo_replay COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/solo_replay.py
@@ -142,6 +144,12 @@ endif()
 add_executable(palette_test tests/palette.c)
 target_link_libraries(palette_test PRIVATE ignition_core)
 add_test(NAME palette COMMAND palette_test)
+add_executable(palette_tables_test tests/palette_tables.c)
+target_link_libraries(palette_tables_test PRIVATE ignition_core)
+add_test(NAME palette_tables COMMAND palette_tables_test)
+add_executable(camera_angles_test tests/camera_angles.c)
+target_link_libraries(camera_angles_test PRIVATE ignition_core)
+add_test(NAME camera_angles COMMAND camera_angles_test)
 
 # Lisa 2 renderer: track-only frames of the port for tests/render_original.py comparisons.
 add_executable(render_shot tests/render_shot.c)
@@ -151,10 +159,14 @@ target_link_libraries(lisa_prims PRIVATE ignition_core)
 
 add_executable(body_step_test tests/body_step.c)
 target_link_libraries(body_step_test PRIVATE ignition_core)
+add_executable(body_pair_test tests/body_pair.c)
+target_link_libraries(body_pair_test PRIVATE ignition_core)
+add_test(NAME body_pair COMMAND body_pair_test --self-test)
 add_executable(car_kernels_test tests/car_kernels.c)
 target_link_libraries(car_kernels_test PRIVATE ignition_core)
 if(NOT MSVC)
   target_compile_options(body_step_test PRIVATE -Wall -Wextra)
+  target_compile_options(body_pair_test PRIVATE -Wall -Wextra)
   target_compile_options(car_kernels_test PRIVATE -Wall -Wextra)
   target_compile_options(track_gates_test PRIVATE -Wall -Wextra)
   target_compile_options(track_ai_records_test PRIVATE -Wall -Wextra)
@@ -166,6 +178,8 @@ if(NOT MSVC)
   target_compile_options(ai_schedule_test PRIVATE -Wall -Wextra)
   target_compile_options(hud_assets_test PRIVATE -Wall -Wextra)
   target_compile_options(palette_test PRIVATE -Wall -Wextra)
+  target_compile_options(palette_tables_test PRIVATE -Wall -Wextra)
+  target_compile_options(camera_angles_test PRIVATE -Wall -Wextra)
 endif()
 option(IGN_VERIFY_ORIGINAL "Compare physics and car kernels with original LE bytes (requires Python unicorn)" OFF)
 if(IGN_VERIFY_ORIGINAL)
@@ -223,6 +237,10 @@ if(IGN_VERIFY_ORIGINAL)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/physics_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:body_step_test>
             --report ${CMAKE_BINARY_DIR}/physics-original-report.json)
+  add_test(NAME body_pair_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/body_pair_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:body_pair_test>
+            --report ${CMAKE_BINARY_DIR}/body-pair-original-report.json)
   add_test(NAME car_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/car_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>
@@ -246,6 +264,14 @@ if(IGN_VERIFY_ORIGINAL)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/palette_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:palette_test>
             --report ${CMAKE_BINARY_DIR}/palette-original-report.json)
+  add_test(NAME palette_tables_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/palette_tables_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:palette_tables_test>
+            --report ${CMAKE_BINARY_DIR}/palette-tables-original-report.json)
+  add_test(NAME camera_angles_original
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/camera_angles_original.py
+            --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:camera_angles_test>
+            --report ${CMAKE_BINARY_DIR}/camera-angles-original-report.json)
   add_test(NAME lap_original
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/lap_original.py
             --original "${GAME_DIR}/MAINDOS.EXE" --runner $<TARGET_FILE:car_kernels_test>

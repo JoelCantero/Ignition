@@ -16,7 +16,7 @@ from car_original import CAR, CAR_SIZE, INFO
 from physics_original import (Original, BODY, BODY_SIZE, ESP, STACK, RETURN, ROOT, ORIGINAL_SHA256,
                               FPCW, EXTENDED_FPCW)
 
-FIELDS = {"D": ("throttle",), "A": ("gear", "sliding", "skid_timer"),
+FIELDS = {"E": ("human_steer",), "D": ("throttle",), "A": ("gear", "sliding", "skid_timer"),
           "K": ("gear", "gear_ticks"), "H": ("gear",),
           "J": ("request_event", "turbo_mode", "turbo_wait"),
           "P": ("turbo_request", "turbo_key")}
@@ -33,7 +33,9 @@ class InputOriginal(Original):
         self.fragment_executions = {}
 
     def code(self, uc, address, size, _):
-        ranges = {"D": [(0x4D5F4, 0x4D6A7)],
+        ranges = {"E": [(0x2C5B8, 0x2C906), (0x55C28, 0x55C38),
+                        (0x51760, 0x517F6), (0x55F9C, 0x55FB8)],
+                  "D": [(0x4D5F4, 0x4D6A7)],
                   "A": [(0x4D6E2, 0x4D8CD), (0x4E1BC, 0x4E2D7)],
                   "K": [(0x502C4, 0x50463), (0x55F9C, 0x55FB8)],
                   "H": [(0x2CB29, 0x2CB45), (0x2CBB2, 0x2CBCC)],
@@ -78,7 +80,22 @@ class InputOriginal(Original):
         self.put(CAR + 0x2F8, "i", values.get("skid", 7))
         self.put(0x1FB4E8, "d", values.get("clock", -1 if values.get("started", 1) else 0))
         self.allowed = [(STACK, STACK + 0x10000)]
-        if mode == "P":
+        if mode == "E":
+            self.put(INFO + 8, "i", 0)
+            self.put(INFO + 0x18, "i", 0)
+            self.put(INFO + 0x1C, "4B", 0xCB, 0xCD, 0xC8, 0xD0)
+            self.uc.mem_write(0x20ACB0, bytes(256))
+            self.put(0x20ACB0 + 0xCB, "B", values["left"])
+            self.put(0x20ACB0 + 0xCD, "B", values["right"])
+            self.put(CAR + 0x344, "i", 73)
+            self.put(CAR + 0x364, "i", 0)
+            self.put(CAR + 0x558, "i", values["flat"])
+            self.put(CAR + 0x9A4, "i", 0)
+            self.put(0x1FEFF8, "I", 0x1FB6D8)
+            self.put(0x1FB6D8 + 4, "d", 0)
+            self.allowed += [(CAR + 0x344, CAR + 0x348), (CAR + 0x9A4, CAR + 0x9B0),
+                             (INFO + 0x24, INFO + 0x28), (0x1FEFF0, 0x1FEFF4)]
+        elif mode == "P":
             self.put(CAR + 0x52C, "i", -123)
             self.put(CAR + 0x530, "i", values["latch"])
             self.put(CAR + 0x53C, "i", values["mode"])
@@ -127,7 +144,9 @@ class InputOriginal(Original):
             return [request, self.get(CAR + 0x530)]
         if mode == "J":
             return self.request_step(values, tick)
-        if mode == "D":
+        if mode == "E":
+            entry, end, stack = 0x2C5B8, 0x2C90C, ESP - 32
+        elif mode == "D":
             self.uc.reg_write(self.reg.UC_X86_REG_EAX, values["accel"])
             self.uc.reg_write(self.reg.UC_X86_REG_EDX, values["brake"])
             entry, end, stack = 0x4D5F4, 0x4D6A9, ESP - 20
@@ -154,6 +173,8 @@ class InputOriginal(Original):
                 self.uc.reg_read(self.reg.UC_X86_REG_FPTAG) != 0xFFFF or
                 self.uc.reg_read(self.reg.UC_X86_REG_FPCW) != self.fpcw):
             raise ValueError(f"{mode} execution boundary/x87 contract failed")
+        if mode == "E":
+            return [self.get(CAR + 0x344)]
         if mode == "D":
             return [struct.unpack("<i", struct.pack("<I", self.uc.reg_read(self.reg.UC_X86_REG_EAX)))[0]]
         if mode == "A":
@@ -202,6 +223,8 @@ def neighbours(value):
 
 def fixtures():
     cases = []
+    for left, right, flat in itertools.product(range(2), range(2), (-1, 0, 1, 199, 200, 201)):
+        cases.append(("E", 1, dict(left=left, right=right, flat=flat)))
     slips = [0, math.pi, 2 * math.pi, *neighbours(-1.5707963267949),
              *neighbours(1.5707963267949), *neighbours(4.7123889803847)]
     for gear, automatic, accel, brake in itertools.product(range(3), range(2),
@@ -248,7 +271,9 @@ def fixtures():
 
 
 def encode(mode, ticks, v):
-    if mode == "P":
+    if mode == "E":
+        values = [v[k] for k in ("left", "right", "flat")]
+    elif mode == "P":
         values = [ticks, *(v[k] for k in ("key", "latch", "mode", "exploded", "sunk", "slid",
                                          "elapsed", "pattern"))]
     elif mode == "J":
@@ -300,7 +325,8 @@ def verify(executable, runner):
                 control += bool(compare(mode, rows[start + tick], control_original.step(mode, values, tick)))
     if not control:
         raise ValueError("Extended-precision control word did not change any gearbox decision")
-    required = {"D": {0x4D66F, 0x4D69F, 0x4D6A3, 0x4D6A7},
+    required = {"E": {0x55C28, 0x2C71C, 0x2C809, 0x2C8B9, 0x2C904},
+                "D": {0x4D66F, 0x4D69F, 0x4D6A3, 0x4D6A7},
                 "A": {0x4D703, 0x4D70F, 0x4D79A, 0x4D821, 0x4D8BD,
                       0x4E238, 0x4E247, 0x4E265, 0x4E2AD},
                 "K": {0x55F9C, 0x50311, 0x50374, 0x5037B, 0x50381, 0x50388,
@@ -334,7 +360,10 @@ def verify(executable, runner):
                                         "0x4da41": "refusal audio setup (event 2)",
                                         "0x4daf2": "forced effect call (event 3)",
                                         "0x4daa1/0x4db89": "no external event (event 0)"},
-                scope={"D": "0x4d5f4..0x4d6a9, fresh supplied pedals, before throttle call",
+                scope={"E": "0x2c5b8..0x2c90c: digital steering, real key polling 0x55c28 "
+                            "from supplied keyboard state; section 0, zero pedals/auto-accel; "
+                            "compares car+0x344 including simultaneous keys and flattened inversion",
+                       "D": "0x4d5f4..0x4d6a9, fresh supplied pedals, before throttle call",
                        "A": "0x4d6e2..0x4d8d8, executes real car_brake, audio-free ctrl+4=1",
                        "K": "complete 0x502c4 with real __CHP and ctrl+4=1, supplied shared int16 curves",
                        "H": "manual shift arithmetic 0x2cb29..0x2cb4b / 0x2cbb2..0x2cbd2",
@@ -342,7 +371,8 @@ def verify(executable, runner):
                             "0x4da8f..0x4da9a and countdown 0x4daa1..0x4daca/0x4db89; no callee stubs",
                        "P": "0x2c93a..0x2c9d4 after supplied key sample; independent latch "
                             "0x2cc9b..0x2ccb5 without intervening dispatcher/camera/gear calls"},
-                exclusions=["Keyboard/joystick polling and shared gear key latch",
+                exclusions=["Keyboard hardware acquisition, joystick polling and shared gear key latch",
+                            "E auxiliary section heading/side outputs, auto-acceleration and pedal mapping",
                             "Cached input sentinel 0x1f02 and input recording/playback",
                             "Human shift audio and control model 8 extra callee",
                             "Generation of shared torque curves, configuration initialization",

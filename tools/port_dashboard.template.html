@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ignition | Estado del port</title>
+<script>
+  (() => {
+    const param = new URLSearchParams(window.location.search).get("scoutTheme");
+    const theme =
+      param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
+<style>
+:root {
+  color-scheme: light;
+  --cp-bg: #f7f4ef;
+  --cp-bg-elevated: #fcfbf8;
+  --cp-surface: #ffffff;
+  --cp-surface-soft: #f5f5f5;
+  --cp-border: #dedede;
+  --cp-border-strong: #919191;
+  --cp-text: #242424;
+  --cp-text-muted: #5c5c5c;
+  --cp-text-soft: #6f6f6f;
+  --cp-accent: #b11f4b;
+  --cp-accent-hover: #9a1a41;
+  --cp-accent-soft: rgba(177, 31, 75, 0.08);
+  --cp-accent-fg: #ffffff;
+  --cp-success: #16a34a;
+  --cp-danger: #dc2626;
+  --cp-warning: #f59e0b;
+  --cp-link: #0078d4;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+  --cp-overlay: rgba(255, 255, 255, 0.8);
+  --cp-panel: rgba(255, 255, 255, 0.86);
+  --cp-panel-strong: rgba(255, 255, 255, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.55);
+  --cp-highlight: rgba(177, 31, 75, 0.12);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --cp-bg: #3d3b3a;
+  --cp-bg-elevated: #343231;
+  --cp-surface: #292929;
+  --cp-surface-soft: #2e2e2e;
+  --cp-border: #474747;
+  --cp-border-strong: #5f5f5f;
+  --cp-text: #dedede;
+  --cp-text-muted: #919191;
+  --cp-text-soft: #b0b0b0;
+  --cp-accent: #fd8ea1;
+  --cp-accent-hover: #fb7b91;
+  --cp-accent-soft: rgba(253, 142, 161, 0.14);
+  --cp-accent-fg: #1a1a1a;
+  --cp-success: #4ade80;
+  --cp-danger: #f87171;
+  --cp-warning: #fbbf24;
+  --cp-link: #4da6ff;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  --cp-overlay: rgba(41, 41, 41, 0.88);
+  --cp-panel: rgba(41, 41, 41, 0.72);
+  --cp-panel-strong: rgba(41, 41, 41, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.04);
+  --cp-highlight: rgba(253, 142, 161, 0.12);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--cp-bg); color: var(--cp-text); font: 15px/1.5 "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif; }
+main { max-width: 1240px; margin: auto; padding: 40px 24px; }
+header, .section-heading, .pagination { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+header { margin-bottom: 28px; }
+h1 { font-size: clamp(30px, 4vw, 46px); letter-spacing: -1.5px; margin: 4px 0; line-height: 1.15; }
+h2 { font-size: 20px; margin: 0 0 16px; }
+h3 { font-size: 15px; margin: 0 0 8px; }
+p { margin: 8px 0; }
+.eyebrow { color: var(--cp-accent); font-size: 12px; letter-spacing: 2px; font-weight: 700; text-transform: uppercase; }
+.muted, small { color: var(--cp-text-muted); }
+.tag { display: inline-block; border: 1px solid var(--cp-border); border-radius: 0.625rem; padding: 4px 12px; font-size: 12px; }
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0; }
+.card, section { background: var(--cp-surface); border: 1px solid var(--cp-border); border-radius: 16px; padding: 24px; }
+.metric { font-size: 36px; line-height: 1.3; font-weight: 700; letter-spacing: -1px; margin: 8px 0; }
+.primary { background: var(--cp-accent); color: var(--cp-accent-fg); border-color: var(--cp-accent); }
+.primary small { color: var(--cp-accent-fg); }
+.two-col { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.notice { padding: 16px 20px; background: var(--cp-accent-soft); border-left: 3px solid var(--cp-accent); border-radius: 0.625rem; }
+.bar { display: flex; height: 8px; border-radius: 4px; background: var(--cp-surface-soft); overflow: hidden; margin: 8px 0; }
+.bar span { display: block; flex-shrink: 0; }
+.ported { background: var(--cp-accent); }
+.verified { background: var(--cp-success); }
+.partial { background: var(--cp-warning); }
+.pending { background: var(--cp-border); }
+.native { background: var(--cp-border-strong); }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; font-size: 12px; }
+.dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; }
+.status-row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--cp-border); }
+.system { display: block; width: 100%; text-align: left; background: var(--cp-surface); border: 0; border-bottom: 1px solid var(--cp-border); border-radius: 0; padding: 12px 0; cursor: pointer; }
+.system:hover { background: var(--cp-accent-soft); }
+.system-line { display: flex; justify-content: space-between; gap: 12px; }
+.system-line span { white-space: nowrap; }
+.system small, .system code { display: block; }
+.system code { color: var(--cp-text-muted); font-size: 11px; overflow-wrap: anywhere; }
+.system-group { border-top: 1px solid var(--cp-border); padding-top: 12px; }
+.system-group summary small { display: block; font-weight: 400; }
+#systems { max-height: 640px; overflow-y: auto; padding-right: 8px; }
+.classification-note { margin-bottom: 24px; }
+.confidence-documented { color: var(--cp-success); }
+.confidence-inferred { color: var(--cp-text-muted); }
+.confidence-unresolved { color: var(--cp-danger); }
+select { max-width: 280px; }
+.roadmap { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.phase { padding: 16px; background: var(--cp-bg-elevated); border: 1px solid var(--cp-border); border-radius: 0.625rem; }
+button, input, select { color: var(--cp-text); font: inherit; }
+button, select, input { border: 1px solid var(--cp-border); background: var(--cp-surface); border-radius: 0.625rem; padding: 8px 12px; }
+button { cursor: pointer; }
+button:hover { border-color: var(--cp-accent); }
+button:disabled { cursor: default; opacity: 0.45; }
+:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 3px; }
+.filters { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; align-items: end; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--cp-text-muted); }
+.search-label { flex: 1; min-width: 200px; }
+.check { flex-direction: row; align-items: center; padding-bottom: 10px; }
+input[type="checkbox"] { accent-color: var(--cp-accent); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+th { font-weight: 600; color: var(--cp-text-muted); background: var(--cp-bg-elevated); }
+td, th { padding: 12px; border-bottom: 1px solid var(--cp-border); }
+td:first-child, td:nth-child(2), code { font-family: Consolas, "Courier New", Courier, monospace; }
+td:first-child { color: var(--cp-text-muted); }
+td { vertical-align: top; }
+td details { margin: 0; min-width: 220px; }
+.function-detail { font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif; max-width: 560px; padding-top: 12px; }
+.function-detail p, .function-detail li { overflow-wrap: anywhere; }
+.function-detail ul { padding-left: 20px; }
+.function-detail details { min-width: 0; margin: 12px 0; }
+.task-cell code { display: block; margin-top: 4px; color: var(--cp-text-muted); font-size: 11px; }
+.badge { white-space: nowrap; padding: 3px 8px; border: 1px solid var(--cp-border); border-radius: 0.625rem; }
+.pagination { padding-top: 16px; }
+.pagination button { margin-left: 8px; }
+details { margin-top: 20px; }
+summary { cursor: pointer; font-weight: 600; }
+li { margin: 8px 0; }
+footer { margin-top: 24px; font-size: 12px; color: var(--cp-text-muted); }
+a { color: var(--cp-link); }
+main > section + section { margin-top: 16px; }
+@media (max-width: 850px) { .cards { grid-template-columns: repeat(2, 1fr); } .two-col { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { main { padding: 24px 12px; } header { align-items: start; } .cards { gap: 8px; } .card, section { padding: 16px; } .metric { font-size: 28px; } .roadmap { grid-template-columns: 1fr; } .pagination { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><div class="eyebrow">Ignition / C11 + SDL3</div><h1>Del DOS al nativo.</h1><p class="muted">Estado del port por ingenier&iacute;a inversa. Datos, no estimaciones.</p></div>
+    <button id="theme" type="button" aria-label="Cambiar tema claro u oscuro">Cambiar tema</button>
+  </header>
+  <div class="notice"><strong>Jugable no significa terminado.</strong> La cobertura mide c&oacute;digo original asociado a funciones portadas; no el porcentaje de juego acabado ni la fidelidad de una carrera DOS completa.</div>
+  <div class="cards">
+    <article class="card primary"><div>C&oacute;digo del juego portado</div><div class="metric" id="code-percent"></div><small id="code-detail"></small></article>
+    <article class="card"><div>Funciones portadas / verificadas</div><div class="metric" id="function-percent"></div><small id="function-detail"></small></article>
+    <article class="card"><div>Funciones parciales</div><div class="metric" id="partial-count"></div><small id="partial-detail"></small></article>
+    <article class="card"><div>Asignaci&oacute;n de subsistema</div><div class="metric" id="mapped-percent"></div><small id="mapped-detail"></small></article>
+  </div>
+  <div class="notice classification-note">
+    <strong id="classification-total"></strong>
+    <p id="classification-summary"></p>
+    <small>Documentada = &aacute;rea respaldada por nombre/notas previas; inferida = propuesta por evidencia est&aacute;tica; por resolver = asignaci&oacute;n provisional, no identificaci&oacute;n sem&aacute;ntica cerrada. Ninguna cambia el estado de portado.</small>
+    <p><button id="show-unresolved" type="button">Explorar asignaciones por resolver</button></p>
+  </div>
+  <div class="two-col">
+    <section>
+      <h2>Inventario del juego</h2>
+      <p class="muted">Distribuci&oacute;n por funciones, no por tama&ntilde;o de c&oacute;digo.</p>
+      <div id="distribution" class="bar" aria-label="Distribuci&oacute;n del inventario"></div>
+      <div class="legend"><span><i class="dot ported"></i>Portadas</span><span><i class="dot verified"></i>Verificadas</span><span><i class="dot partial"></i>Parciales</span><span><i class="dot pending"></i>Resto</span></div>
+      <div id="status-list"></div>
+      <p class="muted" id="runtime"></p>
+    </section>
+    <section>
+      <h2>Cobertura por subsistema</h2>
+      <p class="muted">Despliega cada &aacute;rea para ver sus tareas espec&iacute;ficas. Las barras cuentan funciones portadas/verificadas, no instrucciones ni fidelidad.</p>
+      <label>Buscar subsistema<input id="system-search" type="search" placeholder="ai-route, turbo, mipmaps..." autocomplete="off"></label>
+      <p id="system-scope" class="muted" aria-live="polite"></p>
+      <div id="systems"></div>
+      <small>La opci&oacute;n &laquo;Incluir library&raquo; del explorador ampl&iacute;a tambi&eacute;n estas barras a todo el inventario. Las asignaciones provisionales siguen en el denominador.</small>
+    </section>
+  </div>
+  <section>
+    <h2>Roadmap del proyecto</h2>
+    <p class="muted">Casillas del README: hechas / parciales / pendientes. Las tareas tienen tama&ntilde;os distintos y no se convierten en un porcentaje funcional.</p>
+    <div class="legend"><span><i class="dot verified"></i>Hechas</span><span><i class="dot partial"></i>Parciales</span><span><i class="dot pending"></i>Pendientes</span></div>
+    <div id="roadmap" class="roadmap"></div>
+  </section>
+  <section id="explorer">
+    <div class="section-heading"><h2>Explorador de funciones</h2><span class="tag" id="inventory-count"></span></div>
+    <div class="filters">
+      <label class="search-label">Funci&oacute;n, direcci&oacute;n o categor&iacute;a<input id="search" type="search" placeholder="ai_drive, 0x1aea0, turbo..." autocomplete="off"></label>
+      <label>Estado<select id="status"><option value="">Todos</option></select></label>
+      <label>Certeza del &aacute;rea<select id="confidence"><option value="">Todas</option><option value="documented">Documentada</option><option value="inferred">Inferida</option><option value="unresolved">Por resolver</option></select></label>
+      <label>Sistema<select id="system"><option value="">Todos</option></select></label>
+      <label>Orden<select id="sort"><option value="address">Direcci&oacute;n</option><option value="size">M&aacute;s instrucciones</option><option value="name">Nombre</option></select></label>
+      <label class="check"><input id="library" type="checkbox">Incluir library (heur&iacute;stica)</label>
+      <button id="reset" type="button">Limpiar</button>
+    </div>
+    <div class="table-wrap">
+      <table><caption id="result-count" class="muted" aria-live="polite"></caption><thead><tr><th>Direcci&oacute;n</th><th>Funci&oacute;n / ficha desplegable</th><th>Estado del port</th><th>Certeza del &aacute;rea</th><th>Instr. por funci&oacute;n</th><th>Subsistema espec&iacute;fico</th></tr></thead><tbody id="functions"></tbody></table>
+    </div>
+    <div class="pagination"><small>Los recuentos por funci&oacute;n se solapan: no deben sumarse para obtener cobertura &uacute;nica.</small><div><button id="prev" type="button">Anterior</button><button id="next" type="button">Siguiente</button></div></div>
+  </section>
+  <section>
+    <h2>C&oacute;mo leer los datos</h2>
+    <p id="disassembly"></p>
+    <details><summary>Metodolog&iacute;a y l&iacute;mites</summary><ul>
+      <li>El porcentaje de c&oacute;digo usa instrucciones <strong>&uacute;nicas</strong> del informe de cobertura. Solo incluye <code>ported</code> y <code>verified</code>; excluye parciales y runtime.</li>
+      <li><code>verified</code> es el estado registrado de la funci&oacute;n. No equivale a verificar todo el juego ni implica haber ejecutado pruebas al generar este panel.</li>
+      <li><code>native</code> representa sustituciones nativas; no se suma al numerador portado. La clasificaci&oacute;n <code>library</code> es heur&iacute;stica.</li>
+      <li id="library-caveat"></li>
+      <li>Todas las funciones tienen un subsistema y evidencia individual en el cat&aacute;logo. La certeza de esa asignaci&oacute;n es independiente de <code>unknown</code>, <code>partial</code> o <code>verified</code>. Un &aacute;rea provisional no se cuenta como identificaci&oacute;n confirmada.</li>
+      <li>Las entradas internas de kernels compartidos se conservan como candidatas del inventario. No se suman sus instrucciones para calcular cobertura &uacute;nica.</li>
+      <li>Es una instant&aacute;nea sin conexi&oacute;n, no datos en vivo. Para actualizar: <code>python3 tools/port_dashboard.py</code> tras actualizar el cat&aacute;logo.</li>
+    </ul></details>
+  </section>
+  <footer><div id="snapshot"></div><div>Fuentes: <a href="functions.json">cat&aacute;logo &uacute;nico de funciones y cobertura</a> &middot; <a href="../README.md#roadmap">roadmap</a>. Sin assets del juego ni recursos externos.</div></footer>
+  <noscript><p>Este dashboard necesita JavaScript local para mostrar el inventario y sus m&eacute;tricas.</p></noscript>
+</main>
+<script id="port-data" type="application/json">__PORT_DATA__</script>
+<script>
+"use strict";
+const data = JSON.parse(document.getElementById("port-data").textContent);
+const $ = id => document.getElementById(id);
+const number = value => new Intl.NumberFormat("es-ES").format(value);
+const percent = (value, total) => new Intl.NumberFormat("es-ES", {style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1}).format(total ? value / total : 0);
+const labels = {ported: "Portada", verified: "Verificada", partial: "Parcial", identified: "Identificada", unknown: "Desconocida", understood: "Comprendida", "port-pending": "Por portar", native: "Nativa", library: "Runtime"};
+const systemLabels = {"phase0": "Infraestructura y servicios", "phase1": "Conducci\u00f3n y carrera", "phase2": "Mundo, superficies y efectos", "phase3": "Render y simulaci\u00f3n", "phase4": "Frontend, HUD y flujo", "phase5": "Audio y CD", "phase6": "Fantasmas y persistencia", "phase9": "Revisi\u00f3n de candidatos", "runtime": "Biblioteca C y DOS/4G"};
+const confidenceLabels = {documented: "Documentada", inferred: "Inferida", unresolved: "Por resolver"};
+const byAddress = new Map(data.functions.map(row => [row.address, row]));
+const game = data.functions.filter(row => row.status !== "library");
+const completed = row => row.status === "ported" || row.status === "verified";
+const counts = Object.fromEntries(Object.keys(labels).map(status => [status, game.filter(row => row.status === status).length]));
+const m = data.metrics;
+function text(id, value) { $(id).textContent = value; }
+function element(tag, content, className) {
+  const node = document.createElement(tag);
+  if (content !== undefined) node.textContent = content;
+  if (className) node.className = className;
+  return node;
+}
+function bar(parent, parts, total) {
+  for (const [value, style] of parts) {
+    const segment = element("span", undefined, style);
+    segment.style.width = `${total ? value / total * 100 : 0}%`;
+    parent.append(segment);
+  }
+}
+text("code-percent", percent(m.ported, m.instructions));
+text("code-detail", `${number(m.ported)} / ${number(m.instructions)} instrucciones \u00fanicas`);
+text("function-percent", percent(game.filter(completed).length, game.length));
+text("function-detail", `${number(game.filter(completed).length)} / ${number(game.length)} funciones del juego`);
+text("partial-count", number(counts.partial));
+text("partial-detail", `${number(m.partial)} instrucciones; fuera del numerador portado`);
+text("mapped-percent", percent(m.mapped, game.length));
+text("mapped-detail", `${number(m.mapped)} / ${number(game.length)} del juego con subsistema asignado`);
+text("classification-total", `${number(m.mappedAll)} / ${number(data.functions.length)} funciones asignadas a ${number(Object.keys(data.subsystems).length)} subsistemas espec\u00edficos.`);
+text("classification-summary", `${number(m.classificationAll.documented || 0)} documentadas \u00b7 ${number(m.classificationAll.inferred || 0)} inferidas \u00b7 ${number(m.classificationAll.unresolved || 0)} por resolver. El 100 % de asignaci\u00f3n NO significa 100 % identificadas ni portadas.`);
+text("inventory-count", `${number(data.functions.length)} funciones detectadas`);
+text("runtime", `${number(data.functions.length - game.length)} funciones con estado library excluidas de las m\u00e9tricas heredadas del juego. La asignaci\u00f3n de subsistema no altera esa heur\u00edstica.`);
+text("library-caveat", `${number(m.libraryNonruntime)} entradas library est\u00e1n asignadas a \u00e1reas gr\u00e1ficas, audio u otros servicios, no a runtime.*. Se preserva su estado hist\u00f3rico sin validar ni corregir esa heur\u00edstica: su categor\u00eda no basta para cambiar el denominador de cobertura.`);
+text("snapshot", `Generado: ${new Date(data.generated).toLocaleString("es-ES")} \u00b7 Huella de fuentes: ${data.fingerprint}`);
+text("disassembly", `${percent(m.coveredBytes, m.codeBytes)} del c\u00f3digo binario est\u00e1 desensamblado (${number(m.coveredBytes)} / ${number(m.codeBytes)} bytes). No confundir con el ${percent(m.ported, m.instructions)} portado.`);
+bar($("distribution"), [[counts.ported, "ported"], [counts.verified, "verified"], [counts.partial, "partial"], [counts.native, "native"], [game.length - counts.ported - counts.verified - counts.partial - counts.native, "pending"]], game.length);
+for (const [status, label] of Object.entries(labels)) {
+  if (status === "library") continue;
+  const row = element("div", undefined, "status-row");
+  row.append(element("span", label), element("strong", number(counts[status])));
+  $("status-list").append(row);
+}
+const taskKeys = Object.keys(data.subsystems).sort();
+const phaseKeys = [...new Set(taskKeys.map(key => key.split(".")[0]))].sort();
+for (const [value, label] of Object.entries(labels)) {
+  const option = element("option", label); option.value = value; $("status").append(option);
+}
+for (const phase of phaseKeys) {
+  const group = element("optgroup");
+  group.label = systemLabels[phase];
+  const all = element("option", `${systemLabels[phase]} (todo)`);
+  all.value = phase + ".*"; group.append(all);
+  for (const task of taskKeys.filter(key => key.startsWith(phase + "."))) {
+    const option = element("option", `${data.subsystems[task].title} \u2014 ${task}`);
+    option.value = task; group.append(option);
+  }
+  $("system").append(group);
+}
+function inspectTask(task) {
+  $("system").value = task;
+  for (const id of ["status", "search", "confidence"]) $(id).value = "";
+  page = 0; update();
+  $("explorer").scrollIntoView({behavior: "smooth"});
+}
+function renderSystems() {
+  const openPhases = new Set([...$("systems").querySelectorAll("details[open]")].map(node => node.dataset.phase));
+  const initial = !$("systems").hasChildNodes();
+  const scope = $("library").checked ? data.functions : game;
+  const query = $("system-search").value.trim().toLowerCase();
+  $("systems").replaceChildren();
+  let visible = 0;
+  for (const phase of phaseKeys) {
+    const tasks = taskKeys.filter(key => key.startsWith(phase + ".") &&
+      scope.some(row => row.roadmap === key) &&
+      (!query || `${key} ${data.subsystems[key].title} ${data.subsystems[key].description}`.toLowerCase().includes(query)));
+    if (!tasks.length) continue;
+    const panel = element("details", undefined, "system-group");
+    panel.dataset.phase = phase;
+    panel.open = Boolean(query) || openPhases.has(phase) || (initial && phase === "phase1");
+    const summary = element("summary", systemLabels[phase]);
+    const phaseRows = scope.filter(row => tasks.includes(row.roadmap));
+    summary.append(element("small", `${tasks.length} subsistemas \u00b7 ${phaseRows.filter(completed).length}/${phaseRows.length} funciones portadas/verificadas`));
+    panel.append(summary);
+    for (const task of tasks) {
+      visible++;
+      const rows = scope.filter(row => row.roadmap === task);
+      const done = rows.filter(completed).length;
+      const uncertain = rows.filter(row => row.classification.confidence !== "documented").length;
+      const button = element("button", undefined, "system");
+      button.type = "button"; button.dataset.task = task;
+      button.title = data.subsystems[task].description;
+      const line = element("div", undefined, "system-line");
+      line.append(element("strong", data.subsystems[task].title), element("span", `${done}/${rows.length} \u00b7 ${percent(done, rows.length)}`));
+      const track = element("div", undefined, "bar");
+      bar(track, [[done, "ported"], [rows.filter(row => row.status === "partial").length, "partial"]], rows.length);
+      button.append(line, element("code", task), track,
+        element("small", `${uncertain} asignaciones inferidas/por resolver`));
+      button.addEventListener("click", () => inspectTask(task));
+      panel.append(button);
+    }
+    $("systems").append(panel);
+  }
+  text("system-scope", `${visible} subsistemas visibles \u00b7 alcance: ${number(scope.length)} funciones${$("library").checked ? " (library incluida)" : " (library excluida)"}.`);
+  if (!visible) $("systems").append(element("p", "Sin subsistemas con ese filtro.", "muted"));
+}
+for (const phase of data.phases) {
+  const card = element("article", undefined, "phase");
+  card.append(element("h3", `${String(phase.number).padStart(2, "0")} / ${phase.title}`));
+  const track = element("div", undefined, "bar");
+  bar(track, [[phase.done, "verified"], [phase.partial, "partial"], [phase.pending, "pending"]], phase.done + phase.partial + phase.pending);
+  card.append(track, element("small", `${phase.done} hechas \u00b7 ${phase.partial} parciales \u00b7 ${phase.pending} pendientes`));
+  $("roadmap").append(card);
+}
+let page = 0;
+const pageSize = 25;
+function functionDetails(row) {
+  const details = element("details");
+  details.append(element("summary", row.function));
+  const body = element("div", undefined, "function-detail");
+  body.append(element("p", row.classification.rationale),
+    element("p", `Certeza del \u00e1rea: ${confidenceLabels[row.classification.confidence]}. Tarea anterior: ${row.classification.previous_roadmap}.`));
+  if (row.aliases.length) body.append(element("p", `Alias: ${row.aliases.join(", ")}`));
+  for (const note of row.notes) body.append(element("p", note));
+  for (const [key, title] of [["implementation", "Implementaci\u00f3n"], ["tests", "Pruebas"], ["references", "Referencias"]]) {
+    const paragraph = element("p", `${title}: `);
+    if (!row[key].length) paragraph.append(element("span", "sin enlaces documentados", "muted"));
+    for (const path of row[key]) {
+      const link = element("a", path); link.href = "../" + path;
+      paragraph.append(link, element("span", " "));
+    }
+    body.append(paragraph);
+  }
+  for (const review of row.review) body.append(element("p", `Revisi\u00f3n hist\u00f3rica (${review.field}): ${review.legacy_value} \u2014 ${review.reason}`));
+  const proof = element("details");
+  proof.append(element("summary", `Evidencia individual (${row.classification.evidence.length})`));
+  const list = element("ul");
+  for (const item of row.classification.evidence) {
+    const entry = element("li");
+    const [kind, address] = item.split(":");
+    if ((kind === "call" || kind === "caller") && byAddress.has(address)) {
+      const target = byAddress.get(address);
+      const button = element("button", `${kind === "call" ? "Llama a" : "Llamada desde"} 0x${address} / ${target.function}`);
+      button.type = "button";
+      button.addEventListener("click", () => {
+        for (const id of ["status", "confidence", "system"]) $(id).value = "";
+        if (target.status === "library") { $("library").checked = true; renderSystems(); }
+        $("search").value = "0x" + address;
+        page = 0; update();
+      });
+      entry.append(button);
+    } else entry.textContent = item;
+    list.append(entry);
+  }
+  proof.append(list); body.append(proof); details.append(body);
+  return details;
+}
+function update() {
+  const query = $("search").value.trim().toLowerCase();
+  const addressQuery = query.replace(/^0x/, "").replace(/^0+(?=[0-9a-f])/, "");
+  const task = $("system").value;
+  const rows = data.functions.filter(row =>
+    ($("library").checked || row.status !== "library") &&
+    (!$("status").value || row.status === $("status").value) &&
+    (!$("confidence").value || row.classification.confidence === $("confidence").value) &&
+    (!task || (task.endsWith(".*") ? row.roadmap.startsWith(task.slice(0, -1)) : row.roadmap === task)) &&
+    (!query || `${row.function} ${row.aliases.join(" ")} ${row.roadmap} ${data.subsystems[row.roadmap].title}`.toLowerCase().includes(query) ||
+      (/^(?:0x)?[0-9a-f]+$/.test(query) && row.address.replace(/^0+/, "").startsWith(addressQuery)))
+  );
+  rows.sort((a, b) => $("sort").value === "size" ? b.instructions - a.instructions || a.address.localeCompare(b.address) : $("sort").value === "name" ? a.function.localeCompare(b.function) : a.address.localeCompare(b.address));
+  page = Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1));
+  $("functions").replaceChildren();
+  for (const row of rows.slice(page * pageSize, (page + 1) * pageSize)) {
+    const tr = element("tr");
+    tr.append(element("td", "0x" + row.address));
+    const name = element("td"); name.append(functionDetails(row)); tr.append(name);
+    const status = element("td");
+    status.append(element("span", labels[row.status], "badge"));
+    const certainty = element("td", confidenceLabels[row.classification.confidence], "confidence-" + row.classification.confidence);
+    const taskCell = element("td", data.subsystems[row.roadmap].title, "task-cell");
+    taskCell.append(element("code", row.roadmap));
+    tr.append(status, certainty, element("td", number(row.instructions)), taskCell);
+    $("functions").append(tr);
+  }
+  if (!rows.length) {
+    const cell = element("td", "Sin resultados. Prueba otros filtros.");
+    cell.colSpan = 6; const row = element("tr"); row.append(cell); $("functions").append(row);
+  }
+  text("result-count", `${number(rows.length)} resultados \u00b7 ${rows.length ? page * pageSize + 1 : 0}\u2013${Math.min((page + 1) * pageSize, rows.length)}`);
+  $("prev").disabled = page === 0;
+  $("next").disabled = (page + 1) * pageSize >= rows.length;
+}
+for (const id of ["search", "status", "confidence", "system", "library", "sort"]) $(id).addEventListener(id === "search" ? "input" : "change", () => {
+  if (id === "status" && $("status").value === "library") $("library").checked = true;
+  if (id === "library" || id === "status") renderSystems();
+  page = 0; update();
+});
+$("system-search").addEventListener("input", renderSystems);
+$("prev").addEventListener("click", () => { page--; update(); });
+$("next").addEventListener("click", () => { page++; update(); });
+$("reset").addEventListener("click", () => { for (const id of ["search", "status", "system", "confidence", "system-search"]) $(id).value = ""; $("library").checked = false; $("sort").value = "address"; page = 0; renderSystems(); update(); });
+$("show-unresolved").addEventListener("click", () => {
+  for (const id of ["search", "status", "system"]) $(id).value = "";
+  $("library").checked = true; $("confidence").value = "unresolved";
+  page = 0; renderSystems(); update(); $("explorer").scrollIntoView({behavior: "smooth"});
+});
+$("theme").addEventListener("click", () => document.documentElement.setAttribute("data-theme", document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
+renderSystems();
+update();
+</script>
+</body>
+</html>

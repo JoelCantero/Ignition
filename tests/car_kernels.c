@@ -243,6 +243,16 @@ int main(void) {
             }
             ign_car_shift(&car, shift);
             printf("%d\n", car.gear);
+        } else if (mode == 'E') {
+            int left, right;
+            if (scanf("%d %d %d", &left, &right, &car.flat) != 3 ||
+                left < 0 || left > 1 || right < 0 || right > 1 ||
+                car.flat < -1 || car.flat > 201) {
+                fprintf(stderr, "Invalid human steering fixture\n");
+                return 1;
+            }
+            IgnInput in = {.left = left, .right = right};
+            printf("%d\n", ign_car_input_steer(&car, &in));
         } else if (mode == 'S') {
             int ticks, input, analog;
             double grip;

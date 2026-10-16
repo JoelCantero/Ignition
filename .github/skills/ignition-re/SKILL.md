@@ -1,6 +1,6 @@
 ---
 name: ignition-re
-description: 'Reverse engineer and port Ignition (UDS 1997, MAINDOS.EXE, DOS/4GW LE, Watcom C) to the C11 + SDL3 port in this repository. Use when: decoding a function or global of MAINDOS.EXE, finding code by string/address/constant, reading tables or doubles from the executable, decoding a game data format (PLC, MSH, TEX, SRF, TRI, POS, TAB, PAN, SHD, LFT, CDP, GST, BTZ, INF), porting a game system (physics, AI, cars, collisions, render, HUD, menus, sound), verifying the port headless (--sim, --shot, --model), or updating symbols.txt, docs/formats.md and the README roadmap.'
+description: 'Reverse engineer and port Ignition (UDS 1997, MAINDOS.EXE, DOS/4GW LE, Watcom C) to the C11 + SDL3 port in this repository. Use when: decoding a function or global of MAINDOS.EXE, finding code by string/address/constant, reading tables or doubles from the executable, decoding a game data format (PLC, MSH, TEX, SRF, TRI, POS, TAB, PAN, SHD, LFT, CDP, GST, BTZ, INF), porting a game system (physics, AI, cars, collisions, render, HUD, menus, sound), verifying the port headless (--sim, --shot, --model), or updating docs/functions.json, docs/formats.md and the README roadmap.'
 argument-hint: 'Address (e.g. 1aea0), system or data format to reverse engineer or port'
 ---
 
@@ -53,16 +53,20 @@ base minus/plus a small offset.
 ## Procedure
 
 1. **Locate**: start from a string (`xref`), a global (`refs`), a `double` constant, a caller, or a field offset grep.
-   Check `tools/symbols.txt` and `docs/formats.md` first; do not re-derive known facts.
+   Check the single catalog `docs/functions.json` and `docs/formats.md` first; do not re-derive known facts.
 2. **Read**: disassemble, resolve constants and tables with `mem`, follow the FPU stack carefully (write the stack
    state after each `fxch`/`fsubp`/`fsubrp`). Prefer quoting the exact formula with its addresses.
-3. **Record**: add the function/global to `tools/symbols.txt` (`address  name  notes`) and the formulas, offsets and
-   verification to `docs/formats.md`. Mark guesses with `¿?` instead of stating them as facts.
+3. **Record**: update the function/data record in `docs/functions.json` (name, status, roadmap, notes, implementation,
+   tests and references); put extended formulas, offsets and verification in `docs/formats.md` and link them.
+   Preserve unresolved `review` annotations until individually reconciled. Mark guesses with `¿?`.
 4. **Port**: implement in the matching `src/` module, referencing the original address in a short comment
    (`/* sub_0004e2d8: … */`). Keep the original constants. Any intentional difference is a *deviation*: comment it
    in code and list it in `README.md`.
 5. **Verify headless** (see below) on all 7 tracks; the build must stay warning-free.
-6. **Update `README.md`**: status tables, binary map, roadmap checkboxes and coverage if it changed.
+6. **Update derived views**: after status/count changes run `.venv/bin/python tools/disasm.py catalog --refresh`,
+   then `python3 tools/function_catalog.py sync-readme` and `python3 tools/port_dashboard.py`.
+   Update the README binary map/roadmap prose if needed. Never recreate the removed TSV, coverage or symbols files;
+   the JSON is the only editable function inventory. `python3 tools/function_catalog.py check` works without game data.
 
 ## Build and verification
 

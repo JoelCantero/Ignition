@@ -105,6 +105,9 @@ typedef struct {
     int layers;
     int clip[4];               /* x0, y0, x1, y1 inclusive ([0xc4850]) */
     int32_t xmin8, ymin8, xmax8, ymax8;
+    int look_at;               /* +0x38: opt-in angle update before collecting objects */
+    int32_t target[3];         /* +0x70: target Y points down, unlike view.y */
+    int32_t target_roll;       /* +0x7c: tenths of a degree */
 } LisaView;
 
 typedef struct {
@@ -132,8 +135,10 @@ typedef struct LisaFrame {
 } LisaFrame;
 
 void lisa_view_clip(LisaView *v, int x0, int y0, int x1, int y1);
-/* render_scene: angles of rotated objects may be renormalized in place, as the original does. */
-void lisa_build(LisaScene *scene, const LisaView *view, LisaFrame *f);
+/* camera_angles 0x5891c: preserves yaw when both integer horizontal differences are zero. */
+void lisa_camera_angles(LisaView *view);
+/* render_scene: the optional look-at updates view angles; rotated object angles may be renormalized too. */
+void lisa_build(LisaScene *scene, LisaView *view, LisaFrame *f);
 void lisa_draw(const LisaFrame *f, IgnRaster *r);
 
 #endif

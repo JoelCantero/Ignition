@@ -549,8 +549,10 @@ Las trazas y tablas derivadas permanecen en `build/`, fuera del control de versi
 - Registro de control por jugador en `[0x1fefd0]` (`0x4c` B): `+8` tipo (0 = humano), `+0xc` cambio (0 manual, 1 automático), `+0x18` auto-acelerar,
   teclas (consultadas con `sub_00055c28`): `+0x1c` izquierda, `+0x1d` derecha, `+0x1e` acelerar, `+0x1f` frenar, `+0x20/+0x21` marcha
   arriba/abajo, `+0x22` turbo, `+0x23` cámara trasera (`car+0x5a4`).
-- Acelerador y freno digitales = 100; dirección **digital** −100 / +100 / 0 en `car+0x344` (sin rampa; la suavidad la da el
-  integrador `steer`). `car+0x9a4` = ±50 y `car+0x9a8` = ángulo del tramo + constante (`g_sections+4`, o `+0x10` si tramo < 0).
+- Acelerador y freno digitales = 100; dirección **digital** izquierda = **−100** (`0x2c71c`), derecha = **+100**
+  (`0x2c809`), ninguna = 0 en `car+0x344` (sin rampa; la suavidad la da el integrador `steer`).
+  **Ambas pulsadas conservan +100**: la escritura de derecha sucede después de la de izquierda, no se suman.
+  `car+0x9a4` = ±50 y `car+0x9a8` = ángulo del tramo + constante (`g_sections+4`, o `+0x10` si tramo < 0).
 - `+0x18 == 1` y sin freno → acelerador 100. Si `car+0x558 > 0` (solape con otro coche) la dirección se invierte.
 - Turbo: tecla y `+0x354 == +0x35c == +0x358 == 0` → petición `car+0x52c = 1`; pasa a 2 si `car+0x3a4 <` constante y `+0x530 == +0x53c == 0`.
 - `car_input` (`0x4d5f4`) recibe (acelerador, freno, dirección, turbo) antes de seleccionar la marcha siguiente.
@@ -559,6 +561,21 @@ Las trazas y tablas derivadas permanecen en `build/`, fuera del control de versi
   `car+0x604 == 1`. El port conserva flancos como solicitudes `IgnInput.gear_shift`, no emula el sondeo de teclado.
 - `sub_00031858` (llamada al solapar, `0x2d4d9`/`0x312fe`) solo cambia la malla del coche (`[0x1fecb4]`, 'Error while changing car mesh')
   y reproduce un sonido; `sub_0002ea44` (impacto > 15) es solo efecto visual y sonoro.
+
+### Dirección digital: verificación ejecutable
+
+`tests/input_original.py`, modo E, ejecuta `0x2c5b8..0x2c90c` y el lector real de teclas `0x55c28`,
+sin stubs ni parches, con estados suministrados en la tabla `0x20acb0`. Compara exactamente `car+0x344`
+contra `ign_car_input_steer`: **24 casos / 24 pasos, cero diferencias** (cuatro combinaciones de teclas
+y aplastamiento −1/0/1/199/200/201). Ejecuta también la rama neutra y la inversión en `0x2c904`.
+Informe: `build/player-input-original-report.json`. La comprobación no incluye adquisición de teclado
+por hardware, joystick, salidas auxiliares `+0x9a4/+0x9a8`, auto-aceleración ni equivalencia del dispatcher completo.
+
+La ruta común de `ign_car_apply_input` usa esta conversión tanto en SDL como en `--sim`/`--sim-ticks`;
+la inversión por aplastamiento se aplica una sola vez y después de resolver la prioridad.
+Las entradas analógicas de la IA ya son argumentos de `car_input` y no se alteran.
+`tests/gearbox.c` prueba el despacho a dirección física/visual para los 11 modelos, las combinaciones
+de teclas con/sin aplastamiento, la conservación de entradas de IA y el sentido real del giro en marcha hacia delante.
 
 ## Caja de cambios y dificultad
 
@@ -1200,7 +1217,42 @@ y ninguna mide cuánto comportamiento del juego se ha reconstruido.
   decorados, así que solo en USA y CANADA coinciden los índices. Se reconstruye la correspondencia asignando a cada objeto
   del motor el siguiente PLC cuya malla admite todos sus desplazamientos de cara: autocoincidencia 88–98 % en todas las pistas.
 
-## Motor Lisa 2 y rasterizador (portados a `src/render/lisa*.c`, verificados píxel a píxel)
+## Tablas de color y búsqueda de paleta
+
+Los once kernels `0x10d34`, `0x10e04`–`0x11494` están en `src/game/palette.c`; no son los fades
+`palette_blend` `0x51508` ni `palette_lerp` `0x51a9c`.
+
+- `sqr_table_init` prepara cuadrados de diferencias −299..299. El contexto nativo `IgnColorSearch` pertenece
+  al llamador; no reproduce la dirección global/caché DOS `0xabc24`.
+- `rgb_avg3` calcula `(r+g+b)/3`; `rgb_avg`, la media entera de cada pareja de bytes.
+  `rgb_lerp` calcula la suma de productos de 32 bits con wrapping `a*(256-t)+b*t`, interpreta el resultado
+  con signo y divide por 256 hacia cero. A diferencia de `palette_lerp`, no copia `b` cuando t≥256.
+- `nearest_color` recorre siempre los 256 colores, acumula cuadrados y conserva el primer índice en empates.
+  Dominio de búsqueda expuesto/verificado: componentes RGB 0..255.
+- `color_buckets_build` usa medias de brillo: `<96`, `>32 && <160`, `>96 && <224`, `>160`.
+  Las listas terminan en −1 y tienen stride de 256 dwords, no 257; una lista llena puede sobrescribir
+  su terminador con la siguiente. Las dos tablas de cromaticidad son `channel*255/(r+g+b)`, o 85 para negro.
+- `nearest_color_fast` elige `min(3, ((sum>>1)+(sum>>2))>>6)`, filtra la fracción roja en el intervalo
+  **abierto** `(max(0,red-20),red+20)` y solo vuelve a la búsqueda exacta cuando el error es **>2048**.
+  No es un acelerador equivalente a la búsqueda exacta: en una rampa gris, RGB(32,32,32) devuelve 33,
+  mientras la búsqueda completa devuelve 32. Las pruebas fijan también errores 2046, 2048 y 2049.
+- `blend_table_avg` y su variante rápida escriben `out[a_index*b_count+b_index]` para cuentas 0..256.
+  `blend_table_lerp` genera 256×256 con pesos 0..256. Las entradas vacías no escriben nada.
+  `overlay_table_build` escribe `out[a*256+b] = a ? a : b`; `lisa_scene_init` usa este helper.
+
+`tests/palette_tables_original.py` ejecuta los once kernels y todos sus callees completos sin interceptarlos:
+2 096 casos, listas/tablas auxiliares, empates, umbrales, overflow IMUL32 y seis tablas completas
+(393 216 entradas) idénticas. Usa las paletas de las siete pistas, x87 CW `0x127f`, buffers protegidos,
+guardas de salida y comprobación de pila/escrituras. Las tablas de mezcla nuevas no sustituyen los archivos
+TAB/SHD/PAN existentes.
+
+**Desviación deliberada:** con 256 colores de brillo >160, DOS pierde el terminador de su última lista,
+sobrescrito por cromaticidad, y lee más allá de las tablas. El port devuelve −1 con diagnóstico en esa
+búsqueda rápida; el constructor de listas sí se compara incluso con esa paleta. Las búsquedas con RGB
+fuera de 0..255 y los constructores con cuentas/pesos fuera del dominio también notifican el error.
+`rgb_lerp` como kernel independiente sí se contrasta con pesos extremos de todo el rango int32.
+
+## Motor Lisa 2 y rasterizador (verificación por alcance en `src/render/lisa*.c`)
 
 Rango `0x54000–0x60000` (motor) más el rasterizador `0x60e3d` y sus rutinas (`0x70400–0x77000`, `0x824b4`, `0x825b8`,
 objeto 2 en `0x90000–0x90a7c`). Verificación: `tests/render_original.py` ejecuta con Unicorn el `render_scene` y el
@@ -1221,6 +1273,20 @@ y cada fotograma completo de pista (7 pistas, cámaras de persecución y barrido
   focal > 300), `+0x50` manejadores de cara `0x5cb48` (tabla `0xc86c4`), `+0x54` orden `0x5b9c4`; `+0x44..+0x4c` no se
   consultan. Devuelve la lista `[0x24bffc]` que dibuja `0x60e3d` (tabla `0xd7bd0`). Tras crear mips o liberar el motor,
   `[0xc879c]` hace que 99 fotogramas llamen a `0x58864`, que solo lee téxeles al azar de los mips (consume `rand`).
+  El dispatcher nativo sigue **parcial**: sus buffers se reinician al omitir etapas, en vez de conservar el
+  estado escalonado del original; tampoco implementa este calentamiento de mips ni su consumo de `rand`.
+  La equivalencia de fotogramas normales no demuestra el contrato completo de esta función.
+- **Look-at `camera_angles` `0x5891c`**: `LisaView.look_at` activa esta capa antes de recoger objetos.
+  `dx=target.x-view.x`, `dz=target.z-view.z`; las decisiones de cuadrante usan sus truncamientos a int32,
+  pero el cabeceo usa `float(sqrt(dx²+dz²))` sin truncar previamente los componentes. El delta vertical es
+  `trunc(-target.y+view.y)`; el Y del objetivo apunta hacia abajo, al contrario de `view.y`.
+  Se reproducen por separado los cocientes y las ramas de ejes/cuadrantes del original, con
+  `atan(ratio)*180*0.31830988618379*10` truncado, no una sustitución por `atan2`.
+  Si ambos deltas horizontales enteros son cero, conserva el yaw anterior; roll copia `target_roll`.
+  `tests/camera_angles_original.py` compara 1 550 casos exactos en coordenadas de motor ±51 200:
+  cuadrantes, ejes, diferencias subunidad, coincidencia y roll int32 extremo, con `pow`/`__CHP` originales
+  completos, CW `0x127f`, guardas de escritura y pila. El test nativo comprueba además el flag activado
+  y desactivado a través de `lisa_build`; las vistas de carrera existentes no activan look-at.
 - **Recogida** `0x58ebc`: patrón de celdas en cono `0xc5d8c` desplazado por `0xc5e40` según el rumbo y el cabeceo en
   pasos de 10° (`src/render/lisa_cone.inc`); con alcance `+0xa4` ≠ 0 un cuadrado de `n×n` celdas adelantado n/3 en la
   dirección de la vista. Zona `[0x24bff0]` ≠ 0: se saltan objetos de otra zona ≠ 0. Después, esfera contra la vista con
@@ -1282,11 +1348,32 @@ y cada fotograma completo de pista (7 pistas, cámaras de persecución y barrido
 - Comprobación histórica de vueltas con `--sim 200 auto --rivals 3` en las 7 pistas (CANADA: `gate_b` en la rama B).
   Tras corregir el agarre contra bytes originales, la prueba de 200 s con siete rivales termina sin fallos de
   proceso y con resúmenes finitos, pero varios coches siguen atascados; no se mantiene una garantía de completar carreras.
-- **Choques entre coches** (portado): `cars_update_all` (0x2d2f8) prueba cada par con |dx|,|dz| < 200 y |dy| < 70 unidades y llama
+- **Choques entre coches** (kernels contrastados): `cars_update_all` (0x2d2f8) prueba cada par con |dx|,|dz| < 200 y |dy| < 70 unidades y llama
   a `sub_0001ebb4`: círculo de radio 4 m (`+0x130`), cruce de los 4×4 lados de las cajas (máx. 8 puntos; más = sin choque),
   contacto = media, línea = par de puntos más alejado. `sub_0001e638`: impulso mutuo con `e = 0.6·0.6` (`+0x10`),
   `j_A = m_B·(−(1+e)·v_n)/(m_A+m_B)/(1 + k_A·r_A·cos(a_A−θ))`, `k = 2·r·cos(θ−a)·m/I`, separación 0,25 m.
-  Pendiente: el caso de solape (|dx|,|dz| < 25, `sub_00031858`) y los efectos de impacto > 15 (`sub_0002ea44`).
+  `0x1ebb4` borra impacto **y contacto de ambos cuerpos antes** del descarte por radio. Devuelve 1 cuando encuentra
+  contacto geométrico definido, aunque `0x1e638` no aplique impulso; el pase nativo conserva también esos eventos
+  de impacto cero. El promedio multiplica la suma por `1/n`. Los cruces usan las expresiones expandidas del
+  ejecutable, no una interpolación algebraicamente equivalente, para conservar sus redondeos.
+  En el denominador del impulso se evalúa `sin(a)·sin(θ)+cos(a)·cos(θ)`; no se sustituye por `cos(a−θ)`.
+  Primero se calcula `1/(m_A+m_B)` y las proporciones de masa; el coeficiente angular usa
+  `cos(θ−a)·r·2·m/I` en ese orden. La componente normal para la decisión de signo se calcula sobre velocidades
+  relativas; la magnitud/impulso usa la resta de las proyecciones individuales.
+  `body_corners` `0x1fdb4` escribe esquinas actuales en `body+0x138` y escaladas en `+0x178`, ambas como pares
+  intercalados `{double x,z}`: rota cada componente local, multiplica los productos por la escala y suma el centro
+  al final. El port usa `IgnBodyCorners` y lo calcula al consultar las cajas/muros, en vez de mantener esa caché
+  dentro del cuerpo; la escala no modifica las esquinas actuales ni el cuerpo de entrada.
+  `body_pair_original` ejecuta las tres funciones completas con sus callees originales, sin interceptarlos:
+  **248 esquinas + 418 impulsos + 611 cajas = 1 277 casos definidos**, incluidos límites del radio, rechazo,
+  reposo, restitución, velocidad angular, escalas negativas/cero, cajas anidadas y más de ocho cruces.
+  Compara retornos, todos los campos de cuerpo expuestos y las 16 coordenadas de esquinas; vigila bytes desconocidos,
+  pila de llamada, pila x87 y CW `0x127f`. Tolerancia absoluta `2e-14` / relativa `1e-14`;
+  error absoluto máximo observado `7.11e-15`. `body_pair` prueba además la integración con `ign_cars_collide`.
+  **Exclusión/deviación:** si todos los cruces son el mismo punto, DOS no inicializa los índices del par más
+  alejado (`0x1f290`). El fixture de vértice compartido se identifica y excluye, no se cuenta como coincidencia;
+  el port mantiene el primer punto, sin reproducir la lectura indefinida. No se verifica el dispatcher completo,
+  el aplastamiento `0x31858` ni los efectos `0x2ea44` con este oracle.
 - **Caracter\u00edsticas por coche** (verificadas contra el ejecutable, \u00edndice = modelo `[0x1fefd0 + coche\u00b70x4c]`, 0\u201310
   en `CARS.PLC`): agarre `0xc4dc0`, masa `0xc4e20`, fuerza del turbo `0xc4e50`, direcci\u00f3n `0xc4e80/0xc4ee0/0xc4f40`,
   recarga del turbo `0xc4f70`, curvas de par `0xc4fd0` (3 marchas \u00d7 8 `i32`; `x2` = velocidad punta de la marcha para

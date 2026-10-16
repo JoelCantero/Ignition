@@ -49,19 +49,34 @@ varias pistas y el multijugador.
 |---|---|
 | Funciones candidatas detectadas | **1 112** (bytes de código cubiertos: 98,5 %; 482 clasificadas como runtime) |
 | Instrucciones únicas desensambladas | **128 832** (20 167 de runtime/libc/DOS/4G) |
-| Código del juego marcado como portado/verificado | **46 913 de 108 665 instrucciones (43,2 %)**; **172 de 630 funciones (27,3 %)** |
-| Código del juego marcado como parcial | **8 348 instrucciones en 17 funciones**; excluido del numerador portado |
-| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **257 de 630 (40,8 %)**; runtime excluido y `unmapped` no significa fuera de alcance |
+| Código del juego marcado como portado/verificado | **48 712 de 108 665 instrucciones (44,8 %)**; **187 de 630 funciones (29,7 %)** |
+| Código del juego marcado como parcial | **8 402 instrucciones en 18 funciones**; excluido del numerador portado |
+| Funciones de juego vinculadas explícitamente a una tarea del roadmap | **630 de 630 (100,0 %)**; 303 documentadas, 297 inferidas y 30 por resolver; no es cobertura de portado |
 | Formatos de datos propios descifrados | 15 de 21 (TRI, POS y TAB solo en parte) |
 | Código del port | ≈ 13 900 líneas de C (`src/`, sin contar las tablas generadas `menu_data.c`) |
 
-Los totales anteriores conservan el inventario publicado, con las cuatro funciones de IA/trazado actualizadas;
-el detalle completo está en
-[`docs/function-coverage.txt`](docs/function-coverage.txt) y el inventario conciliable por función en
-[`docs/function-roadmap.tsv`](docs/function-roadmap.tsv). La cobertura cuenta instrucciones únicas de las funciones
+Los totales anteriores se derivan del catálogo único
+[`docs/functions.json`](docs/functions.json), que contiene estados, tareas, notas, implementación, pruebas,
+referencias y revisiones históricas por dirección. La cobertura cuenta instrucciones únicas de las funciones
 marcadas `ported` o `verified`, excluye `partial` y las funciones clasificadas heurísticamente como `library`.
 Mide cobertura de código original asociado a funciones, no equivalencia instrucción por instrucción. El **98,5 %**
 es cobertura del desensamblado, no del port; la clasificación runtime también es heurística.
+
+### Dashboard del port
+
+Abrir [`docs/port-dashboard.html`](docs/port-dashboard.html) en el navegador: funciona sin servidor ni dependencias
+externas. Muestra cobertura de instrucciones únicas, estados por función, sistemas, roadmap y un inventario con
+búsqueda y filtros. Las fichas desplegables muestran evidencia individual, certeza de la clasificación,
+notas, implementación y pruebas documentadas. Es una instantánea del catálogo, no un porcentaje de fidelidad
+o de juego terminado.
+Para regenerarla después de actualizar el catálogo único `docs/functions.json`:
+
+```sh
+python3 tools/port_dashboard.py
+```
+
+El generador valida el catálogo y rechaza una cobertura desactualizada; no necesita el ejecutable ni los datos
+del juego. El HTML es una vista generada, nunca otro inventario editable.
 
 ---
 
@@ -412,7 +427,8 @@ tests/hud_original.py   triángulo `0x729f3` y sprites con matriz `0x82950` cont
 tools/ignassets.py      PIC/COL/TEX/DAT/nivel → PNG
 tools/gst.py            fantasmas GST: cabecera, validación, tiempos por vuelta y trayectoria sobre la pista
 tools/btz.py            IGN_DOS.BTZ: campos, participantes, récords por pista y comprobación de ida y vuelta
-tools/symbols.txt       símbolos identificados (funciones, globales, tablas)
+docs/functions.json    catálogo único: funciones, datos/etiquetas, estados, notas, implementación, pruebas y cobertura
+tools/function_catalog.py validación, consultas y sincronización del resumen del README (sin datos del juego)
 .github/skills/ignition-re/SKILL.md   skill del proyecto para agentes de IA
 ```
 
@@ -491,7 +507,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Selección de marchas | `car_gearbox` `0x502c4`, cambios de `human_input` | `car.c` | caja automática sin audio: 5 526 casos / 72 738 pasos; manual: 6; orden del tick probado en el port, no caller completo original |
 | Revoluciones | bloque de `car_throttle` `0x4dfbe..0x4e1a7` | `car.c` | verificado: 25 016 casos / 134 208 pasos; reutiliza índice final de par y distingue humano/IA |
 | Coches de la IA: modelos, bono de par, perfil 11 | `sub_00022d08`, `car_steer`, `car_turbo`, `car_throttle` | `car.c`, `main.c` | fiel |
-| Dirección | `car_steer` `0x500f0` | `car.c` | verificada: 732 casos / 5 856 pasos contra bytes LE |
+| Dirección | `human_input` `0x2c5b8..0x2c90c`, `car_steer` `0x500f0` | `car.c` | teclado: 24 casos exactos (izquierda −100, derecha +100, prioridad derecha, inversión al aplastarse); integrador: 732 casos / 5 856 pasos contra bytes LE |
 | Agarre por superficie y coche | bloque `0x3070a`, tablas `0xc33f0`, `0xc4dc0`, `0xc5670` | `car.c` | verificado: 672 casos / 1 536 pasos; media persistente y reglas de rivales |
 | Consulta de suelo | `ground_query` `0x20814` | `assets.c` | fiel: puntos sin rotación, coste entero (altura acotada a los vértices de la cara) |
 | Rejilla y lista de objetos del motor, consulta sobre ella | `0x569ec`, `LI_PLACEOBJECT`/`LI_MOVEOBJECT`, `0x58c1c`, `0x32dc8` | `assets.c` | verificadas: 300 listas y 1 500 consultas exactas; usadas por la reaparición y el relámpago |
@@ -504,7 +520,7 @@ cmake --build build --target elf                  # build/maindos.elf para Ghidr
 | Vertical: gravedad, saltos, aterrizaje | `car_vertical` `0x2e234` | `car.c` | aritmética verificada hasta efectos: 252 casos; desviación explícita de subidas |
 | Muros (aristas no compartidas, activación por superficie, modo salto, caché de 150) | `collect_walls` `0x33ee8`, `car_update` `0x2f856`, `cars_update_all` `0x2d77a` | `assets.c`, `car.c` | fiel |
 | Choque con muros | `box_vs_walls` `0x1f708`, `wall_impulse` `0x1f3fc` | `physics.c` | fiel |
-| Choque entre coches | pase en `0x2d2f8`, `0x1ebb4`, `0x1e638` | `physics.c`, `car.c` | fiel (el solape aplasta, ver abajo) |
+| Choque entre coches | pase en `0x2d2f8`, `0x1ebb4`, `0x1e638`; esquinas `0x1fdb4` | `physics.c`, `car.c` | kernels completos: 1 277 casos contra bytes originales; un contacto indefinido excluido; el pase completo del dispatcher no queda verificado |
 | Tramos, bifurcaciones y saltos | `split_plc_types` `0x247b0`, `build_sections` `0x28f08` | `track.c` | topología, mapas y ángulos de 1 365 secciones comparados con ejecución original en las 7 pistas (`track_original`) |
 | Vueltas, fases y tiempos | `car_update` `0x2f2be`, `0x2fc1c` | `race.c`, `car.c` | 3 024 casos / 4 112 pasos exactos por fragmentos; geometría, récord guardado y avisos excluidos |
 | Parrilla de salida | `cars_init` `0x26458` | `main.c` | fiel |
@@ -594,43 +610,94 @@ Detalle y desviaciones: [controlador completo](docs/formats.md#controlador-compl
 
 ## Cobertura del desensamblado
 
-Estado de las funciones del juego en el último informe generado (el detalle por dirección, nombre, estado y número de
-instrucciones está en `docs/function-coverage.txt`):
+Estado de las funciones del juego en el catálogo único [`docs/functions.json`](docs/functions.json).
+Las tablas de este README y el dashboard son vistas derivadas; se edita una sola ficha por dirección en el JSON.
 
 | Estado | Funciones | Interpretación |
 |---|---:|---|
 | `unknown` | 361 | Sin identificación fiable; requiere análisis |
-| `identified` | 71 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
+| `identified` | 55 | Nombre o propósito provisional conocido; falta establecer su comportamiento completo |
 | `understood` | 1 | Comportamiento entendido, todavía no implementado |
 | `port-pending` | 0 | Pendiente explícita y priorizada (ninguna: `car_ground_contact` y `collisions_pass` ya están portadas) |
-| `partial` | 17 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
+| `partial` | 18 | Implementación incompleta o solo se verificó un fragmento; no cuenta como portada |
 | `ported` | 141 | Implementada en el port, sin afirmar verificación completa |
-| `verified` | 31 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
+| `verified` | 46 | Verificada para el alcance anotado, no implica equivalencia de toda la carrera |
 | `native` | 8 | Bucle/temporizador (`0x10010`–`0x1034c`) → SDL; busy, play y stop de CD → reproducción OGG |
 | `library` | 482 | Runtime/libc/DOS/4G detectados heurísticamente, fuera de la conciliación del código de juego |
 
-Los generadores de inventario y cobertura se ejecutan con
-`.venv/bin/python tools/disasm.py roadmap -o docs/function-roadmap.tsv`; la cobertura con
-`.venv/bin/python tools/disasm.py coverage > docs/function-coverage.txt`.
-**Limitación del inventario:** las etiquetas históricas publicadas aún no están todas conciliadas en
-`tools/symbols.txt`; regenerar desde ese archivo reclasifica también funciones ajenas a este bloque.
-Por eso aquí sólo se actualizaron las funciones investigadas y sus agregados, sin degradar etiquetas de otros sistemas.
-En el TSV, `unmapped` significa que aún no
-se ha asociado la función a una tarea concreta, no que esté fuera de alcance. La conciliación cubre **258 de 630
-funciones de juego (41,0 %)**; el informe conserva también el recuento bruto de 258/1 112 para que no se confunda con
-una proporción del código de juego. Las tareas `roadmap=` usadas son identificadores estables de subsistema; las
-sustituciones de la biblioteca estándar, DOS/4G y el motor gráfico se deben decidir por separado, no contabilizar
-automáticamente como porte literal.
+### Catálogo único de funciones
 
-La libc y DOS/4G se agrupan en `library` mediante la clasificación heurística del desensamblador. El motor Lisa 2
-no se mezcla con esa categoría: el port usa SDL3 y un rasterizador nativo propio, así que no necesita replicar
-literalmente cada rutina interna del motor original. `native` se reserva para sustituciones función-a-función
+`docs/functions.json` sustituye los antiguos `function-roadmap.tsv`, `function-coverage.txt` y `symbols.txt`.
+Contiene las **1 112 funciones y 62 símbolos de datos/etiquetas** sin perder ninguna de las 252 anotaciones originales.
+Cada ficha tiene dirección, nombre/alias, tipo, notas, implementación, pruebas y referencias; las funciones añaden
+estado, instrucciones y tarea `roadmap`. Los enlaces vacíos significan «no documentado», no «sin implementación».
+La versión 2 del catálogo asigna **las 1 112 funciones**, incluidas las 482 con estado heurístico `library`,
+a **162 subsistemas específicos**. Se revisaron individualmente nombres/notas, llamadas/llamadores directos,
+referencias a datos/cadenas y, en los casos seleccionados, instrucciones del ejecutable.
+La clasificación no modifica nombres, estados, recuentos, métricas únicas ni anotaciones `review`.
+Las fórmulas y explicaciones extensas siguen en `docs/formats.md`, enlazadas desde las fichas cuando están documentadas;
+`tools/structs.txt` conserva las definiciones de estructuras, no otro inventario de funciones.
+
+La migración conserva todos los estados publicados. El campo `review` registra las discrepancias históricas,
+sin convertir sus valores antiguos en un segundo estado operativo.
+También conserva las dos notas diferentes de `frame_time`, que necesitan conciliación.
+Ya no queda ninguna función con `roadmap=unmapped`. El campo `classification.previous_roadmap` conserva la
+asignación anterior, incluido `unmapped`; no es una segunda asignación vigente.
+`subsystems` define los títulos y alcances de las categorías, y cada función tiene una ficha `classification`:
+
+- `documented`: área respaldada por el nombre, las notas o la tarea previamente documentados.
+- `inferred`: propuesta de área basada en evidencia estática; no afirma entender todo el comportamiento.
+- `unresolved`: área o cola de revisión provisional; **no** se cuenta como identificación semántica resuelta.
+- `evidence`: referencias individuales a símbolos, llamadas, llamadores, datos, cadenas o inspección estática.
+
+**100 % asignado no significa 100 % identificado ni portado.** El dashboard publica los tres grados de certeza
+y permite filtrarlos. Las funciones sin conexiones semánticas suficientes siguen señaladas como `unresolved`,
+incluso cuando tienen una categoría provisional; por ejemplo, `0x541c0` tiene una decodificación sospechosa y
+se asigna a revisión del límite de función. Las entradas internas de kernels de scanline compartidos se conservan
+como candidatas, no se eliminan ni se contabilizan de nuevo como instrucciones únicas.
+
+El estado `library` y el área `runtime.*` son ejes distintos: hay helpers gráficos/de audio clasificados
+heurísticamente como `library`, y entradas del runtime que siguen en el denominador histórico del juego.
+Esta revisión no cambia esa heurística ni infla la cobertura del port; las sustituciones de biblioteca,
+DOS/4G y motor gráfico requieren reconciliación individual antes de cambiar el alcance medido.
+
+Consultar el catálogo no requiere el juego ni Capstone:
+
+```sh
+python3 tools/function_catalog.py check
+python3 tools/function_catalog.py list --status identified
+python3 tools/function_catalog.py list --status partial --roadmap phase1
+python3 tools/function_catalog.py list --roadmap phase1.ai-route
+python3 tools/function_catalog.py list --confidence unresolved
+python3 tools/function_catalog.py show 1ebb4
+```
+
+Después de modificar estados o recuentos, recalcular la cobertura **única** con el ejecutable original y actualizar
+las vistas. No sumar los recuentos de instrucciones de las fichas: hay funciones que se solapan.
+
+```sh
+.venv/bin/python tools/disasm.py catalog --refresh
+python3 tools/function_catalog.py sync-readme
+python3 tools/port_dashboard.py
+```
+
+`catalog --refresh` conserva nombres, estados, tareas y notas; actualiza únicamente medidas y la huella de cobertura.
+`disasm.py catalog` comprueba esas medidas contra el ejecutable sin escribir nada. Si cambia el conjunto de funciones,
+se exige revisión explícita, no se borran ni añaden fichas silenciosamente. `coverage`, `roadmap` y `export` siguen
+disponibles como salidas derivadas bajo demanda, no como archivos maestros adicionales.
+
+La libc y DOS/4G se agrupan en `library` mediante la clasificación heurística del desensamblador; esa clasificación
+también alcanza algunos helpers del motor gráfico y de audio. El port usa SDL3 y un rasterizador nativo propio,
+pero esto no convierte automáticamente todas las rutinas internas del motor original en funciones portadas.
+`native` se reserva para sustituciones función-a-función
 explícitas (bucle principal, temporizador y tres operaciones de reproducción musical), para no confundir una
 sustitución de subsistema con equivalencia de cada rutina. La equivalencia de CD cubre las pistas completas usadas
 por el juego, no paquetes MSCDEX, TOC, cambios de disco ni rangos MSF arbitrarios.
 Las tareas de render sí siguen registradas por separado cuando afectan al comportamiento visible del juego.
 
-**Portado de las 84 identificadas: primer bloque cerrado, 13/84; quedan 71.**
+**Portado de las 84 identificadas: 28/84 cerradas; quedan 56.**
+
+**Primer bloque (13):**
 Siete helpers de animación de texturas, dos recorridos SRF y la conversión relativa POS pasan a
 `ported`/`verified`; busy, play y stop de CD pasan a `native`. Además, el constructor de animaciones
 `0x10508`, que ya figuraba como portado, queda verificado sin contarlo de nuevo entre las 13.
@@ -646,8 +713,45 @@ Las siete carreras de 14 400 ticks con ocho coches son finitas, deterministas y 
 del binario previo. Pasan 44 pruebas; `time_trial` mantiene dos fallos también reproducidos en un build limpio de
 HEAD (BTZ sin nuevo récord y slots de eliminación), sin modificar expectativas ni baseline.
 
-Las etiquetas de roadmap se agrupan así: `phase1.*` carrera, controles, física y rutas; `phase2.*` mundo, efectos y
-colisiones móviles; `phase3.*` actualización del coche y render; `phase4.*` HUD, bucle, audio y frontend.
+**Segundo bloque (3):** `body_corners` `0x1fdb4`, `body_pair_impulse` `0x1e638` y
+`body_vs_body` `0x1ebb4` quedan `verified` para la geometría definida.
+`body_pair_original` ejecuta las tres funciones completas y sus callees matemáticos sin interceptarlos:
+248 casos de esquinas, 418 impulsos y 611 parejas de cajas; un contacto de vértice usa índices no inicializados
+en DOS y se excluye explícitamente. Compara retornos, cuerpos y esquinas; verifica pila, CW `0x127f` y bytes
+no modificables. Tolerancias absoluta `2e-14` / relativa `1e-14`; error máximo observado `7.11e-15` absoluto.
+Se corrigen la limpieza del contacto, el retorno de contacto sin impulso, la evaluación de intersecciones,
+el promedio y el orden de los productos de rotación/impulso; no se sustituyen por identidades trigonométricas.
+El test nativo comprueba también la propagación de contactos de impacto cero por `ign_cars_collide`.
+Build sin warnings y nueve pruebas relacionadas superadas. Las siete carreras de 14 400 ticks y ocho coches
+son finitas y deterministas; conservan las vueltas del jugador, pero cambian trayectorias, imágenes y algunas
+vueltas de rivales frente al binario anterior. No se modifica el baseline ni se afirma equivalencia de una carrera DOS.
+
+**Bloque de render (12):** once kernels de tablas de color `0x10d34`, `0x10e04`–`0x11494`
+y `camera_angles` `0x5891c` pasan a `verified`, con alcance y pruebas en el catálogo.
+Las tablas se contrastan con 2 096 casos y seis salidas completas de 65 536 entradas; la cámara,
+con 1 550 casos exactos ejecutando también sus callees originales. El motor usa el constructor común
+de transparencia y admite la capa look-at opcional, sin cambiar las cámaras de carrera existentes.
+Desviación de seguridad: la búsqueda rápida rechaza con error la lista sin terminador que produce DOS
+cuando sus 256 colores tienen brillo >160, en vez de leer fuera de la tabla.
+Los otros constructores quedan disponibles como kernels; no se regeneran ni sustituyen los TAB/SHD/PAN
+del juego. El contexto de búsqueda nativo es del llamador, no un conjunto de globales DOS.
+**La cohorte anterior de render y actualización queda en 24/46 funciones cerradas; faltan 22.**
+No es el denominador del nuevo desglose exhaustivo por subsistemas. `render_scene` pasa a `partial`,
+no a completado: faltan la conservación de buffers al omitir etapas y el calentamiento de mips que consume `rand`.
+También siguen pendientes los monolitos de actualización de coches, el fotograma de carrera y los viewports.
+Las siete carreras de 14 400 ticks y ocho coches conservan estados, logs e imágenes del binario anterior.
+
+Las etiquetas de roadmap se desglosan en tareas de al menos tres componentes. Por ejemplo, el antiguo
+`phase1.ai-route` pasa a `controller`, `tri-load`, `section-lookup`, `topology`, `opponents` y `progress`.
+Hay tareas separadas para acelerador, freno, turbo, marchas, teclado/joystick; construcción/avance de texturas;
+consultas y generación SRF; visibilidad/proyección del motor; caras afines/perspectiva/mipmaps; sprites, fuentes,
+menús, resultados, audio, MSCDEX, persistencia y servicios del runtime.
+
+Agrupación: `phase0.*` infraestructura/servicios; `phase1.*` carrera/controles/física/IA; `phase2.*`
+mundo/superficies/efectos; `phase3.*` simulación/render; `phase4.*` frontend/HUD/flujo; `phase5.*` audio/CD;
+`phase6.*` fantasmas/persistencia; `phase9.*` revisión de candidatos; `runtime.*` soporte C/DOS4G.
+Las barras de subsistema del dashboard usan **funciones**, conservan las asignaciones provisionales en el
+denominador y permiten incluir/excluir `library`. No suman instrucciones solapadas para simular cobertura única.
 
 No se publica aquí un desglose regional heredado: sus cifras no se regeneran desde el informe actual y podrían inducir
 a error. El total de instrucciones y cobertura de bytes sí se toma directamente de `disasm.py coverage`.
@@ -663,7 +767,7 @@ sus llamadas y funciones que solo tocan datos de runtime; es heurística, no una
 
 ## Mapa del binario
 
-Funciones identificadas por subsistema (ver `tools/symbols.txt` y `docs/formats.md`). Las marcadas con *¿?* son
+Funciones identificadas por subsistema (ver `docs/functions.json` y `docs/formats.md`). Las marcadas con *¿?* son
 hipótesis basadas en cadenas o en el uso.
 
 **Arranque y carga**: `_cstart_` `0x55fbc` · `game_init` `0x215d0` · `load_system_gfx` `0x21860` · `load_level`
@@ -700,7 +804,8 @@ FANTASMAS `0x16f18`–`0x17054` · callback de dibujo de página `0x170ac` · pa
 aplicar menús a la carrera `0x198bc` · BTZ por defecto `0x1a864` · `menu_load_car` `0x1aaf8` · tabla del iris
 `0x2ac28`. Motor de menús "Baltazar" `0x51b20`–`0x539f8`; cajas MenuBkg `0x541d4`–`0x54864`; *Script Player* PSQ/PFM
 `0x549b0`–`0x54df8`; CDP `0x552fc`/`0x55384`. Animación de texturas de objetos PLC `0xfa` `0x10390`–`0x10cf8`
-(carrera, sin portar) y utilidades de paleta `0x10d34`–`0x114f4` (casi todas muertas).
+(carrera; estado detallado en el catálogo). Los once kernels de color `0x10d34`, `0x10e04`–`0x11494`
+están portados y verificados; las envolturas de vídeo adyacentes siguen pendientes.
 
 **Fantasmas y persistencia**: leer el BTZ en carrera `0x2293c` · cargar fantasma `0x2adf8` · fin de carrera
 (fantasma y campeonato) `0x2ccc8` · mover fantasma `0x50e94` · guardar BTZ `0x2cf60`, `0x2b430` · apagado `0x2b6b4` ·
@@ -822,6 +927,8 @@ motriz `+0xd8`, límites `+0xe0/+0xe8`, caja `+0xf0/+0x110`, radio `+0x130`, esq
    dibujan (`hud.c`), usan "PLAYER/CPU n" en vez de los nombres y no hay "TRACK RECORD"; en `0x32dc8` más de 8 caras se
    descartan (el original desborda) y un objeto especial devuelve sus puntos con la posición del objeto; en
    `0x346cc` 1 ulp float en empates de `jB0` (ver la verificación).
+   En `0x1ebb4`, si todos los cruces coinciden, DOS usa índices del par más alejado sin inicializar; el port
+   conserva de forma segura el primer punto (comportamiento nativo previo), fuera de la equivalencia verificada.
 12. **Persistencia**: `IGN_DOS.BTZ` y `GHOSTS/` en `SDL_GetPrefPath("UDS", "Ignition")` (o `IGN_SAVE_DIR`), nunca en la
    carpeta del juego, que solo se lee. Jugador = participante 0, récords
    guardados ya al terminar el jugador, nombres de 3 letras, sin récords de coches eliminados ni vueltas vacías, y
@@ -879,9 +986,9 @@ implementado.
 - [x] **P1** Cubrir el 17 % de bytes restante: `disasm.py sweep` (barrido de huecos con prólogos Watcom, decodificación
       limpia, validación de relocaciones y rechazo de solapes) subió la cobertura del 83,0 % al **98,5 %**
       (277 candidatos de huecos aceptados; 303 inicios validados persistidos, incluidos los llamados).
-- [x] **P2** Exportar `symbols.txt` como script de Ghidra o IDA (nombres, comentarios y tipos de estructura):
+- [x] **P2** Exportar el catálogo único como script de Ghidra o IDA (nombres, comentarios y tipos de estructura):
       `disasm.py export ghidra|ida -o FICHERO` (estructuras en `tools/structs.txt`). No probado en Ghidra/IDA reales.
-- [x] **P2** Generar estados por función en `symbols.txt`: `unknown`, `identified`, `understood`, `port-pending`,
+- [x] **P2** Centralizar estados por función en `docs/functions.json`: `unknown`, `identified`, `understood`, `port-pending`,
       `partial`, `ported`, `verified`, `native`; `library` se clasifica automáticamente y se mantiene aparte.
       `disasm.py coverage` excluye parciales del numerador y `disasm.py roadmap` exporta las 1 112 funciones con
       estado y tarea asociada. Estados detallados y definiciones en "Cobertura del desensamblado".
@@ -940,6 +1047,9 @@ implementado.
       (`0x31858`: malla ×1,2/×0,2/×1,6, COLL 6, dirección del humano invertida, humo; a los 200 ticks se recupera si no
       hay coches a < 30, salto de 6 y COLL 7) y efectos de golpe `0x2ea44` (impacto > 15). Pendientes en otras áreas:
       ensanchamiento en el render.
+- [x] **P1** Kernels de colisión entre coches `0x1fdb4`/`0x1e638`/`0x1ebb4`: esquinas actuales/escaladas,
+      impulso y contacto geométrico contrastados en 1 277 casos definidos con el original; un contacto degenerado
+      indefinido queda separado. Verificación de kernels, no del dispatcher completo.
 - [x] **P1** Destrucción y reaparición (`car_vertical` `0x2e397`, `car_update` `0x2fd63`, `sub_0003a788`): al aterrizar
       en superficies prohibidas, sin suelo bajo las 4 ruedas o 6 ticks con las 4 sobre tipos > 0x28, el coche explota
       (o se hunde) y 80 fotogramas después reaparece dos tramos más adelante, con explosión, piezas y humo
@@ -947,7 +1057,8 @@ implementado.
       coche quieto, en el aire 250 unidades sobre la media de las caras de carretera, en primera, y le asigna el tramo
       del punto de reaparición (si vuelve a explotar, reaparece dos tramos más allá); su suelo sale de `0x32dc8` sobre la
       lista del motor. Disparador por objetos `0x12c` portado (peligros móviles; en ICELAND a < 30 del origen).
-- [~] **P1** Entrada original: teclado `0x2c5b8` decodificado (dirección digital, sin rampas; ver `docs/formats.md`);
+- [~] **P1** Entrada original: teclado `0x2c5b8` decodificado; dirección digital cotejada contra bytes LE
+      (24 casos: signo, prioridad de derecha e inversión al aplastarse; ver `docs/formats.md`);
       pedales/arbitraje y selección de marchas verificados, manual 0–2 (M, Q/E); faltan sondeo/flancos/caché,
       joystick `0x4c9b4` y `car_input` completo
       (`0x4f874`, `0x50464`, `0x50824` sin identificar; freno `0x4e1bc` identificado y verificado para coche no terminado).
@@ -1024,7 +1135,10 @@ implementado.
 - [x] **P1** Cuenta atrás y reloj de salida (`sub_0002b850`) con sus pitidos y el semáforo 3-2-1-GO del HUD.
 - [x] **P1** Conversión del reloj por coche y transición normal verificadas contra instrucciones originales;
       18 450 casos / 74 178 pasos, HUD/turbo/fantasma conectados; timer DOS y pausa pendientes.
-- [ ] **P2** `render_scene` `0x56410`: capas según los flags de configuración `[0x24c05c]+0x38..0x54`.
+- [x] **P2** Once kernels de tablas de color `0x10d34`, `0x10e04`–`0x11494`, verificados contra salidas completas.
+- [x] **P2** `camera_angles` `0x5891c`: look-at opcional, cuadrantes, ejes y puntos coincidentes, conectado al motor.
+- [ ] **P2** `render_scene` `0x56410`: capas según los flags de configuración `[0x24c05c]+0x38..0x54`;
+      quedan la reutilización de buffers al omitir etapas y el calentamiento de mips con sus llamadas a `rand`.
 - [x] **P2** Resoluciones 320×200 / 640×480 / 800×600 (`--res`), mostradas a 4:3.
 - [ ] **P2** Viewports por jugador (`race_setup_video` `0x492fc`): la geometría de `0x49724` (uno o dos jugadores) ya la
       usa el HUD; faltan las cámaras y el render por ventana.
@@ -1107,7 +1221,7 @@ implementado.
 
 1. **Localizar** la función por cadenas (`xref`), globales (`refs`), constantes `double` o llamadas (`callers`).
 2. **Leer** el ensamblado (`dis`), resolver constantes y tablas con `Image.find`, y anotar el resultado en
-   `tools/symbols.txt` y `docs/formats.md`.
+   `docs/functions.json` y `docs/formats.md`. Actualizar estado, notas y referencias en la misma ficha; las vistas se regeneran.
 3. **Portar** a C manteniendo nombres y comentarios con la dirección original (p. ej. `/* sub_0004e2d8 */`).
 4. **Verificar** sin ventana: simulaciones `--sim`, trazas `IGN_TRACE`, imágenes `--shot` y el visor `--model`, en
    las 7 pistas y sin avisos de compilación.
